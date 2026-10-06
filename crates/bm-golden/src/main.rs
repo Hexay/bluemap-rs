@@ -18,6 +18,12 @@ struct Cli {
 enum Command {
     /// Face-by-face hires diff of two webroots rendered from the same world and map config
     DiffRender(DiffArgs),
+    /// Re-encode every tile of a webroot with bm-format: hires PRBM must be byte-identical, lowres PNG pixel-identical
+    Roundtrip {
+        webroot: PathBuf,
+        #[arg(long)]
+        map: Option<String>,
+    },
 }
 
 #[derive(clap::Args)]
@@ -44,7 +50,44 @@ struct DiffArgs {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::DiffRender(a) => diff_render(a),
+        Command::Roundtrip { webroot, map } => roundtrip(&webroot, map.as_deref()),
     }
+}
+
+fn roundtrip(webroot: &std::path::Path, map: Option<&str>) -> Result<()> {
+    let map = WebrootMap::open(webroot, map)?;
+    let (mut out, mut mismatched, mut tiles) = (Vec::new(), 0, 0);
+    for t in map.tiles(0)? {
+        let original = map.tile_bytes(0, t)?;
+        bm_golden::roundtrip::to_model(&bm_golden::parse(&original)?).write_prbm(&mut out)?;
+        tiles += 1;
+        if out != original {
+            mismatched += 1;
+            let at = out.iter().zip(&original).position(|(a, b)| a != b).unwrap_or(out.len().min(original.len()));
+            eprintln!("hires {t:?}: {} vs {} bytes, first difference at byte {at}", out.len(), original.len());
+        }
+    }
+    println!("hires: {tiles} tiles re-encoded, {mismatched} differ");
+
+    let size = map.settings.lowres.tile_size.map(|s| s as usize);
+    let (mut lowres, mut lowres_bad, mut java_bytes, mut our_bytes) = (0, 0, 0, 0);
+    for lod in 1..=map.settings.lowres.lod_count {
+        for t in map.tiles(lod)? {
+            let original = map.tile_bytes(lod, t)?;
+            let tile = bm_format::lowres::LowresTile::decode_png(&original, size)?;
+            tile.encode_png(&mut out)?;
+            lowres += 1;
+            java_bytes += original.len();
+            our_bytes += out.len();
+            if bm_format::lowres::LowresTile::decode_png(&out, size)? != tile {
+                lowres_bad += 1;
+                eprintln!("lowres lod {lod} {t:?}: pixels differ after re-encoding");
+            }
+        }
+    }
+    println!("lowres: {lowres} tiles re-encoded, {lowres_bad} differ; PNG bytes java {java_bytes}, ours {our_bytes}");
+    ensure!(mismatched == 0 && lowres_bad == 0, "re-encoded output differs from BlueMap's");
+    Ok(())
 }
 
 fn texture_names(map: &WebrootMap) -> Result<Vec<String>> {

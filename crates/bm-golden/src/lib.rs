@@ -5,6 +5,7 @@ pub mod diff;
 pub mod lowres;
 mod parse;
 mod reader;
+pub mod roundtrip;
 pub mod settings;
 #[cfg(test)]
 mod test_prbm;

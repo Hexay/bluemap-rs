@@ -2,3 +2,5 @@
 //! and storage (docs/04-storage-web.md).
 
 pub mod grid;
+pub mod lowres;
+pub mod prbm;

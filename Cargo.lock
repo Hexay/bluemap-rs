@@ -111,6 +111,10 @@ dependencies = [
 [[package]]
 name = "bm-format"
 version = "0.1.0"
+dependencies = [
+ "png",
+ "thiserror",
+]
 
 [[package]]
 name = "bm-golden"
