@@ -150,6 +150,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bm-render"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bm-compress",
+ "bm-format",
+ "bm-golden",
+ "bm-java",
+ "bm-math",
+ "bm-resources",
+ "bm-world",
+ "rayon",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "bm-resources"
 version = "0.1.0"
 dependencies = [
