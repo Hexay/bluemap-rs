@@ -149,8 +149,12 @@ dependencies = [
 name = "bm-resources"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "bm-java",
+ "bm-math",
  "bm-world",
+ "flate2",
+ "png",
  "rayon",
  "rustc-hash",
  "serde",
