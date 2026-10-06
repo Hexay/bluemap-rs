@@ -1,0 +1,16 @@
+[package]
+name = "bm-map"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BlueMap map-level logic: render masks and the settings.json files the webapp reads"
+
+[dependencies]
+bm-format.workspace = true
+bm-java.workspace = true
+bm-math.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
