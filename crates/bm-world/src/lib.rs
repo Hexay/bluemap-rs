@@ -5,10 +5,12 @@ pub mod dimension;
 mod packed;
 pub mod region;
 pub mod registry;
+mod world;
 
 pub use chunk::{BlockEntity, Chunk, ChunkContext};
 pub use dimension::DimensionType;
 pub use registry::{BiomeId, Biomes, BlockState, BlockStates, StateId};
+pub use world::{ChunkArea, ChunkSlot, World};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

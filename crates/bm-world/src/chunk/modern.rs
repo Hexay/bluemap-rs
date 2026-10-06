@@ -31,7 +31,8 @@ pub fn parse(root: Compound, data_version: i32, ctx: &ChunkContext) -> Result<Ch
         let packed = Padded::new(bits, data.iter().collect());
         packed.holds(256).then(|| Box::new(std::array::from_fn(|i| (packed.get(i) as i32 + dim.min_y) as i16)))
     };
-    let (min_section, sections) = parse_sections(sections, ctx);
+    let (min_section, sections) =
+        collect_sections(sections.into_iter().flat_map(|l| l.compounds()).filter_map(|c| parse_section(c, ctx)));
     Ok(Chunk {
         data_version,
         generated: status != "empty",
@@ -39,6 +40,7 @@ pub fn parse(root: Compound, data_version: i32, ctx: &ChunkContext) -> Result<Ch
         inhabited_time,
         min_section,
         sections,
+        legacy_biomes: None,
         sky_default: if dim.has_skylight { 15 } else { 0 },
         world_surface: heightmap("WORLD_SURFACE"),
         ocean_floor: heightmap("OCEAN_FLOOR"),
@@ -46,9 +48,9 @@ pub fn parse(root: Compound, data_version: i32, ctx: &ChunkContext) -> Result<Ch
     })
 }
 
-fn parse_sections(list: Option<List>, ctx: &ChunkContext) -> (i32, Vec<Option<Section>>) {
-    let parsed: Vec<(i32, Section)> =
-        list.into_iter().flat_map(|l| l.compounds()).filter_map(|c| parse_section(c, ctx)).collect();
+/// Sections by y, contiguous from the lowest one, gaps `None`.
+pub(super) fn collect_sections(parsed: impl Iterator<Item = (i32, Section)>) -> (i32, Vec<Option<Section>>) {
+    let parsed: Vec<(i32, Section)> = parsed.collect();
     let Some(min) = parsed.iter().map(|(y, _)| *y).min() else { return (0, Vec::new()) };
     let max = parsed.iter().map(|(y, _)| *y).max().unwrap();
     let mut sections: Vec<Option<Section>> = (min..=max).map(|_| None).collect();
@@ -94,7 +96,7 @@ fn parse_blocks(c: Compound, ctx: &ChunkContext) -> Blocks {
 
 /// A palette entry: `{Name, Properties}` (≤ 26.2), `{id, properties}` (26.3+), or a bare name / `{"": name}`
 /// meaning the block's default state. Anything malformed is `MISSING` rather than failing the chunk.
-fn palette_state(tag: Tag, ctx: &ChunkContext) -> StateId {
+pub(super) fn palette_state(tag: Tag, ctx: &ChunkContext) -> StateId {
     let c = match tag {
         Tag::String(_) => return tag.as_str().map_or(StateId::MISSING, |n| ctx.states.default_state(n)),
         Tag::Compound(c) => c,
@@ -139,7 +141,7 @@ fn parse_biomes(c: Compound, ctx: &ChunkContext) -> SectionBiomes {
     }
 }
 
-fn parse_block_entities(list: List) -> Vec<BlockEntity> {
+pub(super) fn parse_block_entities(list: List) -> Vec<BlockEntity> {
     list.compounds()
         .filter_map(|c| {
             let (mut id, mut x, mut y, mut z) = (None, None, None, None);

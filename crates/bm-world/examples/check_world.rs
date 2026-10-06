@@ -4,12 +4,10 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
-use bm_world::chunk::{Chunk, ChunkContext};
-use bm_world::dimension::{DimensionType, dimension_folder, load_dimension_type};
-use bm_world::region::{Region, list_regions};
-use bm_world::{Biomes, BlockStates, StateId};
+use bm_world::{Biomes, BlockStates, Chunk, ChunkSlot, DimensionType, StateId, World};
 
 const DEFAULTS: &str = include_str!("../../../assets/resourceExtensions/data/minecraft/defaultBlockstates.json");
 
@@ -18,13 +16,13 @@ fn main() {
     let world = PathBuf::from(args.first().expect("usage: check_world <world> [--blocks-json <path>]"));
     let blocks_json = args.iter().position(|a| a == "--blocks-json").map(|i| PathBuf::from(&args[i + 1]));
 
-    let states = BlockStates::default();
+    let states = Arc::new(BlockStates::default());
     states.add_defaults_json(DEFAULTS).unwrap();
-    let biomes = Biomes::default();
+    let biomes = Arc::new(Biomes::default());
     let mut failed = false;
     for dimension in dimensions(&world) {
-        let dim_type = load_dimension_type(&world, &dimension, &DimensionType::builtin).unwrap();
-        failed |= check_dimension(&world, &dimension, &dim_type, &states, &biomes);
+        let dim = World::open(&world, &dimension, states.clone(), biomes.clone(), &DimensionType::builtin).unwrap();
+        failed |= check_dimension(&dim);
     }
     if let Some(path) = blocks_json {
         failed |= compare_with_report(&states, &path);
@@ -43,38 +41,37 @@ fn dimensions(world: &Path) -> Vec<String> {
     dims.into_iter().collect()
 }
 
-fn check_dimension(world: &Path, dimension: &str, ty: &DimensionType, states: &BlockStates, biomes: &Biomes) -> bool {
-    let dir = dimension_folder(world, dimension).join("region");
-    let regions = list_regions(&dir).unwrap();
+fn check_dimension(world: &World) -> bool {
+    let regions = world.regions().unwrap();
     if regions.is_empty() {
         return false;
     }
-    let ctx = ChunkContext { states, biomes, dimension: ty };
-    let (mut raw, mut nbt) = (Vec::new(), Vec::new());
-    let (mut chunks, mut bytes, mut errors, mut missing, mut unlit) = (0, 0, 0, 0, 0);
-    let start = Instant::now();
+    let (mut chunks, mut errors, mut missing, mut unlit, mut data_versions) = (0, 0, 0, 0, BTreeSet::new());
+    let mut decode = std::time::Duration::ZERO;
     for (rx, rz) in regions {
-        let region = Region::open(&dir, rx, rz).unwrap();
-        for (lx, lz) in (0..32).flat_map(|x| (0..32).map(move |z| (x, z))) {
-            match region.read_chunk_into(lx, lz, &mut raw, &mut nbt).map(|found| found.then(|| Chunk::parse(&nbt, &ctx))) {
-                Ok(None) => continue,
-                Ok(Some(Ok(chunk))) => {
+        let start = Instant::now();
+        let area = world.load_area(rx * 32, rz * 32, 32, 32);
+        decode += start.elapsed();
+        for ((cx, cz), slot) in area.slots() {
+            match slot {
+                ChunkSlot::Absent => {}
+                ChunkSlot::Loaded(chunk) => {
                     chunks += 1;
-                    bytes += nbt.len();
                     unlit += usize::from(chunk.generated && !chunk.has_light);
-                    missing += count_missing(&chunk);
+                    missing += count_missing(chunk);
+                    data_versions.insert(chunk.data_version);
                 }
-                Ok(Some(Err(e))) | Err(e) => {
+                ChunkSlot::Failed(e) => {
                     errors += 1;
-                    eprintln!("{dimension} r.{rx}.{rz} chunk {lx},{lz}: {e}");
+                    eprintln!("{} chunk {cx},{cz}: {e}", world.dimension);
                 }
             }
         }
     }
-    let secs = start.elapsed().as_secs_f64();
+    let secs = decode.as_secs_f64();
     println!(
-        "{dimension:24} {chunks:6} chunks  {:6.1} MB nbt  {:6.0} chunks/s  errors {errors}  unlit {unlit}  missing-state blocks {missing}",
-        bytes as f64 / 1e6,
+        "{:24} {chunks:6} chunks  {:7.0} chunks/s decoded  data versions {data_versions:?}  errors {errors}  unlit {unlit}  missing-state blocks {missing}",
+        world.dimension,
         chunks as f64 / secs
     );
     errors > 0 || missing > 0

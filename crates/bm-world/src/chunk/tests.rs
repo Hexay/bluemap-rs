@@ -129,10 +129,84 @@ fn out_of_range_palette_index_is_missing() {
     assert_eq!(f.parse(&w.finish()).unwrap().block(0, 0, 0), StateId::MISSING);
 }
 
+/// Values packed back to back across long boundaries (1.13–1.15).
+fn pack_spanning(values: &[u32], bits: u32) -> Vec<u64> {
+    let mut longs = vec![0u64; (values.len() * bits as usize).div_ceil(64)];
+    for (i, &v) in values.iter().enumerate() {
+        let (bit, v) = (i * bits as usize, v as u64);
+        longs[bit / 64] |= v << (bit % 64);
+        if bit % 64 + bits as usize > 64 {
+            longs[bit / 64 + 1] |= v >> (64 - bit % 64);
+        }
+    }
+    longs
+}
+
+/// A `Level` chunk with one section at y=0 holding 20 states (5 bits), so index arrays exercise both layouts.
+fn legacy_chunk(data_version: i32, status: &str, padded: bool, biomes: &[i32]) -> Vec<u8> {
+    let indices: Vec<u32> = (0..4096).map(|i| i % 20).collect();
+    let mut w = Writer::new();
+    w.int("DataVersion", data_version).begin_compound("Level").string("Status", status);
+    w.int_array("Biomes", biomes);
+    w.begin_compound("Heightmaps");
+    let heights = vec![65; 256];
+    w.long_array("WORLD_SURFACE", &if padded { pack(&heights, 9) } else { pack_spanning(&heights, 9) });
+    w.end_compound();
+    w.begin_compound_list("Sections", 1).byte("Y", 0).begin_compound_list("Palette", 20);
+    for i in 0..20 {
+        w.string("Name", &format!("minecraft:block_{i}")).end_compound();
+    }
+    w.long_array("BlockStates", &if padded { pack(&indices, 5) } else { pack_spanning(&indices, 5) });
+    w.byte_array("SkyLight", &[0xAA; 2048]).end_compound();
+    w.begin_compound_list("TileEntities", 1).string("id", "minecraft:sign").int("x", 1).int("y", 2).int("z", 3);
+    w.end_compound().end_compound();
+    w.finish()
+}
+
 #[test]
-fn pre_1_18_is_reported_unsupported_for_now() {
+fn chunk_1_16_padded_with_repeating_biome_cells() {
+    let f = Fixture::new();
+    let biomes: Vec<i32> = (0..1024).map(|i| if i < 16 { 2 } else { 1 }).collect();
+    let c = f.parse(&legacy_chunk(2586, "full", true, &biomes)).unwrap();
+    assert!(c.has_light);
+    for i in [0, 12, 19, 4095] {
+        let state = f.states.get(c.block(i & 15, i >> 8, (i >> 4) & 15));
+        assert_eq!(*state.name, *format!("minecraft:block_{}", i % 20));
+    }
+    assert_eq!(&*f.biomes.name(c.biome(0, 0, 0)), "minecraft:desert");
+    assert_eq!(&*f.biomes.name(c.biome(0, 4, 0)), "minecraft:plains");
+    assert_eq!(&*f.biomes.name(c.biome(0, 16, 0)), "minecraft:desert", "BlueMap repeats the lowest 16 blocks");
+    assert_eq!(c.world_surface_y(3, 3), Some(65), "no min-y offset before 1.18");
+    assert_eq!(c.light(0, 0, 0), (10, 0));
+    assert_eq!(c.block_entities[0].id.as_ref(), "minecraft:sign");
+}
+
+#[test]
+fn chunk_1_13_spanning_with_column_biomes() {
+    let f = Fixture::new();
+    let biomes: Vec<i32> = (0..256).map(|i| if i == 17 { 6 } else { 999 }).collect();
+    let c = f.parse(&legacy_chunk(1631, "postprocessed", false, &biomes)).unwrap();
+    assert!(c.has_light, "postprocessed counts as lit before 1.16");
+    for i in [0, 12, 13, 19, 4095] {
+        let state = f.states.get(c.block(i & 15, i >> 8, (i >> 4) & 15));
+        assert_eq!(*state.name, *format!("minecraft:block_{}", i % 20), "index {i}");
+    }
+    assert_eq!(&*f.biomes.name(c.biome(1, 100, 1)), "minecraft:swamp");
+    assert_eq!(c.biome(0, 0, 0), BiomeId::DEFAULT, "unknown legacy id");
+    assert_eq!(c.world_surface_y(15, 15), Some(65));
+
+    let c = f.parse(&legacy_chunk(2586, "postprocessed", true, &[])).unwrap();
+    assert!(!c.has_light, "1.16+ needs full");
+    assert_eq!(c.biome(0, 0, 0), BiomeId::DEFAULT, "no biome array");
+}
+
+#[test]
+fn pre_flattening_chunks_are_unsupported() {
     let f = Fixture::new();
     let mut w = Writer::new();
+    w.int("DataVersion", 1343);
+    assert!(matches!(f.parse(&w.finish()), Err(Error::UnsupportedVersion(1343))));
+    let mut w = Writer::new();
     w.int("DataVersion", 2586);
-    assert!(matches!(f.parse(&w.finish()), Err(Error::UnsupportedVersion(2586))));
+    assert!(matches!(f.parse(&w.finish()), Err(Error::Corrupt(_))), "legacy chunk without Level");
 }

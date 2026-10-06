@@ -1,6 +1,8 @@
 //! A decoded chunk: blocks, biomes and light as dense ids per section. Coordinates passed to accessors are block
 //! coordinates; only their low 4 bits are used for x and z.
 
+mod legacy;
+mod legacy_biomes;
 mod modern;
 
 use crate::dimension::DimensionType;
@@ -26,6 +28,8 @@ pub struct Chunk {
     min_section: i32,
     /// Contiguous from `min_section`; `None` for gaps.
     sections: Vec<Option<Section>>,
+    /// 1.13–1.17 store biomes for the whole chunk, not per section.
+    legacy_biomes: Option<LegacyBiomes>,
     /// Light returned where nothing is stored: 15 with sky light, else 0.
     sky_default: u8,
     world_surface: Option<Box<[i16; 256]>>,
@@ -51,6 +55,13 @@ enum SectionBiomes {
     Cells(Box<[BiomeId; 64]>),
 }
 
+enum LegacyBiomes {
+    /// 1.13–1.14: one id per block column, index `z*16 + x`.
+    Columns(Box<[BiomeId; 256]>),
+    /// 1.15–1.17 as BlueMap reads them: 64 cells repeated every 16 blocks of height.
+    Cells(Box<[BiomeId; 64]>),
+}
+
 /// A nibble array, or one value for all 4096 blocks (most sections are fully dark or fully lit).
 enum Light {
     Uniform(u8),
@@ -72,6 +83,8 @@ impl Chunk {
         let data_version = root.i64("DataVersion").unwrap_or(0) as i32;
         if data_version >= modern::MIN_DATA_VERSION {
             modern::parse(root, data_version, ctx)
+        } else if data_version >= legacy::MIN_DATA_VERSION {
+            legacy::parse(root, data_version, ctx)
         } else {
             Err(Error::UnsupportedVersion(data_version))
         }
@@ -91,6 +104,11 @@ impl Chunk {
     }
 
     pub fn biome(&self, x: i32, y: i32, z: i32) -> BiomeId {
+        match &self.legacy_biomes {
+            Some(LegacyBiomes::Columns(ids)) => return ids[column_index(x, z)],
+            Some(LegacyBiomes::Cells(cells)) => return cells[((y & 12) << 2 | z & 12 | (x & 12) >> 2) as usize],
+            None => {}
+        }
         self.section(y).map_or(BiomeId::DEFAULT, |s| match &s.biomes {
             SectionBiomes::Single(b) => *b,
             SectionBiomes::Cells(cells) => cells[((y & 12) << 2 | z & 12 | (x & 12) >> 2) as usize],
