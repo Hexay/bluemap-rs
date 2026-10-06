@@ -3,6 +3,8 @@
 
 pub mod blockstate;
 pub mod client_jar;
+pub mod color;
+pub mod datapack;
 pub mod json;
 pub mod key;
 pub mod manifest;

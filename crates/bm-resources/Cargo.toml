@@ -11,6 +11,7 @@ description = "Resource and data pack loading: blockstates, models, textures, co
 bm-java.workspace = true
 bm-math.workspace = true
 bm-world.workspace = true
+png.workspace = true
 rayon.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true

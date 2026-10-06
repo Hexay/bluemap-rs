@@ -20,6 +20,19 @@ pub fn parse(src: &str) -> Result<Value, JsonError> {
     Ok(v)
 }
 
+/// A top-level object's members in file order, duplicates kept, for loaders that stream entries like Gson's
+/// `JsonReader` (first-wins configs). On a syntax error the members read before it are returned with the error.
+pub fn parse_entries(src: &str) -> (Vec<(String, Value)>, Option<JsonError>) {
+    let mut p = Parser { s: src.as_bytes(), pos: 0, depth: 1 };
+    p.skip_bom();
+    let mut entries = Vec::new();
+    let res = p.ws().and_then(|()| match p.peek() {
+        Some(b'{') => p.members(|k, v| entries.push((k, v))),
+        _ => p.err("expected an object"),
+    });
+    (entries, res.err())
+}
+
 /// [`parse`] then deserialize into `T`.
 pub fn from_str<T: serde::de::DeserializeOwned>(src: &str) -> Result<T, crate::Error> {
     Ok(serde_json::from_value(parse(src)?)?)
@@ -99,14 +112,19 @@ impl Parser<'_> {
     }
 
     fn object(&mut self) -> Result<Value, JsonError> {
-        self.pos += 1;
         let mut map = Map::new();
+        self.members(|k, v| _ = map.insert(k, v))?;
+        Ok(Value::Object(map))
+    }
+
+    fn members(&mut self, mut member: impl FnMut(String, Value)) -> Result<(), JsonError> {
+        self.pos += 1;
         loop {
             self.ws()?;
             match self.peek() {
                 Some(b'}') => {
                     self.pos += 1;
-                    return Ok(Value::Object(map));
+                    return Ok(());
                 }
                 Some(b',' | b';') => {
                     self.pos += 1;
@@ -126,7 +144,7 @@ impl Parser<'_> {
                 _ => return self.err("expected ':' after name"),
             }
             let value = self.value()?;
-            map.insert(name, value);
+            member(name, value);
             self.ws()?;
             if !matches!(self.peek(), Some(b',' | b';' | b'}')) {
                 return self.err("expected ',' or '}'");
@@ -245,43 +263,5 @@ fn number(lit: &str) -> Option<Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn strict_json_is_unchanged() {
-        let src = r#"{"a": [1, 2.5, -3e2, true, null, "x\"y\u00e9"], "b": {}}"#;
-        assert_eq!(parse(src).unwrap(), serde_json::from_str::<Value>(src).unwrap());
-    }
-
-    #[test]
-    fn gson_lenient_extensions() {
-        let src = "\u{feff}{ // comment\n # hash comment\n /* block */ unquoted: 'single', \"eq\" = 1; arrow => [a, 2,], }";
-        assert_eq!(parse(src).unwrap(), json!({"unquoted": "single", "eq": 1, "arrow": ["a", 2]}));
-    }
-
-    #[test]
-    fn empty_array_slots_are_null() {
-        assert_eq!(parse("[1,,2]").unwrap(), json!([1, null, 2]));
-        assert_eq!(parse("[,1]").unwrap(), json!([null, 1]));
-        assert_eq!(parse("[NaN]").unwrap(), json!([null]));
-    }
-
-    #[test]
-    fn unquoted_values_become_strings_or_numbers() {
-        assert_eq!(parse("{x: minecraft:stone}").unwrap_err().msg, "expected ',' or '}'");
-        assert_eq!(parse("[1 2]").unwrap_err().msg, "expected ',' or ']'");
-        assert_eq!(parse("{x: 'minecraft:stone', y: 0x10, z: .5}").unwrap(), json!({"x": "minecraft:stone", "y": "0x10", "z": 0.5}));
-    }
-
-    #[test]
-    fn errors_are_reported_not_panicked() {
-        for bad in ["{", "[1", "\"abc", "/* x", "{\"a\" 1}", "", "[\"\\u12\"]"] {
-            assert!(parse(bad).is_err(), "{bad:?}");
-        }
-        let deep = "[".repeat(1000);
-        assert_eq!(parse(&deep).unwrap_err().msg, "nested too deeply");
-    }
-}
+#[path = "json_tests.rs"]
+mod tests;
