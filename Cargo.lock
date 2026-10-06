@@ -140,9 +140,11 @@ version = "0.1.0"
 dependencies = [
  "bm-compress",
  "bm-format",
+ "bm-java",
  "bm-math",
  "bm-nbt",
  "rustc-hash",
+ "serde",
  "serde_json",
  "thiserror",
 ]
