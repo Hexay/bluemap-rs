@@ -14,3 +14,7 @@ mkdir -p "$OUT" "$ROOT/crates/bm-java/tests/data" "$ROOT/crates/bm-math/tests/da
 mkdir -p "$ROOT/crates/bm-resources/tests/data"
 "$J/javac" -nowarn -d "$OUT" -sourcepath "$FLOWMATH;$BLUEMAP/core/src/main/java" "$ROOT/tools/javaref/ColorRef.java"
 "$J/java" -cp "$OUT" ColorRef "$ROOT/crates/bm-resources/tests/data/color.rs"
+# model rotations: keep java_ref.rs's 12-line header (struct definition), regenerate the ROTATIONS table
+"$J/javac" -nowarn -d "$OUT" -sourcepath "$FLOWMATH;$BLUEMAP/core/src/main/java" "$ROOT/tools/javaref/ModelRef.java"
+MODEL_REF="$ROOT/crates/bm-resources/src/model/java_ref.rs"
+{ head -12 "$MODEL_REF"; "$J/java" -cp "$OUT" ModelRef; } > "$OUT/java_ref.rs" && mv "$OUT/java_ref.rs" "$MODEL_REF"
