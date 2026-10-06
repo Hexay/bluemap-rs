@@ -1,0 +1,35 @@
+[package]
+name = "bm-web"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BlueMap's integrated webserver: webroot + bundled webapp, map storage, live data and SSE"
+
+[dependencies]
+axum.workspace = true
+bm-compress.workspace = true
+bm-config.workspace = true
+bm-map.workspace = true
+bm-storage.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+gethostname.workspace = true
+http.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+percent-encoding.workspace = true
+rust-embed.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "net", "sync", "time"] }
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }

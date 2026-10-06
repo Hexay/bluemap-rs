@@ -1,0 +1,2 @@
+# embedded verbatim: bytes must equal the upstream webapp.zip
+webapp/** -text
