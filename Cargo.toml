@@ -27,7 +27,23 @@ debug = true
 
 [workspace.dependencies]
 anyhow = "1"
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
 base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+gethostname = "1"
+http = "1"
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "service"] }
+percent-encoding = "2"
+# debug-embed: debug builds embed too, so tests serve exactly what release ships
+rust-embed = { version = "8", features = ["debug-embed"] }
+socket2 = "0.6"
+tokio-util = { version = "0.7", features = ["io"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["catch-panic", "limit", "timeout"] }
+tracing = "0.1"
 clap = { version = "4", features = ["derive"] }
 # zlib-rs: pure-Rust backend, faster than miniz_oxide
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
@@ -60,4 +76,5 @@ bm-nbt = { path = "crates/bm-nbt" }
 bm-render = { path = "crates/bm-render" }
 bm-resources = { path = "crates/bm-resources" }
 bm-storage = { path = "crates/bm-storage" }
+bm-web = { path = "crates/bm-web" }
 bm-world = { path = "crates/bm-world" }
