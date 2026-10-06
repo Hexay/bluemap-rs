@@ -8,6 +8,7 @@ pub mod datapack;
 pub mod json;
 pub mod key;
 pub mod manifest;
+pub mod model;
 pub mod pack_meta;
 pub mod packs;
 pub mod vfs;
