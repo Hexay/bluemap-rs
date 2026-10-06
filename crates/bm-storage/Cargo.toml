@@ -1,0 +1,18 @@
+[package]
+name = "bm-storage"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BlueMap map storages (file tree and SQL), byte-compatible with upstream"
+
+[dependencies]
+bm-compress.workspace = true
+bm-format.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
