@@ -1,0 +1,28 @@
+[package]
+name = "bm-engine"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BlueMap's render pipeline: resources, maps, region updates, render state and lowres persistence"
+
+[dependencies]
+bm-compress.workspace = true
+bm-config.workspace = true
+bm-format.workspace = true
+bm-map.workspace = true
+bm-math.workspace = true
+bm-render.workspace = true
+bm-resources.workspace = true
+bm-storage.workspace = true
+bm-world.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+# entries are stored uncompressed, so the build script needs no deflate backend
+zip = { version = "8.6", default-features = false }

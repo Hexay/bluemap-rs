@@ -82,7 +82,7 @@ fn read(p: &Path) -> Result<Vec<u8>> {
 }
 
 /// `path` or `path<suffix>` for whichever compression the storage used.
-fn read_decompressed(path: &Path) -> Result<Vec<u8>> {
+pub(crate) fn read_decompressed(path: &Path) -> Result<Vec<u8>> {
     for c in Compression::ALL {
         let mut name = path.as_os_str().to_owned();
         name.push(c.file_suffix());

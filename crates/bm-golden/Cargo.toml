@@ -12,6 +12,7 @@ anyhow = "1"
 base64.workspace = true
 bm-compress.workspace = true
 bm-format.workspace = true
+bm-map.workspace = true
 clap.workspace = true
 png.workspace = true
 serde.workspace = true

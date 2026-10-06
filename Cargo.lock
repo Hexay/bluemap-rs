@@ -131,6 +131,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bm-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bm-config",
+ "bm-engine",
+ "bm-golden",
+ "clap",
+ "rayon",
+]
+
+[[package]]
 name = "bm-compress"
 version = "0.1.0"
 dependencies = [
@@ -152,6 +164,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "bm-engine"
+version = "0.1.0"
+dependencies = [
+ "bm-compress",
+ "bm-config",
+ "bm-format",
+ "bm-map",
+ "bm-math",
+ "bm-render",
+ "bm-resources",
+ "bm-storage",
+ "bm-world",
+ "rayon",
+ "rustc-hash",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "zip",
+]
+
+[[package]]
 name = "bm-format"
 version = "0.1.0"
 dependencies = [
@@ -167,6 +200,7 @@ dependencies = [
  "base64 0.22.1",
  "bm-compress",
  "bm-format",
+ "bm-map",
  "clap",
  "png",
  "serde",
