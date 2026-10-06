@@ -110,7 +110,7 @@ mod tests {
     fn png_round_trip_keeps_every_pixel() {
         let mut t = LowresTile::new([500, 500]);
         for i in 0..501 {
-            t.set(i, (i * 7) % 501, 0x7F00_0000 | i as u32 * 31, i as i32 - 64, (i % 16) as u8);
+            t.set(i, (i * 7) % 501, 0x7F00_0000 | (i as u32 * 31), i as i32 - 64, (i % 16) as u8);
         }
         let mut png = Vec::new();
         t.encode_png(&mut png).unwrap();

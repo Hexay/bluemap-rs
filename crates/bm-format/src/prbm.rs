@@ -61,13 +61,13 @@ impl TileModel {
         self.position.iter().for_each(|&v| f32_le(out, v));
 
         attribute(out, "normal", 0x63);
-        for p in self.position.chunks_exact(9) {
-            let n = surface_normal(p).map(|v| normal_byte(v));
+        for p in self.position.as_chunks::<9>().0 {
+            let n = surface_normal(p).map(normal_byte);
             (0..3).for_each(|_| out.extend(n));
         }
 
         attribute(out, "color", 0x67);
-        for c in self.color.chunks_exact(3) {
+        for c in self.color.as_chunks::<3>().0 {
             let c = [unit_byte(c[0]), unit_byte(c[1]), unit_byte(c[2])];
             (0..3).for_each(|_| out.extend(c));
         }
