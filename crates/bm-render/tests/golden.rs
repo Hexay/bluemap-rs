@@ -25,18 +25,22 @@ fn check(fx: &str, dimension: &str) {
         .unwrap();
     let tiles = f.golden_tiles().unwrap();
     let area = f.load_area(&tiles);
-    let mut differing = Vec::new();
-    for r in f.render(&area, &tiles, &AtomicU64::new(0)).unwrap() {
-        if f.golden.tile_bytes(0, r.tile).unwrap() != r.prbm {
-            differing.push(r.tile);
-        }
-    }
+    let rendered = f.render(&area, &tiles, &AtomicU64::new(0)).unwrap();
+    let differing: Vec<_> =
+        rendered.iter().filter(|r| f.golden.tile_bytes(0, r.tile).unwrap() != r.prbm).map(|r| r.tile).collect();
     assert!(
         differing.is_empty(),
         "{fx}: {} of {} tiles differ, e.g. {:?}",
         differing.len(),
         tiles.len(),
         &differing[..differing.len().min(5)]
+    );
+    let (checked, bad) = f.check_lowres(&rendered).unwrap();
+    assert!(
+        bad.is_empty(),
+        "{fx}: {} of {checked} lowres columns differ:\n{}",
+        bad.len(),
+        bad[..bad.len().min(10)].join("\n")
     );
 }
 

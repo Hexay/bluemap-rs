@@ -70,6 +70,13 @@ fn main() -> Result<()> {
         rayon::current_num_threads()
     );
     println!("meshing alone: {mesh:.2} thread-seconds, {:.1} tiles/s per thread", tiles.len() as f64 / mesh);
+    match fx.check_lowres(&rendered) {
+        Ok((checked, bad)) => {
+            println!("lowres columns vs golden LOD 1: {checked} compared, {} differ", bad.len());
+            bad.iter().take(10).for_each(|b| println!("  {b}"));
+        }
+        Err(e) => println!("lowres columns not compared: {e}"),
+    }
     copy_settings(&golden, &out, &fx.golden.id)
 }
 

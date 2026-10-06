@@ -1,6 +1,7 @@
 //! A golden map and everything needed to re-render its hires tiles: resources, the golden material ids, the
 //! world and the map config's render settings. Shared by the `render_map` example and the golden test.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,8 +9,9 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use bm_format::grid::{Grid, Tile};
+use bm_format::lowres::LowresTile;
 use bm_golden::WebrootMap;
-use bm_render::{HiresRenderer, RenderSettings, StateCache, TileBuffers};
+use bm_render::{ColumnMeta, HiresRenderer, RenderSettings, StateCache, TileBuffers};
 use bm_resources::PackVersions;
 use bm_resources::datapack::BiomeTable;
 use bm_resources::packs::load_order;
@@ -38,11 +40,12 @@ pub struct Fixture {
     pub world: World,
 }
 
-/// One rendered tile: PRBM bytes (uncompressed) and face count.
+/// One rendered tile: PRBM bytes (uncompressed), face count and the lowres column data.
 pub struct Rendered {
     pub tile: Tile,
     pub prbm: Vec<u8>,
     pub faces: usize,
+    pub columns: Vec<ColumnMeta>,
 }
 
 impl Fixture {
@@ -123,8 +126,39 @@ impl Fixture {
                 }
                 let mut prbm = Vec::new();
                 buf.model.write_prbm(&mut prbm)?;
-                Ok(Rendered { tile, prbm, faces: buf.model.len() })
+                Ok(Rendered { tile, prbm, faces: buf.model.len(), columns: buf.columns.clone() })
             })
             .collect()
     }
+
+    /// Compares every rendered column with the golden LOD 1 pixel `TileMetaConsumer` wrote for it; returns the
+    /// columns compared and a description of each mismatch.
+    pub fn check_lowres(&self, rendered: &[Rendered]) -> Result<(usize, Vec<String>)> {
+        let size = self.golden.settings.lowres.tile_size;
+        let lowres = Grid { size, offset: [0, 0] };
+        let mut tiles: HashMap<Tile, LowresTile> = HashMap::new();
+        let (mut checked, mut bad) = (0, Vec::new());
+        for c in rendered.iter().flat_map(|r| &r.columns) {
+            let t = lowres.tile_of(c.x, c.z);
+            if !tiles.contains_key(&t) {
+                let png = self.golden.tile_bytes(1, t)?;
+                tiles.insert(t, LowresTile::decode_png(&png, size.map(|s| s as usize))?);
+            }
+            let (px, pz) = (c.x.rem_euclid(size[0]) as usize, c.z.rem_euclid(size[1]) as usize);
+            let tile = &tiles[&t];
+            let mut color = c.color;
+            let expected = (color.straight().get_int() as u32, sign_extend(c.height & 0xFFFF), c.block_light as u8);
+            let actual = (tile.color(px, pz), tile.height(px, pz), tile.block_light(px, pz));
+            checked += 1;
+            if expected != actual {
+                bad.push(format!("column {},{}: ours {expected:08x?}, golden {actual:08x?}", c.x, c.z));
+            }
+        }
+        Ok((checked, bad))
+    }
+}
+
+/// `LowresTile.getHeight`'s read-back of a 16-bit height.
+fn sign_extend(h: i32) -> i32 {
+    if h > 0x8000 { h | !0xFFFF } else { h }
 }
