@@ -46,7 +46,12 @@ impl LowresTile {
     }
 
     pub fn block_light(&self, x: usize, z: usize) -> u8 {
-        (self.pixels[(self.depth + z) * self.width + x] >> 16) as u8
+        (self.meta(x, z) >> 16) as u8
+    }
+
+    /// Raw bottom-half pixel; alpha 0 means the column was never written.
+    pub fn meta(&self, x: usize, z: usize) -> u32 {
+        self.pixels[(self.depth + z) * self.width + x]
     }
 
     /// 8-bit RGBA PNG into `out` (replacing its contents).

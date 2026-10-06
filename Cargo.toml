@@ -49,6 +49,7 @@ zip = { version = "8.6", default-features = false, features = ["deflate-flate2"]
 bm-compress = { path = "crates/bm-compress" }
 bm-format = { path = "crates/bm-format" }
 bm-java = { path = "crates/bm-java" }
+bm-map = { path = "crates/bm-map" }
 bm-math = { path = "crates/bm-math" }
 bm-nbt = { path = "crates/bm-nbt" }
 bm-resources = { path = "crates/bm-resources" }
