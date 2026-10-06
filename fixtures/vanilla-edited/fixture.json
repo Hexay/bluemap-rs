@@ -1,0 +1,9 @@
+{
+  "description": "vanilla fixture's seed and area plus player edits (flattening, pool, builds, dark tunnel, buried fill): tests how regen merges with evidence",
+  "properties": {
+    "level-type": "minecraft:normal",
+    "generate-structures": "true",
+    "level-seed": "bluemap_reverse"
+  },
+  "area": [-128, -128, 127, 127]
+}

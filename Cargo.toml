@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+rust-version = "1.88"
+publish = false
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+debug = "line-tables-only"
+
+# release code + full debug info so samply can name functions
+[profile.profiling]
+inherits = "release"
+debug = true
+
+[workspace.dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+# zlib-rs: pure-Rust backend, faster than miniz_oxide
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+# lz4-java block framing only needs the raw block API; checked-decode turns malformed input into errors
+lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
+png = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+twox-hash = { version = "2.1", default-features = false, features = ["xxhash32"] }
+zstd = "0.13"
+bm-compress = { path = "crates/bm-compress" }
+bm-format = { path = "crates/bm-format" }
+bm-java = { path = "crates/bm-java" }

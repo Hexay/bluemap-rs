@@ -1,0 +1,9 @@
+{
+  "description": "vanilla seed over 512x512 blocks (4x the vanilla fixture): scaling benchmark for time and memory",
+  "properties": {
+    "level-type": "minecraft:normal",
+    "generate-structures": "true",
+    "level-seed": "bluemap_reverse"
+  },
+  "area": [-256, -256, 255, 255]
+}

@@ -1,0 +1,14 @@
+opaque  png  opt  webp_ll  colour_half_opt  meta_half_opt  path
+0.59   37786   35759   14894   32573    2139  structures/tiles/1/x0/z0.png
+0.47   19125   11596    4670    9104    2502  structures_numeric/tiles/1/x-2/z1.png
+0.45   31175   30812   11572   28050    1950  structures_numeric/tiles/1/x-2/z0.png
+0.43   99158  111285   55140   86103   25186  structures/tiles/1/x0/z-1.png
+0.42   87408  100940   46382   75678   25097  structures_numeric/tiles/1/x-1/z0.png
+0.41   22776   16132    6290   13911    2133  structures/tiles/1/x-1/z0.png
+0.40   30064   25682   10544   22796    2358  structures/tiles/1/x-2/z-2.png
+0.39  123121  146916   68886  104157   41673  structures_numeric/tiles/1/x-1/z-1.png
+0.38  135186  141595   77960   92769   48609  structures_numeric/tiles/1/x0/z0.png
+0.35   56512   51891   27996   39098   12672  structures/tiles/1/x1/z0.png
+0.35  101801  120299   57750   87572   32346  structures_numeric/tiles/1/x0/z-1.png
+0.34   16646    8153    2694    6140    2080  structures/tiles/1/x-2/z0.png
+ratios vs stored: opt 1.053 webp 0.506; colour/meta split of opt: 0.75/0.25

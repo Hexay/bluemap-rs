@@ -1,0 +1,10 @@
+[package]
+name = "bm-java"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Bit-exact reimplementations of the Java library behaviour BlueMap's output depends on"
+
+[dependencies]

@@ -1,0 +1,10 @@
+{
+  "description": "One vanilla world (vanilla fixture's seed) with overworld, nether and end areas, served as BlueMap's three default maps: tests bmr pull reconstructing every dimension into one world (tools/check_dimensions.py)",
+  "dimensions": ["minecraft:overworld", "minecraft:the_nether", "minecraft:the_end"],
+  "properties": {
+    "level-type": "minecraft:normal",
+    "generate-structures": "true",
+    "level-seed": "bluemap_reverse"
+  },
+  "area": [-64, -64, 63, 63]
+}

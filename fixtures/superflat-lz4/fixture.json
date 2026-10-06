@@ -1,0 +1,11 @@
+{
+  "description": "superflat with LZ4 region compression (MC 1.20.5+ region-file-compression=lz4): reader check, should score identical to superflat",
+  "properties": {
+    "level-type": "minecraft:flat",
+    "generator-settings": "{\"layers\":[{\"block\":\"minecraft:bedrock\",\"height\":1},{\"block\":\"minecraft:dirt\",\"height\":2},{\"block\":\"minecraft:grass_block\",\"height\":1}],\"biome\":\"minecraft:plains\"}",
+    "generate-structures": "false",
+    "level-seed": "1",
+    "region-file-compression": "lz4"
+  },
+  "area": [-64, -64, 63, 63]
+}

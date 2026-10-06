@@ -1,0 +1,38 @@
+category            n      bytes    4K-disk  files<4K
+hires              2996  210757469  216973312     73
+lowres1             333    2670705    3153920    245
+lowres2              56     458174     540672     31
+lowres3              56     167054     262144     48
+markers.json         14         28      57344     14
+players.json         14         28      57344     14
+rstate-chunks        56      35180     229376     56
+rstate-region        56       5232     229376     56
+rstate-tiles         77      17929     315392     77
+settings.json        14       4998      57344     14
+textures.json.gz     14    8230964    8257536      0
+TOTAL              3686  222347761  230133760    628   dirs=800
+
+hires vertex-count buckets (<=limit): n, gz bytes
+  <=          0:    46       3726
+  <=        600:    11      10831
+  <=       6000:    26     124980
+  <=      60000:  2457  146420989
+  <=     600000:   456   64196943
+  <= 1073741824:     0          0
+
+rstate {'files': 189, 'gz': 58341, 'raw': 4995708, 'zstd19': 42919}
+
+webapp asset            raw      gz6    zstd19    br11
+Quicksand-BuVPtn-J.ttf       124196    65965    62126    56735
+favicon-DEN7TZ5X.png           6073     6096     6083     6077
+index-C6zAnFcX.css            19444     3577     3431     3127
+index-DJzYl7wx.js           1201901   305182   262790   249262
+index-DJzYl7wx.js.map       4902303  1029087   816608   792088
+logo.png                      16338    16361    16348    16337
+logoCircle512.png             53997    53671    53587    53617
+logoCircle64.png               7071     7094     7081     7073
+manifest-vz4Wm4Dd.webmanifest      536      310      313      262
+poi.svg                         919      562      569      460
+steve.png                       844      867      854      848
+index.html                     1650      684      690      471
+lang files 30 130320

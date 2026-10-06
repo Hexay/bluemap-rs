@@ -1,0 +1,10 @@
+{
+  "description": "Void world whose level.dat/data files seed reconstructed worlds; any chunk the server regenerates comes out empty, so the scorer catches it",
+  "properties": {
+    "level-type": "minecraft:flat",
+    "generator-settings": "{\"layers\":[{\"block\":\"minecraft:air\",\"height\":1}],\"biome\":\"minecraft:the_void\"}",
+    "generate-structures": "false",
+    "level-seed": "1"
+  },
+  "area": [0, 0, 15, 15]
+}

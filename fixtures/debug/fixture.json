@@ -1,0 +1,9 @@
+{
+  "description": "Vanilla debug world: every block state once, isolated, at y=70 on a 2-block grid. Source of the face-signature library (bmr learn)",
+  "properties": {
+    "level-type": "minecraft:debug_all_block_states",
+    "generate-structures": "false",
+    "level-seed": "1"
+  },
+  "area": [0, 0, 383, 383]
+}

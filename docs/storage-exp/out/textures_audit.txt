@@ -1,0 +1,15 @@
+biomes/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+context/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+debug/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+end/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+nether/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+overworld/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+end/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+nether/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+structures_numeric/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+structures/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+superflat/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+vanilla_512/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+vanilla_edited/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+vanilla/textures.json.gz: entries=2148 stored=587926 raw=2500763 b64=2126472 png=1557267 uniq_png=2126/2148 uniq_png_bytes=1542937 uniq_opt=1491689 anim=107 zstd19=525657 br11=512042
+distinct textures.json contents: 1 of 14

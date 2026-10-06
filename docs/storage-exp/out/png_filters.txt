@@ -1,0 +1,4 @@
+best filter histogram: {4: 13, 0: 416, 2: 16}
+lod1 n=333 stored=2670705 none+z9=2222739 (0.832) best-filter+z9=2216679 (0.830)
+lod2 n=56 stored=458174 none+z9=414922 (0.906) best-filter+z9=410927 (0.897)
+lod3 n=56 stored=167054 none+z9=155676 (0.932) best-filter+z9=155676 (0.932)

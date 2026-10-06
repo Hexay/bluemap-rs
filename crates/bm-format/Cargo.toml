@@ -1,0 +1,10 @@
+[package]
+name = "bm-format"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BlueMap's on-disk and on-the-wire formats: tile grids and paths"
+
+[dependencies]

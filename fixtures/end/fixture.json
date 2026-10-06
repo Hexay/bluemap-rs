@@ -1,0 +1,10 @@
+{
+  "description": "Vanilla end main island (vanilla fixture's seed), 256x256 blocks, rendered with BlueMap's default end map",
+  "dimension": "minecraft:the_end",
+  "properties": {
+    "level-type": "minecraft:normal",
+    "generate-structures": "true",
+    "level-seed": "bluemap_reverse"
+  },
+  "area": [-128, -128, 127, 127]
+}

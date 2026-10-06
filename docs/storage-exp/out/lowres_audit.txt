@@ -1,0 +1,6 @@
+IHDR (w,h,depth,ctype,interlace,zlib FLEVEL): {(501, 1002, 8, 6, 0, 1): 445}
+row filter types: {0: 445890}
+lod n png disk opt opt+zeroHiddenRGB empty near_empty(<5%) mean_opaque hidden_rgb_px meta_alpha!=255 other_chunks
+1 333 2670705 3153920 2460009 2460009 243 43 0.034 0 50404176 0 empty_bytes 693043 empty_disk 995328
+2 56 458174 540672 383438 383446 0 53 0.009 1 10712642 0 empty_bytes 0 empty_disk 0
+3 56 167054 262144 149070 149066 0 56 0.0 1 13490442 0 empty_bytes 0 empty_disk 0

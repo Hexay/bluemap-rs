@@ -1,0 +1,58 @@
+# Run after the fixture area is loaded. Ground (grass) is y=-61; build from y=-60.
+
+# stone brick house with glass windows, oak door, stair roof
+fill 0 -60 0 8 -56 8 stone_bricks hollow
+fill 0 -58 3 0 -57 5 glass
+fill 8 -58 3 8 -57 5 glass
+setblock 4 -60 0 oak_door[half=lower,facing=north]
+setblock 4 -59 0 oak_door[half=upper,facing=north]
+fill -1 -55 -1 9 -55 3 oak_stairs[facing=south]
+fill -1 -55 5 9 -55 9 oak_stairs[facing=north]
+fill -1 -55 4 9 -55 4 oak_slab[type=bottom]
+setblock 4 -57 1 wall_torch[facing=south]
+
+# wool rainbow
+fill 12 -60 0 12 -60 15 white_wool
+fill 13 -60 0 13 -60 15 orange_wool
+fill 14 -60 0 14 -60 15 magenta_wool
+fill 15 -60 0 15 -60 15 light_blue_wool
+fill 16 -60 0 16 -60 15 yellow_wool
+fill 17 -60 0 17 -60 15 lime_wool
+fill 18 -60 0 18 -60 15 pink_wool
+fill 19 -60 0 19 -60 15 gray_wool
+fill 20 -60 0 20 -60 15 red_wool
+fill 21 -60 0 21 -60 15 blue_wool
+
+# pool: water and lava
+fill 0 -61 12 8 -61 20 water
+fill -2 -61 12 -1 -61 13 lava
+
+# fence pen, flowers, tall grass, a tree's worth of leaves on logs
+fill -10 -60 -10 -4 -60 -4 oak_fence
+fill -9 -60 -9 -5 -60 -5 air
+setblock -7 -60 -7 poppy
+setblock -8 -60 -7 dandelion
+setblock -6 -60 -7 short_grass
+setblock -7 -60 -6 tall_grass[half=lower]
+setblock -7 -59 -6 tall_grass[half=upper]
+fill -20 -60 -20 -20 -55 -20 oak_log
+fill -22 -55 -22 -18 -53 -18 oak_leaves[persistent=true] keep
+
+# redstone line with a lamp and lever
+fill 24 -60 0 24 -60 8 redstone_wire
+setblock 24 -60 -1 lever[face=floor,facing=north,powered=true]
+setblock 24 -60 9 redstone_lamp
+
+# block entities: chest, sign
+setblock 2 -60 2 chest[facing=south]
+setblock 6 -60 2 oak_sign[rotation=0]
+
+# ore/material palette strip
+fill 0 -60 -10 0 -60 -10 diamond_block
+fill 1 -60 -10 1 -60 -10 gold_block
+fill 2 -60 -10 2 -60 -10 iron_block
+fill 3 -60 -10 3 -60 -10 copper_block
+fill 4 -60 -10 4 -60 -10 deepslate
+fill 5 -60 -10 5 -60 -10 cobblestone
+fill 6 -60 -10 6 -60 -10 sandstone
+fill 7 -60 -10 7 -60 -10 glowstone
