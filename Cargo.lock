@@ -138,8 +138,10 @@ version = "0.1.0"
 name = "bm-map"
 version = "0.1.0"
 dependencies = [
+ "bm-compress",
  "bm-format",
  "bm-math",
+ "bm-nbt",
  "rustc-hash",
  "serde_json",
  "thiserror",

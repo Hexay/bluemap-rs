@@ -5,11 +5,13 @@ version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "BlueMap's map layer: lowres tiles and LOD aggregation"
+description = "BlueMap's map layer: lowres LODs, render state, everything between the hires render and stored tiles"
 
 [dependencies]
+bm-compress.workspace = true
 bm-format.workspace = true
 bm-math.workspace = true
+bm-nbt.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 
