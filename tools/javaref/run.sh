@@ -11,3 +11,6 @@ OUT=$ROOT/work/javaref
 mkdir -p "$OUT" "$ROOT/crates/bm-java/tests/data" "$ROOT/crates/bm-math/tests/data"
 "$J/javac" -nowarn -d "$OUT" -sourcepath "$FLOWMATH;$BLUEMAP/core/src/main/java" "$ROOT/tools/javaref/MathRef.java"
 "$J/java" -cp "$OUT" MathRef "$ROOT/crates/bm-java/tests/data" "$ROOT/crates/bm-math/tests/data"
+mkdir -p "$ROOT/crates/bm-resources/tests/data"
+"$J/javac" -nowarn -d "$OUT" -sourcepath "$FLOWMATH;$BLUEMAP/core/src/main/java" "$ROOT/tools/javaref/ColorRef.java"
+"$J/java" -cp "$OUT" ColorRef "$ROOT/crates/bm-resources/tests/data/color.rs"

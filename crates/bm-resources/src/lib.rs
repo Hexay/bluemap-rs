@@ -2,6 +2,8 @@
 //! and world datapacks to turn block states into models, textures and colours (docs/02-resources.md).
 
 pub mod client_jar;
+pub mod color;
+pub mod datapack;
 pub mod json;
 pub mod key;
 pub mod manifest;

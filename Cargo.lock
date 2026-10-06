@@ -150,7 +150,9 @@ name = "bm-resources"
 version = "0.1.0"
 dependencies = [
  "bm-java",
+ "bm-math",
  "bm-world",
+ "png",
  "rayon",
  "rustc-hash",
  "serde",
