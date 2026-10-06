@@ -47,6 +47,7 @@ zstd = "0.13"
 # deflate via flate2 only: the default features pull C builds (bzip2, zstd) and crypto we don't need
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
 bm-compress = { path = "crates/bm-compress" }
+bm-config = { path = "crates/bm-config" }
 bm-format = { path = "crates/bm-format" }
 bm-java = { path = "crates/bm-java" }
 bm-math = { path = "crates/bm-math" }

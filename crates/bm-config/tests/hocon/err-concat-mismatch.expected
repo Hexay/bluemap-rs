@@ -1,0 +1,1 @@
+ERROR: ParsingException: []@(line 2, col 0): null Reader: 2 ^ | WrongType: Reader: 2: Cannot concatenate object or list with a non-object-or-list, SimpleConfigList([1]) and SimpleConfigObject({"x":1}) are not compatible | 
