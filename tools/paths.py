@@ -44,6 +44,11 @@ class Toolchain:
     work: Path
 
     @property
+    def version(self) -> tuple[int, ...]:
+        """Comparable release number: (1, 13, 2) < (1, 21, 11) < (26, 3)."""
+        return tuple(int(p) for p in self.mc.split("."))
+
+    @property
     def java(self) -> Path:
         return jdk_dir(self.java_major) / "bin" / f"java{EXE}"
 

@@ -15,7 +15,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-from console import bundler_args
+from console import bundled, bundler_args
 from paths import DEFAULT, DOWNLOADS, EXE, MC_MANIFEST_URL, WINDOWS, Toolchain, jdk_dir, jdk_url, toolchain
 
 
@@ -66,7 +66,9 @@ def resolve(mc: str, bluemap: str) -> Toolchain:
     DOWNLOADS.mkdir(parents=True, exist_ok=True)
     probe = toolchain(mc, bluemap, 0, 0)
     download(probe.bluemap_url, probe.bluemap_jar)
-    return toolchain(mc, bluemap, version_json(mc)["javaVersion"]["majorVersion"], jar_java_major(probe.bluemap_jar))
+    # metadata of versions older than the field claims nothing: they run on Java 8
+    java = version_json(mc).get("javaVersion", {}).get("majorVersion", 8)
+    return toolchain(mc, bluemap, java, jar_java_major(probe.bluemap_jar))
 
 
 def jar_java_major(jar: Path, main_class: str = "de/bluecolored/bluemap/cli/BlueMapCLI.class") -> int:
@@ -109,9 +111,10 @@ def generate_reports(tc: Toolchain) -> None:
         return
     print("gen     vanilla data reports")
     tc.reports.parent.mkdir(parents=True, exist_ok=True)
+    launch = (["-DbundlerMainClass=net.minecraft.data.Main", *bundler_args(tc), "-jar", str(tc.server_jar)]
+              if bundled(tc) else ["-cp", str(tc.server_jar), "net.minecraft.data.Main"])
     subprocess.run(
-        [str(tc.java), "-DbundlerMainClass=net.minecraft.data.Main", *bundler_args(tc), "-jar", str(tc.server_jar),
-         "--reports", "--output", str(tc.reports)],
+        [str(tc.java), *launch, "--reports", "--output", str(tc.reports)],
         cwd=tc.reports.parent, check=True, stdout=subprocess.DEVNULL,
     )
 

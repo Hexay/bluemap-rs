@@ -4,6 +4,7 @@ import re
 import subprocess
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 from paths import DEFAULT, WORK, Toolchain
@@ -13,10 +14,16 @@ COMMAND_ERRORS = re.compile(
 )
 
 
+def bundled(tc: Toolchain) -> bool:
+    """1.18+ server jars are a bundler that unpacks the real server; older jars are the server itself."""
+    with zipfile.ZipFile(tc.server_jar) as z:
+        return "META-INF/versions.list" in z.namelist()
+
+
 def bundler_args(tc: Toolchain) -> list[str]:
     """The server jar unpacks its libraries into the working directory unless given a repo. One repo for
     all versions: the first JVM to load fresh jars pays ~2 min (virus scan), later runs and versions reuse them."""
-    return [f"-DbundlerRepoDir={WORK / 'server-libs'}"]
+    return [f"-DbundlerRepoDir={WORK / 'server-libs'}"] if bundled(tc) else []
 
 
 class ServerTimeout(RuntimeError):
@@ -28,6 +35,7 @@ class Server:
         self.lines: queue.Queue[str] = queue.Queue()
         self.errors: list[str] = []
         self.label = cwd.name
+        self.tc = tc
         self.proc = subprocess.Popen(
             [str(tc.java), f"-Xmx{heap}", *bundler_args(tc), "-jar", str(tc.server_jar), "--nogui"],
             cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,

@@ -1,6 +1,6 @@
 """Generate a fixture world: fresh server run, force-load the fixture area, apply its commands, save, stop.
 
-Usage: py -3 tools/make_world.py <fixture> [--force] [--mc 1.21.11 [--bluemap 5.28]]
+Usage: py -3 tools/make_world.py <fixture> [--force] [--mc 1.21.11 [--bluemap 5.28]] [--port 25601]
 Output: <toolchain worlds>/<fixture>/world (default toolchain: work/worlds/<fixture>/world)
 """
 import argparse
@@ -26,6 +26,8 @@ BASE_PROPERTIES = {
     "max-tick-time": "-1",
 }
 FORCELOAD_MAX_CHUNKS = 256
+# pre-1.14 startup generates the chunks within ±192 blocks of the world spawn
+SPAWN_RADIUS = 192
 OVERWORLD = "minecraft:overworld"
 
 
@@ -66,17 +68,45 @@ def forceload_commands(x0: int, z0: int, x1: int, z1: int, dimension: str = OVER
     return out
 
 
+def is_loaded(server: Server, x: int, z: int, dimension: str) -> bool:
+    if server.tc.version >= (1, 19, 4):
+        return server.query(f"execute in {dimension} if loaded {x} 0 {z}", r"Test (passed|failed)").group(1) == "passed"
+    # no `if loaded` yet: any block test answers "not loaded" until the chunk is full
+    m = server.query(f"execute in {dimension} if block {x} 0 {z} minecraft:air", r"Test (passed|failed)|not loaded")
+    if m.group(1) is None:
+        server.errors.remove(m.string)
+        return False
+    return True
+
+
 def wait_until_loaded(server: Server, x0: int, z0: int, x1: int, z1: int, dimension: str = OVERWORLD,
                       timeout: float = 600) -> None:
     deadline = time.monotonic() + timeout
     for x, z in [(x0, z0), (x0, z1), (x1, z0), (x1, z1)]:
         while True:
-            m = server.query(f"execute in {dimension} if loaded {x} 0 {z}", r"Test (passed|failed)")
-            if m.group(1) == "passed":
+            if is_loaded(server, x, z, dimension):
                 break
             if time.monotonic() > deadline:
                 raise ServerTimeout(f"chunk at {x},{z} never loaded")
             time.sleep(1)
+
+
+def check_spawn_area(spec: dict) -> None:
+    x0, z0, x1, z1 = spec["area"]
+    if max(x1 - x0, z1 - z0) > 2 * SPAWN_RADIUS or spec.get("extra_areas") or fixture_dimensions(spec) != [OVERWORLD]:
+        sys.exit(f"before 1.14 only an overworld area within {2 * SPAWN_RADIUS} blocks square can be generated")
+
+
+def restart_around(server: Server, area: list[int], server_dir, heap: str, tc: Toolchain) -> Server:
+    """No /forceload before 1.14: move the world spawn to the area's centre and restart, so startup
+    pregenerates the spawn chunks (and their full neighbours) around it."""
+    x0, z0, x1, z1 = area
+    server.send(f"setworldspawn {(x0 + x1) // 2} 64 {(z0 + z1) // 2}")
+    server.query("save-all flush", r"Saved the game", timeout=300)
+    server.stop()
+    server = Server(server_dir, heap, tc)
+    server.wait_for(r"Done \(", timeout=600, echo=True)
+    return server
 
 
 def make_world(name: str, force: bool, tc: Toolchain = DEFAULT, heap: str = "4G", port: int | None = None) -> None:
@@ -94,14 +124,19 @@ def generate(server_dir, spec: dict, commands: list[str], force: bool, tc: Toolc
             print(f"exists  {server_dir / 'world'} (use --force to regenerate)")
             return
         shutil.rmtree(server_dir)
+    no_forceload = tc.version < (1, 14)
+    if no_forceload:
+        check_spawn_area(spec)
     write_server_files(server_dir, spec.get("properties", {}))
 
     server = Server(server_dir, heap, tc)
     try:
         server.wait_for(r"Done \(", timeout=600, echo=True)
         area, dimension = spec["area"], spec.get("dimension", OVERWORLD)
+        if no_forceload:
+            server = restart_around(server, area, server_dir, heap, tc)
         for dim in fixture_dimensions(spec):
-            for cmd in forceload_commands(*area, dim):
+            for cmd in [] if no_forceload else forceload_commands(*area, dim):
                 server.send(cmd)
             wait_until_loaded(server, *area, dim)
         print(f"loaded  area {area}")
@@ -132,13 +167,14 @@ def main() -> None:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--mc", default=DEFAULT.mc)
     ap.add_argument("--bluemap", default=DEFAULT.bluemap)
+    ap.add_argument("--port", type=int, help="to run several servers at once")
     args = ap.parse_args()
     from setup import resolve, setup  # lazy: only needed when a toolchain may need downloading
 
     tc = resolve(args.mc, args.bluemap)
     if tc != DEFAULT:
         setup(tc)
-    make_world(args.fixture, args.force, tc)
+    make_world(args.fixture, args.force, tc, port=args.port)
 
 
 if __name__ == "__main__":
