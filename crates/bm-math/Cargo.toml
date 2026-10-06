@@ -1,0 +1,12 @@
+[package]
+name = "bm-math"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Bit-exact port of BlueMap's mutable math types (matrices, vectors, colours, simplex noise)"
+
+[dependencies]
+bm-java.workspace = true
+thiserror.workspace = true
