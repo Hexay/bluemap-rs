@@ -213,7 +213,7 @@ Line numbers refer to the cloned BlueMap source.
 **Final properties** (`ResourcePack.java:360-386`)
 1. Extensions apply first.
 2. Config then **overwrites** the defined fields.
-3. If culling or occluding is still UNDEFINED, it is filled from the models of the matching variants, evaluated at position (0,0,0). The last variant visited wins.
+3. If culling or occluding is still UNDEFINED, it is filled from the models of the matching variants, evaluated at position (0,0,0). The first variant visited wins (verified against the Java code; an earlier version of this doc said last).
 4. UNDEFINED reads as false (`C/world/BlockProperties.java:57-75`).
 
 **Bundled blockProperties**
