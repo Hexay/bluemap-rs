@@ -129,7 +129,13 @@ impl Liquid<'_, '_, '_> {
     }
 
     /// Whether the face was rendered.
-    fn face(&self, dir: Direction, c: [[f32; 3]; 4], tint: &Color, out: &mut TileModel) -> Result<bool, CapacityReached> {
+    fn face(
+        &self,
+        dir: Direction,
+        c: [[f32; 3]; 4],
+        tint: &Color,
+        out: &mut TileModel,
+    ) -> Result<bool, CapacityReached> {
         let (ctx, block) = (self.ctx, self.block);
         let [dx, dy, dz] = dir.to_vector();
         let neighbor = block.neighbor(ctx, dx, dy, dz).1;
@@ -138,7 +144,8 @@ impl Liquid<'_, '_, '_> {
         }
         out.reserve_faces(2)?;
 
-        let mut uvs = [VectorM2f::new(0.0, 1.0), VectorM2f::new(1.0, 1.0), VectorM2f::new(1.0, 0.0), VectorM2f::new(0.0, 0.0)];
+        let mut uvs =
+            [VectorM2f::new(0.0, 1.0), VectorM2f::new(1.0, 1.0), VectorM2f::new(1.0, 0.0), VectorM2f::new(0.0, 0.0)];
         let mut flow = false;
         if dir == Direction::Up {
             if let Some(angle) = self.flowing_angle() {

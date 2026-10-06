@@ -55,7 +55,13 @@ struct Renderer<'x, 'r, 'a> {
 type Corner = [f32; 3];
 
 impl Renderer<'_, '_, '_> {
-    fn element(&mut self, i: usize, e: &BakedElement, out: &mut TileModel, color: &mut Color) -> Result<(), CapacityReached> {
+    fn element(
+        &mut self,
+        i: usize,
+        e: &BakedElement,
+        out: &mut TileModel,
+        color: &mut Color,
+    ) -> Result<(), CapacityReached> {
         let ([fx, fy, fz], [tx, ty, tz]) = (e.from, e.to);
         let c = [
             [fx, fy, fz],
@@ -89,14 +95,14 @@ impl Renderer<'_, '_, '_> {
         let Some(face) = e.face(dir) else { return Ok(()) };
         let (ctx, block) = (self.ctx, self.block);
 
-        let [nx, ny, nz] = self.relative(dir.to_vector());
-        let (sky, block_light) = block.neighbor_light(ctx, nx, ny, nz);
-        let sun = block.sky.max(sky);
-        let block_light = block.block_light.max(block_light);
-        if block.culled_as_cave(ctx, sun, block_light) {
-            return Ok(());
+        // Java tests light and caves first; every test is side-effect free, so the cheapest goes first
+        if let Some(cull) = face.cullface {
+            let [cx, cy, cz] = self.relative(cull.to_vector());
+            let (id, info) = block.neighbor(ctx, cx, cy, cz);
+            if info.props.culling || (info.props.culling_identical && id == block.id) {
+                return Ok(());
+            }
         }
-
         let mut facing = VectorM3f::default();
         facing.set_i(dir.to_vector());
         facing.rotate_and_scale(&e.rotation);
@@ -104,12 +110,13 @@ impl Renderer<'_, '_, '_> {
         if ctx.settings.render_top_only && f64::from(facing.y) < 0.01 {
             return Ok(());
         }
-        if let Some(cull) = face.cullface {
-            let [cx, cy, cz] = self.relative(cull.to_vector());
-            let (id, info) = block.neighbor(ctx, cx, cy, cz);
-            if info.props.culling || (info.props.culling_identical && id == block.id) {
-                return Ok(());
-            }
+
+        let [nx, ny, nz] = self.relative(dir.to_vector());
+        let (sky, block_light) = block.neighbor_light(ctx, nx, ny, nz);
+        let sun = block.sky.max(sky);
+        let block_light = block.block_light.max(block_light);
+        if block.culled_as_cave(ctx, sun, block_light) {
+            return Ok(());
         }
 
         out.reserve_faces(2)?;

@@ -47,7 +47,9 @@ impl<'r, 'a> Block<'r, 'a> {
         let (id, info) = ctx.state(x, y, z);
         let (sky, block_light) = ctx.view.light(x, y, z);
         let s = ctx.settings;
-        let remove_if_cave = y < s.remove_caves_below_y
+        // air renders nothing, so it never needs the heightmap read
+        let remove_if_cave = !info.is_air()
+            && y < s.remove_caves_below_y
             && ctx.view.ocean_floor_y(x, z).is_none_or(|floor| y < floor.wrapping_add(s.cave_detection_ocean_floor));
         Self { x, y, z, id, info, sky, block_light, remove_if_cave }
     }

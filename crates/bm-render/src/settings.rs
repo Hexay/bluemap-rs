@@ -11,6 +11,12 @@ pub trait RenderMask: Send + Sync {
     fn test_column(&self, _x: i32, _z: i32) -> bool {
         true
     }
+
+    /// `test(box)` over every y of the x/z rectangle: `Some(true)` wholly inside, `Some(false)` wholly outside,
+    /// `None` mixed or unknown. Lets a tile skip per-block mask tests.
+    fn test_area(&self, _min: [i32; 2], _max: [i32; 2]) -> Option<bool> {
+        None
+    }
 }
 
 #[derive(Clone)]

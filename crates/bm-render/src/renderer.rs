@@ -9,7 +9,7 @@ use bm_world::{BlockStates, ChunkArea, DimensionType};
 use crate::context::Ctx;
 use crate::settings::RenderSettings;
 use crate::states::StateCache;
-use crate::view::View;
+use crate::view::{Masking, View, Volume};
 use crate::{ColumnMeta, Error, block_pass, mesh};
 
 /// Shareable across threads; each thread brings its own [`TileBuffers`].
@@ -31,6 +31,7 @@ pub struct TileBuffers {
     /// True when the tile hit [`crate::MAX_FACES`] and was cut short, as BlueMap does.
     pub truncated: bool,
     unsorted: TileModel,
+    volume: Volume,
 }
 
 impl HiresRenderer<'_, '_> {
@@ -49,17 +50,20 @@ impl HiresRenderer<'_, '_> {
         }
         let (min_x, min_z) = grid.tile_min(tile);
         let max = [min_x + grid.size[0] - 1, min_z + grid.size[1] - 1];
+        let min = [min_x, min_z];
+        let masking = Masking::new(self.settings, self.dimension.has_skylight, min, max);
+        out.volume.fill(area, &masking, min, max);
         let ctx = Ctx {
             pack: self.pack,
             states: self.states,
             settings: self.settings,
             biomes: self.biomes,
-            view: View::new(area, self.settings, self.dimension.has_skylight),
+            view: View::new(area, masking, &out.volume),
         };
         out.unsorted.clear();
         out.columns.clear();
         // TODO: entity pass (`EntityRenderPass`); core ships no entity models, so BlueMap's output has none either
-        out.truncated = block_pass::render(&ctx, [min_x, min_z], max, &mut out.unsorted, &mut out.columns).is_err();
+        out.truncated = block_pass::render(&ctx, min, max, &mut out.unsorted, &mut out.columns).is_err();
         mesh::sort_by_material(&out.unsorted, &mut out.model);
         Ok(())
     }

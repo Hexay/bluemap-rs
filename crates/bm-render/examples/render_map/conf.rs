@@ -94,6 +94,18 @@ impl RenderMask for BoxMask {
         }
     }
 
+    fn test_area(&self, min: [i32; 2], max: [i32; 2]) -> Option<bool> {
+        for l in self.layers.iter().rev() {
+            let overlaps = l.min[0] <= max[0] && min[0] <= l.max[0] && l.min[2] <= max[1] && min[1] <= l.max[2];
+            if !overlaps {
+                continue;
+            }
+            let covers = l.min[0] <= min[0] && max[0] <= l.max[0] && l.min[2] <= min[1] && max[1] <= l.max[2];
+            return (covers && l.min[1] == i32::MIN && l.max[1] == i32::MAX).then_some(l.value);
+        }
+        Some(self.layers.is_empty())
+    }
+
     fn test_column(&self, x: i32, z: i32) -> bool {
         for l in self.layers.iter().rev() {
             if !(l.min[0] <= x && x <= l.max[0] && l.min[2] <= z && z <= l.max[2]) {

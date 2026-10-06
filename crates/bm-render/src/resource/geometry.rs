@@ -17,6 +17,9 @@ impl Renderer<'_, '_, '_> {
 
     /// `getRotationRelativeBlock`'s offset.
     pub(super) fn relative(&self, [x, y, z]: [i32; 3]) -> [i32; 3] {
+        if !self.v.variant.transformed {
+            return [x, y, z];
+        }
         let mut v = VectorM3f::default();
         v.set_i([x, y, z]);
         self.make_relative(&mut v);

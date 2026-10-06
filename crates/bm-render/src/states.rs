@@ -4,12 +4,12 @@
 use std::sync::Arc;
 
 use bm_math::Color;
+use bm_resources::ResourcePath;
 use bm_resources::blockstate::{RendererType, Variant, VariantSet, hash_to_float};
 use bm_resources::color::BlockProperties;
 use bm_resources::model::BakedModel;
 use bm_resources::resource_pack::ResourcePack;
 use bm_resources::texture::TextureGallery;
-use bm_resources::ResourcePath;
 use bm_world::{BlockState, BlockStates, StateId};
 
 /// Resolved `BlockProperties` (undefined reads as false).
@@ -145,12 +145,7 @@ impl<'a> StateCache<'a> {
             let parts = def.multipart.iter().flat_map(|m| &m.parts);
             sets.extend(parts.filter(|p| p.condition.matches(&state)).map(|s| self.set_info(s)));
         }
-        StateInfo {
-            props: pack.block_properties(&state).into(),
-            liquid_level: liquid_level(&state),
-            sets,
-            state,
-        }
+        StateInfo { props: pack.block_properties(&state).into(), liquid_level: liquid_level(&state), sets, state }
     }
 
     fn set_info(&self, set: &'a VariantSet) -> SetInfo<'a> {
@@ -160,7 +155,10 @@ impl<'a> StateCache<'a> {
     fn variant_info(&self, variant: &'a Variant) -> VariantInfo<'a> {
         let model = self.pack.model(&variant.model);
         let materials = model.map_or_else(Vec::new, |m| {
-            m.elements.iter().map(|e| e.faces.each_ref().map(|f| self.material(f.as_ref().and_then(|f| f.texture.as_ref())))).collect()
+            m.elements
+                .iter()
+                .map(|e| e.faces.each_ref().map(|f| self.material(f.as_ref().and_then(|f| f.texture.as_ref()))))
+                .collect()
         });
         let named = |name: &str| self.material(model.and_then(|m| m.textures.get(name)));
         VariantInfo {
