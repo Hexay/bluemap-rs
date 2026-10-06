@@ -2,6 +2,7 @@
 //! world and the map config's render settings. Shared by the `render_map` example and the golden test.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -140,12 +141,14 @@ impl Fixture {
         let (mut checked, mut bad) = (0, Vec::new());
         for c in rendered.iter().flat_map(|r| &r.columns) {
             let t = lowres.tile_of(c.x, c.z);
-            if !tiles.contains_key(&t) {
-                let png = self.golden.tile_bytes(1, t)?;
-                tiles.insert(t, LowresTile::decode_png(&png, size.map(|s| s as usize))?);
-            }
+            let tile = match tiles.entry(t) {
+                Entry::Occupied(e) => e.into_mut(),
+                Entry::Vacant(e) => {
+                    let png = self.golden.tile_bytes(1, t)?;
+                    e.insert(LowresTile::decode_png(&png, size.map(|s| s as usize))?)
+                }
+            };
             let (px, pz) = (c.x.rem_euclid(size[0]) as usize, c.z.rem_euclid(size[1]) as usize);
-            let tile = &tiles[&t];
             let mut color = c.color;
             let expected = (color.straight().get_int() as u32, sign_extend(c.height & 0xFFFF), c.block_light as u8);
             let actual = (tile.color(px, pz), tile.height(px, pz), tile.block_light(px, pz));

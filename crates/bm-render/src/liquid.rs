@@ -1,5 +1,7 @@
 //! `LiquidModelRenderer`: water and lava as a box with sloped top corners and flowing UVs.
 
+use std::cell::OnceCell;
+
 use bm_format::prbm::TileModel;
 use bm_java::trig::RAD_TO_DEG;
 use bm_math::{Color, MatrixM3f, VectorM2f};
@@ -57,7 +59,8 @@ impl Liquid<'_, '_, '_> {
             [16.0, top[2], 0.0],
             [16.0, top[3], 16.0],
         ];
-        let tint = ctx.tint(self.liquid, block.x, block.y, block.z);
+        // Java blends the tint up front; it only shows once a face survives culling, which most water doesn't
+        let tint = OnceCell::new();
 
         let start = out.faces();
         let mut face = |dir, k: [usize; 4]| self.face(dir, k.map(|k| c[k]), &tint, out);
@@ -72,7 +75,7 @@ impl Liquid<'_, '_, '_> {
         match self.v.still.color.filter(|_| up_rendered) {
             Some(texture) => {
                 *color = texture;
-                color.multiply(&tint);
+                color.multiply(self.tint(&tint));
                 let ambient = ctx.settings.ambient_light;
                 let light = f32::from(sun.max(block_light)) / 15.0;
                 let light = (ambient + light) / (ambient + 1.0);
@@ -86,6 +89,10 @@ impl Liquid<'_, '_, '_> {
             None => {}
         }
         Ok(())
+    }
+
+    fn tint<'c>(&self, cell: &'c OnceCell<Color>) -> &'c Color {
+        cell.get_or_init(|| self.ctx.tint(self.liquid, self.block.x, self.block.y, self.block.z))
     }
 
     fn same_liquid(&self, other: &StateInfo) -> bool {
@@ -133,7 +140,7 @@ impl Liquid<'_, '_, '_> {
         &self,
         dir: Direction,
         c: [[f32; 3]; 4],
-        tint: &Color,
+        tint: &OnceCell<Color>,
         out: &mut TileModel,
     ) -> Result<bool, CapacityReached> {
         let (ctx, block) = (self.ctx, self.block);
@@ -143,6 +150,7 @@ impl Liquid<'_, '_, '_> {
             return Ok(false);
         }
         out.reserve_faces(2)?;
+        let tint = self.tint(tint);
 
         let mut uvs =
             [VectorM2f::new(0.0, 1.0), VectorM2f::new(1.0, 1.0), VectorM2f::new(1.0, 0.0), VectorM2f::new(0.0, 0.0)];
