@@ -11,6 +11,7 @@ pub mod manifest;
 pub mod model;
 pub mod pack_meta;
 pub mod packs;
+pub mod resource_pack;
 pub mod texture;
 pub mod vfs;
 
