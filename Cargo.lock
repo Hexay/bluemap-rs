@@ -135,6 +135,16 @@ name = "bm-java"
 version = "0.1.0"
 
 [[package]]
+name = "bm-map"
+version = "0.1.0"
+dependencies = [
+ "bm-compress",
+ "bm-format",
+ "bm-nbt",
+ "thiserror",
+]
+
+[[package]]
 name = "bm-math"
 version = "0.1.0"
 dependencies = [
