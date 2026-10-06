@@ -9,11 +9,13 @@ description = "Resource and data pack loading: blockstates, models, textures, co
 
 [dependencies]
 bm-java.workspace = true
+bm-math.workspace = true
 bm-world.workspace = true
 rayon.workspace = true
 rustc-hash.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# variants resolve in file order, so JSON objects must keep it
+serde_json = { workspace = true, features = ["preserve_order"] }
 sha1.workspace = true
 thiserror.workspace = true
 ureq.workspace = true

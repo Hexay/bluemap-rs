@@ -1,6 +1,7 @@
 //! Resource and data pack loading: everything BlueMap reads from the Minecraft client jar, resource packs, mod jars
 //! and world datapacks to turn block states into models, textures and colours (docs/02-resources.md).
 
+pub mod blockstate;
 pub mod client_jar;
 pub mod json;
 pub mod key;
