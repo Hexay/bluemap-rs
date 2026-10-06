@@ -32,6 +32,8 @@ pub struct BakedModel {
     pub culling: bool,
     /// `Model.occluding`: some element is a full cube.
     pub occluding: bool,
+    /// Every texture variable that resolves, by name (the liquid renderer reads `still` and `flow`).
+    pub textures: HashMap<String, ResourcePath>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -86,6 +88,11 @@ pub(super) fn bake_model(
         ambient_occlusion: model.ambient_occlusion(),
         culling,
         occluding,
+        textures: model
+            .textures
+            .iter()
+            .filter_map(|(k, v)| v.resolve(&model.textures).map(|p| (k.clone(), p.clone())))
+            .collect(),
     }
 }
 
