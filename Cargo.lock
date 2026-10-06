@@ -142,6 +142,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bm-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "bm-format"
 version = "0.1.0"
 dependencies = [

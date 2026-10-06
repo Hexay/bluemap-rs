@@ -1,0 +1,1 @@
+ERROR: ParsingException: []@(line 3, col 0): null Reader: 3 ^ | Parse: Reader: 3: List should have ended with ] or had a comma, instead had token: ':' (if you want ':' to be part of a string value, then double-quote it) | 
