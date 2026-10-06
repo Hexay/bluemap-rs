@@ -1,0 +1,11 @@
+[package]
+name = "bm-nbt"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Zero-copy, lazy NBT reader for Minecraft chunk and level data"
+
+[dependencies]
+thiserror.workspace = true

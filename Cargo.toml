@@ -34,6 +34,7 @@ flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
 # lz4-java block framing only needs the raw block API; checked-decode turns malformed input into errors
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
 png = "0.18"
+rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -42,3 +43,5 @@ zstd = "0.13"
 bm-compress = { path = "crates/bm-compress" }
 bm-format = { path = "crates/bm-format" }
 bm-java = { path = "crates/bm-java" }
+bm-nbt = { path = "crates/bm-nbt" }
+bm-world = { path = "crates/bm-world" }
