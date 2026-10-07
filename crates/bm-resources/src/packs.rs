@@ -5,6 +5,7 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 
 use crate::pack_meta::{PackMeta, PackVersion};
@@ -72,11 +73,27 @@ fn java_path_cmp(a: &Path, b: &Path) -> Ordering {
     }
 }
 
+/// Pack roots opened so far, shared by several [`load_order_in`] calls: the client jar is both the resource and
+/// the data root, and every open reads and indexes the whole file.
+#[derive(Default)]
+pub struct OpenedRoots(FxHashMap<PathBuf, Option<Pack>>);
+
+impl OpenedRoots {
+    fn open(&mut self, path: &Path) -> Option<Pack> {
+        self.0.entry(path.to_owned()).or_insert_with(|| Pack::open(path).ok()).clone()
+    }
+}
+
 /// Every pack the roots expand to, in load order (see [`expand_root`]).
 pub fn load_order(roots: &[PathBuf], version: PackVersion) -> Vec<Pack> {
+    load_order_in(&mut OpenedRoots::default(), roots, version)
+}
+
+/// [`load_order`], reusing roots `opened` already holds.
+pub fn load_order_in(opened: &mut OpenedRoots, roots: &[PathBuf], version: PackVersion) -> Vec<Pack> {
     let mut out = Vec::new();
-    for root in roots {
-        out.extend(expand_root(root, version));
+    for pack in roots.iter().filter_map(|root| opened.open(root)) {
+        expand(&pack, version, 0, &mut out);
     }
     out
 }
@@ -85,11 +102,7 @@ pub fn load_order(roots: &[PathBuf], version: PackVersion) -> Vec<Pack> {
 /// jars, then nested datapacks (`data/*/datapacks/*`), then overlays in reverse entry order filtered by
 /// `version`, then the root itself. Unreadable parts are skipped, as upstream only logs them at debug level.
 pub fn expand_root(path: &Path, version: PackVersion) -> Vec<Pack> {
-    let mut out = Vec::new();
-    if let Ok(pack) = Pack::open(path) {
-        expand(&pack, version, 0, &mut out);
-    }
-    out
+    load_order(std::slice::from_ref(&path.to_owned()), version)
 }
 
 fn expand(pack: &Pack, version: PackVersion, depth: u32, out: &mut Vec<Pack>) {

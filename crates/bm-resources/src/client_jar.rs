@@ -52,9 +52,18 @@ impl PackVersions {
 
     /// Reads `version.json` from a client jar; a jar without one gets [`PackVersions::default`].
     pub fn read(jar: &Path) -> Result<Self> {
-        let pack = Pack::open(jar)?;
-        pack.read_string("version.json").map_or(Ok(Self::default()), |s| Self::parse_version_json(&s))
+        let json = if jar.is_dir() { Pack::open(jar)?.read_string("version.json") } else { zip_entry_string(jar, "version.json")? };
+        json.map_or(Ok(Self::default()), |s| Self::parse_version_json(&s))
     }
+}
+
+/// One entry of a zip on disk, reading only its directory and that entry (a client jar is ~40 MB).
+fn zip_entry_string(zip: &Path, name: &str) -> Result<Option<String>> {
+    let file = std::io::BufReader::new(std::fs::File::open(zip)?);
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| Error::Pack(format!("{}: {e}", zip.display())))?;
+    let Ok(mut entry) = archive.by_name(name) else { return Ok(None) };
+    let mut s = String::new();
+    Ok(std::io::Read::read_to_string(&mut entry, &mut s).ok().map(|_| s))
 }
 
 /// `<data>/minecraft-client-<id>.jar`, rejecting ids that could leave the data folder.

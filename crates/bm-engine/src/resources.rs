@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use bm_config::BlueMapConfig;
 use bm_resources::datapack::DataPack;
-use bm_resources::packs::{PackRootsConfig, load_order, pack_roots};
+use bm_resources::packs::{OpenedRoots, PackRootsConfig, load_order, load_order_in, pack_roots};
 use bm_resources::resource_pack::ResourcePack;
 use bm_resources::{MinecraftVersion, Pack};
 use bm_world::{Biomes, BlockStates};
@@ -54,9 +54,11 @@ impl Resources {
             resource_extensions: write_resource_extensions(data)?,
         };
         let resource_roots = pack_roots(&roots, &[], &minecraft.resource_pack).map_err(io("list packs in", data))?;
-        let resource_packs = load_order(&resource_roots, minecraft.resource_pack_version);
+        let mut opened = OpenedRoots::default();
+        let resource_packs = load_order_in(&mut opened, &resource_roots, minecraft.resource_pack_version);
         let data_roots = pack_roots(&roots, &[], &minecraft.data_pack).map_err(io("list packs in", data))?;
-        let pack = ResourcePack::load(&resource_packs, &load_order(&data_roots, minecraft.data_pack_version));
+        let data_packs = load_order_in(&mut opened, &data_roots, minecraft.data_pack_version);
+        let pack = ResourcePack::load(&resource_packs, &data_packs);
 
         let states = Arc::new(BlockStates::default());
         load_default_states(&states, &resource_packs);
