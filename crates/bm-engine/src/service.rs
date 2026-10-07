@@ -68,6 +68,11 @@ impl Service {
         Ok(self.storages.get(&self.config, &map.storage)?.map(id)?)
     }
 
+    /// Storage `id`, opened on first use (`getOrLoadStorage`).
+    pub fn storage(&self, id: &str) -> Result<std::sync::Arc<dyn bm_storage::Storage>> {
+        self.storages.get(&self.config, id)
+    }
+
     /// Converts storage `id` in place between compat and optimized; nothing else may use it meanwhile.
     pub fn convert_storage(
         &self,

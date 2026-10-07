@@ -2,8 +2,12 @@
 //! sender's permission node and the loaded state, run, and stream text components back.
 
 mod actions;
+mod checks;
+mod debug;
 mod info;
 pub mod parse;
+mod storages;
+mod troubleshoot;
 
 use bm_ipc::{CommandSender, CoreMsg};
 use serde_json::Value;
@@ -41,6 +45,13 @@ fn run(core: &Core, input: &str, sender: &CommandSender, say: Say) -> i32 {
     if matches!(m.usage, "reload" | "reload light") {
         return actions::reload(core, m.usage == "reload light", say);
     }
+    if m.usage == "debug dump" {
+        return debug::dump(core, say);
+    }
+    if !has_context(m.usage, sender) {
+        say(text::one("Unknown or incomplete command!", NEGATIVE));
+        return 0;
+    }
     let Some(s) = session.filter(|s| s.is_loaded() && !core.is_loading()) else {
         say(not_loaded(core));
         return 0;
@@ -58,16 +69,33 @@ fn dispatch(core: &Core, s: &Session, m: &Matched, sender: &CommandSender, say: 
         "maps" => info::maps(s, say),
         "tasks" if usage == "tasks" => info::tasks(s, say),
         "tasks" => actions::cancel_tasks(s, m.get("task-ref"), say),
-        "storages" if usage == "storages" => info::storages(s, say),
+        "storages" if usage == "storages" => storages::list(s, say),
+        "storages" if usage.ends_with("delete <map>") => {
+            storages::delete(s, m.get("storage").unwrap_or_default(), m.get("map").unwrap_or_default(), say)
+        }
+        "storages" => storages::show(s, m.get("storage").unwrap_or_default(), say),
+        "troubleshoot" => troubleshoot::command(core, s, m, sender, say),
+        "debug" if usage.starts_with("debug world") => debug::world(s, m, sender, say),
+        "debug" => debug::map(s, m, sender, say),
         "start" | "stop" => actions::start_stop(core, s, first == "start", say),
         "freeze" | "unfreeze" => actions::freeze(core, s, m.get("map").unwrap_or_default(), first == "freeze", say),
         "purge" => actions::purge(s, m.get("map").unwrap_or_default(), say),
         "update" | "fix-edges" | "force-update" => actions::update(core, s, m, sender, say),
         _ => {
-            say(text::one("This command is not supported by bluemap-rs yet.", NEGATIVE));
+            say(text::one("Unknown or incomplete command!", NEGATIVE));
             0
         }
     }
+}
+
+/// `@WithWorld`/`@WithPosition` usages only exist for senders in a world (players).
+fn has_context(usage: &str, sender: &CommandSender) -> bool {
+    let (world, position) = match usage {
+        "debug world" | "debug map" | "debug map <map>" => (true, true),
+        "debug world <x> <y> <z>" | "debug map <x> <z>" => (true, false),
+        _ => (false, false),
+    };
+    (!world || sender.world.is_some()) && (!position || sender.position.is_some())
 }
 
 /// `Commands.checkPluginLoaded`.
