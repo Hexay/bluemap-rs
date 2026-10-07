@@ -1,13 +1,16 @@
 //! A map update (`MapUpdatePreparationTask` → `MapUpdateTask` of `WorldRegionUpdateTask`s, or just some regions'
-//! tasks): regions one after another, each region's tiles in parallel; render state and lowres are persisted off
-//! the render threads.
+//! tasks): regions in plan order, each region's tiles in parallel while the next region is prepared; render state
+//! and lowres are persisted off the render threads.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bm_map::renderstate::{
     Action, CellIo, MapChunkState, MapRegionState, MapTileState, TileInfo, TileUpdateStrategy,
 };
+use bm_format::grid::Tile;
 use bm_render::StateCache;
 use bm_world::ChunkArea;
 use rustc_hash::FxHashSet;
@@ -18,7 +21,7 @@ use crate::io::QueuedCells;
 use crate::map::MapContext;
 use crate::persist::{LowresSettings, Persister};
 use crate::plan::{Plan, REGION_GRID};
-use crate::render::{Outcome, RegionRender};
+use crate::render::{Outcome, RegionRender, TileResult};
 use crate::resources::Resources;
 use crate::task::Regions;
 
@@ -89,6 +92,9 @@ pub fn update_map(
     Ok(stats)
 }
 
+/// Regions are prepared (tile jobs, chunk area) on this thread while the previous region still renders, so the
+/// pool never drains at a region boundary. Overlap is safe: a region's owned tiles lie in no earlier region, so
+/// its jobs don't depend on the render state an earlier region records, and no two regions share a lowres pixel.
 fn run(
     ctx: &MapContext,
     resources: &Resources,
@@ -101,54 +107,109 @@ fn run(
         States { tiles: MapTileState::new(cells()), chunks: MapChunkState::new(cells()), regions: MapRegionState::new(cells()) };
     let mut stats = UpdateStats::default();
 
-    let Some(mut plan) = plan(ctx, job.regions, &mut states.regions, on_event)? else { return Ok(stats) };
+    let Some(plan) = plan(ctx, job.regions, &mut states.regions, on_event)? else { return Ok(stats) };
     stats.regions = plan.regions.len();
-    let mut cache = StateCache::new(&resources.pack, &ctx.gallery, &resources.states);
-    let mut last_save = Instant::now();
-    for region in plan.regions.clone() {
-        if job.cancel.load(Ordering::Relaxed) {
-            stats.cancelled = true;
-            break;
-        }
-        let headers = Headers::load(&ctx.world, &plan, region);
-        if headers.region(region).is_none() {
-            // like a cancelled region task: no tiles, no render state written
-            on_event(UpdateEvent::Warning(format!("Failed to load chunks for region {region:?}")));
-            continue;
-        }
-        let jobs = tile_jobs(ctx, &plan, region, &headers, &mut states.tiles, &mut states.chunks, job.strategy);
-        if !jobs.is_empty() {
-            let area = load_area(ctx, &jobs);
-            cache.update(&resources.states);
-            let render = RegionRender { ctx, resources, cache: &cache, area: &area, queue: &persister.queue };
-            let now = unix_now();
-            for r in render.run(&jobs) {
-                states.tiles.set(r.tile.0, r.tile.1, TileInfo { render_time: now, state: r.state });
-                match (r.error, r.outcome) {
-                    (Some(e), _) => {
-                        stats.tile_errors += 1;
-                        on_event(UpdateEvent::Warning(format!("Error while processing map-tile for map '{}': {e}", ctx.id)));
-                    }
-                    (None, Outcome::Rendered) => stats.tiles_rendered += 1,
-                    (None, Outcome::Skipped) => stats.tiles_skipped += 1,
-                    (None, Outcome::Deleted) => stats.tiles_deleted += 1,
+    let mut cache = Arc::new(StateCache::new(&resources.pack, &ctx.gallery, &resources.states));
+    let mut done = Done { ctx, persister, states, plan, stats, last_save: Instant::now(), on_event };
+    std::thread::scope(|s| -> Result<()> {
+        let mut in_flight: Option<InFlight> = None;
+        for region in done.plan.regions.clone() {
+            if job.cancel.load(Ordering::Relaxed) {
+                done.stats.cancelled = true;
+                break;
+            }
+            let headers = Headers::load(&ctx.world, &done.plan, region);
+            let jobs = match headers.region(region) {
+                Some(_) => {
+                    let States { tiles, chunks, .. } = &mut done.states;
+                    tile_jobs(ctx, &done.plan, region, &headers, tiles, chunks, job.strategy)
                 }
+                None => Vec::new(),
+            };
+            let area = (!jobs.is_empty()).then(|| (load_area(ctx, &jobs), resources.states.snapshot()));
+            if area.as_ref().is_some_and(|(_, registry)| registry.len() > cache.len()) {
+                // the in-flight render reads the cache, so it has to end before new states are resolved
+                if let Some(prev) = in_flight.take() {
+                    done.finish(prev)?;
+                }
+                Arc::get_mut(&mut cache).expect("no render in flight").update(&resources.states);
+            }
+            let started = unix_now();
+            let render = area.map(|(area, registry)| {
+                let (cache, queue) = (cache.clone(), &persister.queue);
+                s.spawn(move || {
+                    RegionRender { ctx, resources, cache: &cache, area: &area, registry: &registry, queue }.run(&jobs)
+                })
+            });
+            if let Some(prev) = in_flight.replace(InFlight { region, headers, started, render }) {
+                done.finish(prev)?;
             }
         }
-        complete_region(ctx, region, &headers, &mut states.chunks, &mut states.regions, unix_now());
-        let finished = plan.complete(region);
+        in_flight.map_or(Ok(()), |last| done.finish(last))
+    })?;
+    done.states.save(done.on_event)?;
+    Ok(done.stats)
+}
+
+/// A region whose tile jobs are planned; `render` is `None` when it has none.
+struct InFlight<'s> {
+    region: Tile,
+    headers: Headers,
+    started: i32,
+    render: Option<ScopedJoinHandle<'s, Vec<TileResult>>>,
+}
+
+/// Bookkeeping of finished regions, in plan order.
+struct Done<'a, S: CellIo> {
+    ctx: &'a MapContext,
+    persister: &'a Persister,
+    states: States<S>,
+    plan: Plan,
+    stats: UpdateStats,
+    last_save: Instant,
+    on_event: &'a mut dyn FnMut(UpdateEvent),
+}
+
+impl<S: CellIo> Done<'_, S> {
+    /// Waits for the region's render, then records its tiles, chunks and lowres flushes.
+    fn finish(&mut self, f: InFlight) -> Result<()> {
+        let results = match f.render {
+            Some(handle) => handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            None => Vec::new(),
+        };
+        let (ctx, region) = (self.ctx, f.region);
+        if f.headers.region(region).is_none() {
+            // like a cancelled region task: no tiles, no render state written
+            (self.on_event)(UpdateEvent::Warning(format!("Failed to load chunks for region {region:?}")));
+            return Ok(());
+        }
+        for r in results {
+            self.states.tiles.set(r.tile.0, r.tile.1, TileInfo { render_time: f.started, state: r.state });
+            match (r.error, r.outcome) {
+                (Some(e), _) => {
+                    self.stats.tile_errors += 1;
+                    let msg = format!("Error while processing map-tile for map '{}': {e}", ctx.id);
+                    (self.on_event)(UpdateEvent::Warning(msg));
+                }
+                (None, Outcome::Rendered) => self.stats.tiles_rendered += 1,
+                (None, Outcome::Skipped) => self.stats.tiles_skipped += 1,
+                (None, Outcome::Deleted) => self.stats.tiles_deleted += 1,
+            }
+        }
+        let States { chunks, regions, .. } = &mut self.states;
+        complete_region(ctx, region, &f.headers, chunks, regions, unix_now());
+        let finished = self.plan.complete(region);
         if !finished.is_empty() {
-            send_flush(persister, finished)?;
+            send_flush(self.persister, finished)?;
         }
-        if last_save.elapsed() >= SAVE_INTERVAL {
-            states.save(on_event)?;
-            last_save = Instant::now();
+        if self.last_save.elapsed() >= SAVE_INTERVAL {
+            self.states.save(self.on_event)?;
+            self.last_save = Instant::now();
         }
-        stats.regions_done += 1;
-        on_event(UpdateEvent::Progress(&stats));
+        self.stats.regions_done += 1;
+        (self.on_event)(UpdateEvent::Progress(&self.stats));
+        Ok(())
     }
-    states.save(on_event)?;
-    Ok(stats)
 }
 
 /// The planned regions, or `None` when there are none; for a full update that is warned about and nothing is
