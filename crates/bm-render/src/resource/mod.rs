@@ -96,12 +96,10 @@ impl Renderer<'_, '_, '_> {
         let (ctx, block) = (self.ctx, self.block);
 
         // Java tests light and caves first; every test is side-effect free, so the cheapest goes first
-        if let Some(cull) = face.cullface {
-            let id = block.neighbor_id(ctx, self.v.relative.get(cull.to_vector()));
-            let flags = ctx.states.flags(id);
-            if flags.culling() || (flags.culling_identical() && id == block.id) {
-                return Ok(());
-            }
+        if let Some(cull) = face.cullface
+            && ctx.states.culls(block.neighbor_id(ctx, self.v.relative.get(cull.to_vector())), block.id)
+        {
+            return Ok(());
         }
         let mut facing = VectorM3f::default();
         facing.set_i(dir.to_vector());

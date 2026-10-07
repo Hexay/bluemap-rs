@@ -12,7 +12,7 @@ use bm_resources::resource_pack::ResourcePack;
 use bm_resources::texture::TextureGallery;
 use bm_world::{BlockState, BlockStates, StateId};
 
-use crate::relative::RelativeOffsets;
+use crate::relative::{Offset, RelativeOffsets};
 
 /// Resolved `BlockProperties` (undefined reads as false).
 #[derive(Clone, Copy, Debug, Default)]
@@ -91,6 +91,9 @@ pub struct StateInfo<'a> {
     air: bool,
     water: bool,
     renders_water: bool,
+    /// When every face of every variant has a cullface within one block: the [`Offset::slot`]s those test, as bits.
+    /// If all of them cull, the block renders nothing at all (no faces, no colour).
+    pub(crate) cullfaces: Option<u32>,
 }
 
 impl StateInfo<'_> {
@@ -189,6 +192,12 @@ impl<'a> StateCache<'a> {
         self.flags[id.0 as usize]
     }
 
+    /// Whether `neighbor` culls a face of `own` it covers.
+    pub(crate) fn culls(&self, neighbor: StateId, own: StateId) -> bool {
+        let flags = self.flags(neighbor);
+        flags.culling() || (flags.culling_identical() && neighbor == own)
+    }
+
     fn resolve(&self, state: Arc<BlockState>) -> StateInfo<'a> {
         let pack = self.pack;
         let mut sets = Vec::new();
@@ -199,10 +208,12 @@ impl<'a> StateCache<'a> {
             sets.extend(parts.filter(|p| p.condition.matches(&state)).map(|s| self.set_info(s)));
         }
         let props: Props = pack.block_properties(&state).into();
+        let renders_water = state.waterlogged || props.always_waterlogged;
         StateInfo {
             air: state.is_air,
             water: state.is_water,
-            renders_water: state.waterlogged || props.always_waterlogged,
+            renders_water,
+            cullfaces: if renders_water { None } else { cullfaces(&sets) },
             props,
             liquid_level: liquid_level(&state),
             sets,
@@ -250,6 +261,26 @@ impl<'a> StateCache<'a> {
             color: path.and_then(|p| self.pack.textures.get(p)).map(|t| t.color_premultiplied()),
         }
     }
+}
+
+/// [`StateInfo::cullfaces`] of a state's sets: `None` if a liquid variant or a face without an in-range cullface
+/// could render regardless of the neighbours.
+fn cullfaces(sets: &[SetInfo]) -> Option<u32> {
+    let mut slots = 0u32;
+    for v in sets.iter().flat_map(|s| &s.variants) {
+        if v.renderer == RendererType::Liquid {
+            return None;
+        }
+        let faces = v.model.iter().flat_map(|m| &m.elements).flat_map(|e| e.faces.iter().flatten());
+        for face in faces {
+            let slot = v.relative.get(face.cullface?.to_vector()).slot;
+            if slot == Offset::FAR {
+                return None;
+            }
+            slots |= 1 << slot;
+        }
+    }
+    Some(slots)
 }
 
 /// `level` clamped to 0..=15; absent or unparseable is 0.

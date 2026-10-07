@@ -43,6 +43,12 @@ pub(crate) fn render(
                         light_under(ctx.view.light_at(i).1, &column_color);
                         continue;
                     }
+                    // the same for buried blocks: every cullface culled means no faces and no colour
+                    if let Some(i) = index.filter(|&i| fully_culled(ctx, i)) {
+                        debug_assert!(renders_nothing(ctx, &Block::new(ctx, x, y, z, index)));
+                        light_under(ctx.view.light_at(i).1, &column_color);
+                        continue;
+                    }
                     let block = Block::new(ctx, x, y, z, index);
                     let start = out.faces();
                     render_block(ctx, &block, out, &mut block_color)?;
@@ -64,6 +70,26 @@ pub(crate) fn render(
         }
     }
     Ok(())
+}
+
+/// Whether the interior block at volume index `i` has only cullfaces, all of them culled ([`StateInfo::cullfaces`]).
+fn fully_culled(ctx: &Ctx, i: usize) -> bool {
+    let id = ctx.view.state_at(i);
+    let Some(mut slots) = ctx.states.get(id).cullfaces else { return false };
+    while slots != 0 {
+        let slot = slots.trailing_zeros() as u8;
+        slots &= slots - 1;
+        if !ctx.states.culls(ctx.view.state_at(ctx.view.step(i, slot)), id) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The full render of a block [`fully_culled`] skips, for debug builds to check it adds nothing.
+fn renders_nothing(ctx: &Ctx, block: &Block) -> bool {
+    let (mut out, mut color) = (TileModel::default(), Color::default());
+    render_block(ctx, block, &mut out, &mut color).is_ok() && out.faces() == 0 && color.a == 0.0
 }
 
 /// `BlockStateModelRenderer.render`: the block's variants, then water if it's waterlogged.
