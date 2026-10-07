@@ -1,0 +1,186 @@
+"""End-to-end test of the Paper plugin (docs/13) on a real Paper 26.3 server, plus an optional comparison run with
+upstream BlueMap 5.28 on a copy of the same world.
+
+    py -3 tools/e2e_paper.py [--skip-build] [--keep] [--no-upstream]
+
+Builds the core (release) and the plugin jars, starts Paper with our jar + BlueBorder (marker addon) + server-side
+bots, then checks: the core becomes ready, `/bluemap` commands answer on the console, the webserver serves the
+webapp and a rendered tile, `live/players.json` lists a bot, BlueBorder's markers reach `live/markers.json`,
+`/bluemap reload` works, a killed core is respawned, and stopping the server leaves no core process. Results and
+captured files go to work/e2e-paper/out/.
+"""
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from paper_server import E2E, Paper, fetch, get, json_get, kill, pid_alive, poll, prepare, rss_mib
+from paths import EXE, ROOT, WINDOWS
+
+PLATFORM = ROOT / "platforms" / "paper"
+TARGET = "windows-x64" if WINDOWS else "linux-x64"
+OUT = E2E / "out"
+RESULTS: list[tuple[str, bool, str]] = []
+
+
+def check(name: str, ok, detail: str = "") -> bool:
+    RESULTS.append((name, bool(ok), detail))
+    print(f"[{'PASS' if ok else 'FAIL'}] {name} {detail}", flush=True)
+    return bool(ok)
+
+
+def build() -> Path:
+    subprocess.run(["cargo", "build", "--release", "-p", "bm-cli"], cwd=ROOT, check=True)
+    native = PLATFORM / "natives" / TARGET / f"bluemap-core{EXE}"
+    native.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "target" / "release" / f"bluemap{EXE}", native)
+    gradlew = PLATFORM / ("gradlew.bat" if WINDOWS else "gradlew")
+    subprocess.run([str(gradlew), "build", "--no-daemon", "--console=plain", "-q", "-Dorg.gradle.jvmargs=-Xmx1g"],
+                   cwd=PLATFORM, check=True)
+    return plugin_jar()
+
+
+def plugin_jar() -> Path:
+    jars = sorted((PLATFORM / "build" / "libs").glob(f"*-{TARGET}.jar"))
+    if not jars:
+        sys.exit(f"no {TARGET} plugin jar in {PLATFORM / 'build' / 'libs'}; run without --skip-build")
+    return jars[-1]
+
+
+def core_pid(server: Path) -> int | None:
+    try:
+        return int((server / "plugins" / "BlueMap" / ".core.pid").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def first_map() -> str | None:
+    settings = json_get("settings.json")
+    return settings["maps"][0] if settings and settings.get("maps") else None
+
+
+def save(name: str, data: bytes) -> None:
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / name).write_bytes(data)
+
+
+def run_ours(jar: Path, fresh: bool) -> Path:
+    folder = E2E / "rs"
+    prepare(folder, [jar, fetch("blueborder"), fetch("bots")], fresh)
+    server = Paper(folder)
+    try:
+        server.wait_for(r"\[BlueMap\].*Loaded!", 600)
+        check("core ready", True, f"{time.monotonic() - server.started:.1f}s after JVM start")
+        jar_mib = jar.stat().st_size / 2**20
+        check("plugin jar", True, f"{jar.name} {jar_mib:.1f} MiB")
+        server.wait_for(r"Done \(", 300)
+
+        server.command("bluemap", r"BlueMap Status|render-threads", 30)
+        check("/bluemap status", True)
+        server.command("bluemap maps", r"BlueMap Maps", 30)
+        check("/bluemap maps", True)
+
+        status, index = get("index.html")
+        check("webserver serves webapp", status == 200 and b"<html" in index.lower(), f"HTTP {status}")
+        map_id = poll(first_map, 30)
+        check("settings.json lists maps", map_id, str(map_id))
+
+        players = poll(lambda: json_get(f"maps/{map_id}/live/players.json"), 15)
+        check("players.json (no players)", players == {"players": []}, json.dumps(players))
+        save("rs-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
+
+        markers = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m and m, 60)
+        check("BlueBorder markers in markers.json", markers, str(list(markers or {})))
+        save("rs-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+
+        tile = poll(lambda: get(f"maps/{map_id}/tiles/1/x0/z0.png")[0] == 200, 600, 5)
+        check("map renders (lowres tile 1/x0/z0)", tile)
+        hires = get(f"maps/{map_id}/tiles/0/x0/z0.prbm")[0]
+        check("hires tile served", hires == 200, f"HTTP {hires}")
+
+        server.send("start 1 none")
+        bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
+        check("players.json shows a bot", bot, json.dumps(bot)[:200] if bot else "")
+        save("rs-players-bot.json", get(f"maps/{map_id}/live/players.json")[1])
+        server.send("stress stop")
+
+        pid = core_pid(folder)
+        rss = rss_mib(pid) if pid else None
+        check("core RSS", rss is not None, f"{rss:.0f} MiB" if rss else "")
+
+        server.command("bluemap reload", r"BlueMap reloaded!", 300)
+        check("/bluemap reload", True)
+        again = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
+        check("markers back after reload", again)
+
+        old = core_pid(folder)
+        kill(old)
+        new = poll(lambda: (p := core_pid(folder)) and p != old and pid_alive(p) and p, 60)
+        check("killed core respawns", new, f"pid {old} -> {new}")
+        back = poll(lambda: get("index.html")[0] == 200, 120)
+        check("webserver back after respawn", back)
+        check("markers after respawn",
+              poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 90))
+    finally:
+        last = core_pid(folder)
+        code = server.stop()
+        check("server stopped", code == 0, f"exit {code}")
+        if last:
+            check("no orphan core process", poll(lambda: not pid_alive(last), 30), f"pid {last}")
+    return folder
+
+
+def run_upstream(world: Path) -> None:
+    folder = E2E / "upstream"
+    prepare(folder, [fetch("upstream"), fetch("blueborder")], True, world_from=world)
+    server = Paper(folder)
+    try:
+        server.wait_for(r"\[BlueMap\].*Loaded!", 600)
+        server.wait_for(r"Done \(", 300)
+        map_id = poll(first_map, 30)
+        save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
+        poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
+        save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+    finally:
+        server.stop()
+    for name in ["players-empty.json", "markers.json"]:
+        ours, theirs = (OUT / f"rs-{name}").read_bytes(), (OUT / f"upstream-{name}").read_bytes()
+        check(f"{name} byte-identical to upstream", ours == theirs, f"{len(ours)} vs {len(theirs)} B")
+    compare_configs(E2E / "rs" / "plugins" / "BlueMap", folder / "plugins" / "BlueMap")
+
+
+def compare_configs(ours: Path, theirs: Path) -> None:
+    for path in sorted(theirs.rglob("*.conf")):
+        rel = path.relative_to(theirs)
+        mine = ours / rel
+        if not mine.is_file():
+            check(f"config {rel} generated", False)
+            continue
+        strip = lambda p: [l for l in p.read_text(encoding="utf-8").splitlines() if not l.startswith("# 20")]
+        same = strip(mine) == strip(path)
+        check(f"config {rel} identical", same)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--skip-build", action="store_true")
+    ap.add_argument("--keep", action="store_true", help="reuse the server folder (world, configs) of the last run")
+    ap.add_argument("--no-upstream", action="store_true")
+    args = ap.parse_args()
+    jar = plugin_jar() if args.skip_build else build()
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    folder = run_ours(jar, fresh=not args.keep)
+    if not args.no_upstream:
+        run_upstream(folder / "world")
+    failed = [r for r in RESULTS if not r[1]]
+    print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
+    (OUT / "results.json").write_text(json.dumps(RESULTS, indent=1))
+    sys.exit(1 if failed else 0)
+
+
+if __name__ == "__main__":
+    main()

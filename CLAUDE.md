@@ -33,7 +33,10 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - `bm-engine` — render pipeline (`Service`, `MapContext`, `update_map`): region tasks, tile actions, persistence
   thread for lowres + rstate; each region-boundary tile rendered once (crate docs); `-u` render queue + region
   watcher (`task`, `queue`, `runner`, `watch/`)
-- `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes/log format; `-u`, `--markers`, `--convert-storage`
+- `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes/log format; `-u`, `--markers`, `--convert-storage`;
+  hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`)
+- `bm-ipc` — shim↔core wire protocol (stdin/stdout frames, JSON headers); crate docs are the canonical spec
+- `platforms/paper` — Java shim (Gradle, Java 21, BlueMapAPI 2.8.1 proxy); bundles the core from `natives/<target>/`
 - `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` / `compare-webroots` CLI
 
 ## Commands
@@ -44,6 +47,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
 - Acceptance (our CLI on Java's fixture configs, webroot vs Java's, incremental, drop-in): `py -3 tools/accept.py`
   (`--watch <fx>` for `-u`); optimized storage: `py -3 tools/accept_optimized.py`
+- Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots, upstream compare): `py -3 tools/e2e_paper.py`
 
 ## Gotchas
 
