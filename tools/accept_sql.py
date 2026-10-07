@@ -4,8 +4,9 @@
             Java's `-r` over it starts no work; both implementations create the same schema.
   optimized we render `format: optimized`, re-render nothing, serve, convert to compat (Java serves it) and back.
 
-Usage: py -3 tools/accept_sql.py [--servers mariadb postgres] [--fixture vanilla] [--no-build]
-Output: work/accept/<fx>-sql-<server>-*/ (fresh each run). Exit 1 if any check fails.
+Usage: py -3 tools/accept_sql.py [--servers mariadb mysql postgres] [--fixture vanilla] [--no-build]
+Output: work/accept/<fx>-sql-<server>-*/ (fresh each run). Exit 1 if any check fails; a hung or failed command
+aborts only its step.
 """
 import argparse
 import gzip
@@ -244,7 +245,7 @@ FIXTURE = "vanilla"
 def main() -> None:
     global FIXTURE
     ap = argparse.ArgumentParser()
-    ap.add_argument("--servers", nargs="*", default=["mariadb", "postgres"])
+    ap.add_argument("--servers", nargs="*", default=["mariadb", "mysql", "postgres"])
     ap.add_argument("--fixture", default=FIXTURE)
     ap.add_argument("--no-build", action="store_true")
     args = ap.parse_args()
@@ -256,9 +257,13 @@ def main() -> None:
         s = dbs.SERVERS[name]
         dbs.start(s)
         ports = (18200 + 2 * i, 18201 + 2 * i)
-        java_to_rs(s, failures, ports)
-        rs_to_java(s, failures, ports)
-        optimized(s, failures, ports)
+        for step in (java_to_rs, rs_to_java, optimized):
+            # a hang or crash aborts this step only: the other steps and servers still run and report
+            try:
+                step(s, failures, ports)
+            except SystemExit as e:
+                print(f"  ABORT {name}: {step.__name__}: {e.code}", flush=True)
+                failures.append(f"{name}: {step.__name__} aborted: {str(e.code).splitlines()[0]}")
     print(f"\n{len(failures)} failed" + "".join(f"\n  {f}" for f in failures))
     sys.exit(1 if failures else 0)
 
