@@ -15,5 +15,9 @@ thiserror.workspace = true
 tokio.workspace = true
 twox-hash.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# the file id for stored-file versions (std's `MetadataExt::file_index` is unstable)
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 tempfile.workspace = true

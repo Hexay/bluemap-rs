@@ -1,7 +1,9 @@
 //! Serves an existing BlueMap webroot (every `maps/<id>` as gzip file storage) for load tests and profiling.
 //!
 //! `cargo run -p bm-web --profile profiling --example serve_bench -- <webroot> [--port 8100] [--live] [--log <file>]
-//! [--exit-after <secs>]`
+//! [--exit-after <secs>] [--etags] [--optimized]`
+//!
+//! `--etags` sends map-data ETags; `--optimized` opens the maps as an optimized storage (convert a copy first).
 //!
 //! A counting global allocator tracks allocations; send `stats` on stdin to print and reset them as one JSON line.
 //! `--live` registers players/markers/SSE on every map and pushes a fresh players.json every second.
@@ -13,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
-use bm_storage::{Compression, FileStorage, Storage};
+use bm_storage::{Compression, FileStorage, Format, Storage};
 use bm_web::{AccessLog, FileSink, LiveMap, LogSink, MapRoute, WebApp, WebOptions, WebServer};
 
 struct Counting;
@@ -94,22 +96,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let webroot = PathBuf::from(args.next().ok_or("usage: serve_bench <webroot> …")?);
     let (mut port, mut live, mut log, mut exit_after) = (8100, false, None::<String>, None::<u64>);
+    let (mut etags, mut format) = (false, Format::Compat);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--port" => port = args.next().unwrap_or_default().parse()?,
             "--exit-after" => exit_after = Some(args.next().unwrap_or_default().parse()?),
             "--live" => live = true,
+            "--etags" => etags = true,
+            "--optimized" => format = Format::Optimized,
             "--log" => log = args.next(),
             other => return Err(format!("unknown arg {other}").into()),
         }
     }
     let mut options = WebOptions::new(&webroot);
+    options.map_etags = etags;
     if let Some(file) = log {
         let sinks: Vec<Box<dyn LogSink>> = vec![Box::new(FileSink::open(&file, false)?)];
         options.access_log = AccessLog::new("%1$s \"%3$s %4$s %5$s\" %6$s %7$s", sinks)?;
     }
     let mut app = WebApp::new(options)?;
-    let storage = FileStorage::new(webroot.join("maps"), Compression::Gzip).read_only(true);
+    let storage = FileStorage::open(webroot.join("maps"), Compression::Gzip, format, true)?;
     let mut lives = Vec::new();
     for entry in std::fs::read_dir(webroot.join("maps"))? {
         let id = entry?.file_name().to_string_lossy().into_owned();

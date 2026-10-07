@@ -3,15 +3,17 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use bm_storage::{GridKey, ItemKey, MapStorage, Stored};
-use http::header::{CONTENT_ENCODING, CONTENT_TYPE};
-use http::{HeaderMap, HeaderValue, Response, StatusCode};
+use bm_storage::{GridKey, ItemKey, MapStorage};
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE, ETAG, VARY};
+use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::sync::CancellationToken;
 
 use crate::content_type;
-use crate::encoding::{Accepted, encode};
+use crate::encoding::Accepted;
 use crate::live::LiveMap;
+use crate::map_data::{self, Reply, Target};
 use crate::response::{empty, header_static};
+use crate::validators::IfNoneMatch;
 
 /// One served map: its storage and, when the app provides live data, its [`LiveMap`].
 #[derive(Clone)]
@@ -25,7 +27,9 @@ const NO_STORE: [&str; 4] = ["Cache-Control", "Cloudflare-CDN-Cache-Control", "C
 pub(crate) async fn handle(
     route: &MapRoute,
     path: &str,
+    method: &Method,
     headers: &HeaderMap,
+    etags: bool,
     shutdown: &CancellationToken,
 ) -> Response<Body> {
     if let Some(live) = &route.live {
@@ -36,7 +40,7 @@ pub(crate) async fn handle(
             _ => {}
         }
     }
-    storage(route.storage.clone(), path, Accepted::from_headers(headers)).await
+    storage(route, path, method, headers, etags).await
 }
 
 fn live_json(body: Option<bytes::Bytes>) -> Response<Body> {
@@ -61,12 +65,7 @@ fn no_store(res: &mut Response<Body>) {
     }
 }
 
-enum Target {
-    Tile(GridKey, i32, i32),
-    Item(ItemKey),
-}
-
-async fn storage(storage: Arc<dyn MapStorage>, path: &str, accepted: Accepted) -> Response<Body> {
+async fn storage(route: &MapRoute, path: &str, method: &Method, headers: &HeaderMap, etags: bool) -> Response<Body> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let path = path.strip_suffix('/').unwrap_or(path);
     let (path, gz_url) = match path.strip_suffix(".gz") {
@@ -74,7 +73,7 @@ async fn storage(storage: Arc<dyn MapStorage>, path: &str, accepted: Accepted) -
         None => (path, false),
     };
     let target = match parse_tile(path) {
-        Some(Ok((lod, x, z))) => Target::Tile(if lod == 0 { GridKey::Hires } else { GridKey::Lowres(lod) }, x, z),
+        Some(Ok((lod, x, z))) => Target::Tile(if lod == 0 { GridKey::Hires } else { GridKey::Lowres(lod) }, (x, z)),
         Some(Err(())) => return empty(StatusCode::NOT_FOUND),
         None => match item_key(path) {
             Some(item) => Target::Item(item),
@@ -82,32 +81,42 @@ async fn storage(storage: Arc<dyn MapStorage>, path: &str, accepted: Accepted) -
         },
     };
     let content_type = match &target {
-        Target::Tile(GridKey::Hires, ..) => content_type::OCTET_STREAM,
+        Target::Tile(GridKey::Hires, _) => content_type::OCTET_STREAM,
         Target::Tile(..) => "image/png",
         Target::Item(_) => content_type::map_item(path),
     };
-    let is_png = content_type == "image/png";
     let is_tile = matches!(target, Target::Tile(..));
-    let read = tokio::task::spawn_blocking(move || -> Result<Option<_>, String> {
-        let stored: Option<Stored> = match target {
-            Target::Tile(grid, x, z) => storage.read_grid(grid, (x, z)),
-            Target::Item(item) => storage.read_item(&item),
+    let req = map_data::Request {
+        target,
+        is_png: content_type == "image/png",
+        gz_url,
+        accepted: Accepted::from_headers(headers),
+        if_none_match: IfNoneMatch::from_request(method, headers),
+        etags,
+    };
+    let storage = route.storage.clone();
+    match tokio::task::spawn_blocking(move || map_data::serve(storage.as_ref(), req)).await {
+        Ok(Ok(Reply::NotModified(etag))) => {
+            let mut res = empty(StatusCode::NOT_MODIFIED);
+            res.headers_mut().insert(ETAG, etag);
+            res
         }
-        .map_err(|e| e.to_string())?;
-        stored.map(|s| encode(s, is_png, gz_url, &accepted).map_err(|e| e.to_string())).transpose()
-    })
-    .await;
-    match read {
-        Ok(Ok(Some(encoded))) => {
+        Ok(Ok(Reply::Found { encoded, etag })) => {
             let mut res = Response::new(Body::from(encoded.body));
             header_static(&mut res, CONTENT_TYPE, content_type);
             if let Some(coding) = encoded.content_encoding {
                 header_static(&mut res, CONTENT_ENCODING, coding);
             }
+            if let Some(etag) = etag {
+                res.headers_mut().insert(ETAG, etag);
+                if !gz_url {
+                    header_static(&mut res, VARY, "Accept-Encoding");
+                }
+            }
             res
         }
-        Ok(Ok(None)) if is_tile => empty(StatusCode::NO_CONTENT),
-        Ok(Ok(None)) => empty(StatusCode::NOT_FOUND),
+        Ok(Ok(Reply::Missing)) if is_tile => empty(StatusCode::NO_CONTENT),
+        Ok(Ok(Reply::Missing)) => empty(StatusCode::NOT_FOUND),
         Ok(Err(e)) => {
             tracing::error!("Failed to read map-tile for web-request: {e}");
             empty(StatusCode::INTERNAL_SERVER_ERROR)
