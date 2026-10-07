@@ -60,10 +60,12 @@ impl LowresTile {
         let mut encoder = png::Encoder::new(&mut *out, self.width as u32, (self.depth * 2) as u32);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
-        // the default level writes PNGs up to a third bigger than Java's ImageIO
-        encoder.set_compression(png::Compression::High);
+        // unfiltered: 0.87× Java's ImageIO bytes vs 1.18× for Adaptive, and faster (examples/png_bench.rs)
+        encoder.set_deflate_compression(png::DeflateCompression::Level(9));
+        encoder.set_filter(png::Filter::NoFilter);
         let mut writer = encoder.write_header()?;
-        let rgba: Vec<u8> = self.pixels.iter().flat_map(|&p| [(p >> 16) as u8, (p >> 8) as u8, p as u8, (p >> 24) as u8]).collect();
+        let mut rgba = Vec::with_capacity(self.pixels.len() * 4);
+        rgba.extend(self.pixels.iter().flat_map(|&p| [(p >> 16) as u8, (p >> 8) as u8, p as u8, (p >> 24) as u8]));
         writer.write_image_data(&rgba)?;
         writer.finish()?;
         Ok(())

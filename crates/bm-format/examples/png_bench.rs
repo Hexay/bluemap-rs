@@ -64,10 +64,22 @@ fn main() {
         bytes += out.len();
     }
     let ns = t.elapsed().as_nanos();
+    for (_, w, h, rgba, tile) in &tiles {
+        tile.encode_png(&mut out).unwrap();
+        let size = [*w as usize - 1, *h as usize / 2 - 1];
+        assert_eq!(&LowresTile::decode_png(&out, size).unwrap(), tile, "encode_png changed pixels");
+        let mut dec = png::Decoder::new(std::io::Cursor::new(&out[..]));
+        dec.set_transformations(png::Transformations::EXPAND);
+        let mut r = dec.read_info().unwrap();
+        let mut back = vec![0; r.output_buffer_size().unwrap()];
+        r.next_frame(&mut back).unwrap();
+        assert_eq!(&back, rgba, "encode_png changed RGBA bytes vs the stored PNG");
+    }
+    println!("product encode_png output is pixel-identical to all stored PNGs");
     println!("| setting | bytes | vs stored | enc ms/tile |");
     println!("|---|---|---|---|");
     let n = tiles.len() as f64;
-    println!("| product encode_png (zlib 9, Adaptive) | {bytes} | {:.3} | {:.2} |", bytes as f64 / stored as f64, ns as f64 / 1e6 / n);
+    println!("| product encode_png | {bytes} | {:.3} | {:.2} |", bytes as f64 / stored as f64, ns as f64 / 1e6 / n);
     let variants: [(&str, D, F); 9] = [
         ("fdeflate, Up (png Fastest)", D::FdeflateUltraFast, F::Up),
         ("fdeflate, Adaptive (png Fast)", D::FdeflateUltraFast, F::Adaptive),
