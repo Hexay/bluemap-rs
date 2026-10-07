@@ -1,7 +1,6 @@
 """Headless Paper server for the plugin e2e test: pinned downloads, server folder setup, console + HTTP helpers."""
 import hashlib
 import json
-import queue
 import re
 import shutil
 import subprocess
@@ -18,6 +17,7 @@ CACHE = E2E / "cache"
 JAVA = jdk_dir(25) / "bin" / ("java.exe" if WINDOWS else "java")
 MC = "26.3"
 HTTP = "http://127.0.0.1:8100"
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 # (file name, url, sha256 or None)
 DOWNLOADS = {
@@ -47,7 +47,9 @@ def fetch(key: str) -> Path:
         CACHE.mkdir(parents=True, exist_ok=True)
         print(f"downloading {name}", flush=True)
         tmp = path.with_suffix(".part")
-        with urllib.request.urlopen(url, timeout=120) as r, open(tmp, "wb") as f:
+        # Modrinth's CDN refuses Python's default user agent
+        req = urllib.request.Request(url, headers={"User-Agent": "bluemap-rs-e2e/0.1"})
+        with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
             shutil.copyfileobj(r, f)
         tmp.replace(path)
     if sha and hashlib.sha256(path.read_bytes()).hexdigest() != sha:
@@ -57,8 +59,10 @@ def fetch(key: str) -> Path:
 
 def client_jar() -> Path | None:
     """A cached 26.3 client jar, so neither BlueMap has to download it."""
-    for p in (WORK / "bluemap").glob(f"*/data/minecraft-client-{MC}.jar"):
-        return p
+    # work/ is not versioned, so a worktree finds the fixtures in an enclosing checkout
+    for work in [WORK, *[d / "work" for d in WORK.parent.parents]]:
+        for p in (work / "bluemap").glob(f"*/data/minecraft-client-{MC}.jar"):
+            return p
     return None
 
 
@@ -84,7 +88,10 @@ class Paper:
 
     def __init__(self, folder: Path, heap: str = "2G"):
         self.folder = folder
-        self.lines: queue.Queue[str | None] = queue.Queue()
+        self.history: list[str] = []
+        self.cursor = 0  # wait_for scans from here; send() moves it to the end
+        self.done = False
+        self.changed = threading.Condition()
         self.log = open(folder / "e2e-console.log", "a", encoding="utf-8")
         self.started = time.monotonic()
         self.proc = subprocess.Popen(
@@ -97,23 +104,33 @@ class Paper:
         for line in self.proc.stdout:
             self.log.write(line)
             self.log.flush()
-            self.lines.put(line.rstrip())
-        self.lines.put(None)
+            with self.changed:
+                self.history.append(ANSI.sub("", line.rstrip()))
+                self.changed.notify_all()
+        with self.changed:
+            self.done = True
+            self.changed.notify_all()
 
-    def wait_for(self, pattern: str, timeout: float = 300) -> re.Match:
+    def wait_for(self, pattern: str, timeout: float = 300, since_start: bool = False) -> re.Match:
+        """First line matching `pattern` after the last command (or since the server started)."""
         rx, deadline = re.compile(pattern), time.monotonic() + timeout
-        while (left := deadline - time.monotonic()) > 0:
-            try:
-                line = self.lines.get(timeout=left)
-            except queue.Empty:
-                break
-            if line is None:
-                raise RuntimeError(f"server exited while waiting for {pattern!r}")
-            if m := rx.search(line):
-                return m
-        raise TimeoutError(f"no console line matching {pattern!r} within {timeout}s")
+        i = 0 if since_start else self.cursor
+        with self.changed:
+            while True:
+                for line in self.history[i:]:
+                    i += 1
+                    if m := rx.search(line):
+                        return m
+                if self.done:
+                    raise RuntimeError(f"server exited while waiting for {pattern!r}")
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError(f"no console line matching {pattern!r} within {timeout}s")
+                self.changed.wait(left)
 
     def send(self, command: str) -> None:
+        with self.changed:
+            self.cursor = len(self.history)
         self.proc.stdin.write(command + "\n")
         self.proc.stdin.flush()
 

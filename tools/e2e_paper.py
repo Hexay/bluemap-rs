@@ -11,6 +11,7 @@ captured files go to work/e2e-paper/out/.
 """
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,7 @@ import time
 from pathlib import Path
 
 from paper_server import E2E, Paper, fetch, get, json_get, kill, pid_alive, poll, prepare, rss_mib
-from paths import EXE, ROOT, WINDOWS
+from paths import EXE, ROOT, WINDOWS, jdk_dir
 
 PLATFORM = ROOT / "platforms" / "paper"
 TARGET = "windows-x64" if WINDOWS else "linux-x64"
@@ -38,8 +39,9 @@ def build() -> Path:
     native.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(ROOT / "target" / "release" / f"bluemap{EXE}", native)
     gradlew = PLATFORM / ("gradlew.bat" if WINDOWS else "gradlew")
+    env = {**os.environ, "JAVA_HOME": str(jdk_dir(21))}
     subprocess.run([str(gradlew), "build", "--no-daemon", "--console=plain", "-q", "-Dorg.gradle.jvmargs=-Xmx1g"],
-                   cwd=PLATFORM, check=True)
+                   cwd=PLATFORM, check=True, env=env)
     return plugin_jar()
 
 
@@ -48,6 +50,11 @@ def plugin_jar() -> Path:
     if not jars:
         sys.exit(f"no {TARGET} plugin jar in {PLATFORM / 'build' / 'libs'}; run without --skip-build")
     return jars[-1]
+
+
+def clock(m) -> int:
+    h, mi, se = map(int, m.group(1).split(":"))
+    return h * 3600 + mi * 60 + se
 
 
 def core_pid(server: Path) -> int | None:
@@ -72,11 +79,12 @@ def run_ours(jar: Path, fresh: bool) -> Path:
     prepare(folder, [jar, fetch("blueborder"), fetch("bots")], fresh)
     server = Paper(folder)
     try:
-        server.wait_for(r"\[BlueMap\].*Loaded!", 600)
-        check("core ready", True, f"{time.monotonic() - server.started:.1f}s after JVM start")
+        spawned = server.wait_for(r"\[(\d+:\d+:\d+) .*BlueMap core \S+ started", 600, since_start=True)
+        loaded = server.wait_for(r"\[(\d+:\d+:\d+) .*\[BlueMap\] Loaded!", 600, since_start=True)
+        check("core ready", True, f"{clock(loaded) - clock(spawned)} s from core spawn to Ready")
         jar_mib = jar.stat().st_size / 2**20
         check("plugin jar", True, f"{jar.name} {jar_mib:.1f} MiB")
-        server.wait_for(r"Done \(", 300)
+        server.wait_for(r"Done \(", 300, since_start=True)
 
         server.command("bluemap", r"BlueMap Status|render-threads", 30)
         check("/bluemap status", True)
@@ -98,8 +106,13 @@ def run_ours(jar: Path, fresh: bool) -> Path:
 
         tile = poll(lambda: get(f"maps/{map_id}/tiles/1/x0/z0.png")[0] == 200, 600, 5)
         check("map renders (lowres tile 1/x0/z0)", tile)
-        hires = get(f"maps/{map_id}/tiles/0/x0/z0.prbm")[0]
-        check("hires tile served", hires == 200, f"HTTP {hires}")
+        # a fresh world's first render may skip chunks the server hadn't lit yet; force one with the command
+        server.command(f"bluemap force-update {map_id}", r"Created new update-task", 120)
+        check("/bluemap force-update", True)
+        # single-digit coordinates need no per-digit folders
+        around = [f"maps/{map_id}/tiles/0/x{x}/z{z}.prbm" for x in range(-9, 10) for z in range(-9, 10)]
+        hires = poll(lambda: next((p for p in around if get(p)[0] == 200), None), 300, 5)
+        check("hires tile served", hires, str(hires))
 
         server.send("start 1 none")
         bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
@@ -138,8 +151,8 @@ def run_upstream(world: Path) -> None:
     prepare(folder, [fetch("upstream"), fetch("blueborder")], True, world_from=world)
     server = Paper(folder)
     try:
-        server.wait_for(r"\[BlueMap\].*Loaded!", 600)
-        server.wait_for(r"Done \(", 300)
+        server.wait_for(r"\[BlueMap\].*Loaded!", 600, since_start=True)
+        server.wait_for(r"Done \(", 300, since_start=True)
         map_id = poll(first_map, 30)
         save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
         poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
@@ -160,8 +173,12 @@ def compare_configs(ours: Path, theirs: Path) -> None:
             check(f"config {rel} generated", False)
             continue
         strip = lambda p: [l for l in p.read_text(encoding="utf-8").splitlines() if not l.startswith("# 20")]
-        same = strip(mine) == strip(path)
-        check(f"config {rel} identical", same)
+        ours_lines, theirs_lines = strip(mine), strip(path)
+        if rel.parts[0] == "storages":
+            # deliberate: new storages get an appended `format: optimized` block (docs/00 "Storage default")
+            check(f"config {rel} = upstream + format block", ours_lines[:len(theirs_lines)] == theirs_lines)
+        else:
+            check(f"config {rel} identical", ours_lines == theirs_lines)
 
 
 def main() -> None:
