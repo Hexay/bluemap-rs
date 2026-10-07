@@ -150,6 +150,21 @@ class Paper:
         self.send(command)
         return self.wait_for(pattern, timeout)
 
+    def command_text(self, command: str, header: str, timeout: float = 60) -> list[str]:
+        """Runs `command` and returns its multi-line message: the line matching `header` without the log prefix,
+        then its continuation lines (up to the next `[hh:mm:ss …]` record)."""
+        self.command(command, header, timeout)
+        time.sleep(1)  # the record's continuation lines arrive just after its first line
+        with self.changed:
+            lines = self.history[self.cursor:]
+        start = next(i for i, line in enumerate(lines) if re.search(header, line))
+        block = [re.sub(r"^\[\d+:\d+:\d+ \w+\]: ", "", lines[start])]
+        for line in lines[start + 1:]:
+            if re.match(r"\[\d+:\d+:\d+ ", line):
+                break
+            block.append(line)
+        return block
+
     def kill(self) -> None:
         """Hard-kills the JVM (SIGKILL / TerminateProcess): no shutdown hooks, the core only sees stdin EOF."""
         self.proc.kill()

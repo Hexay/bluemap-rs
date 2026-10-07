@@ -163,10 +163,19 @@ def diagnostic_commands(server: Paper, folder: Path, map_id: str) -> None:
     check("/bluemap debug map <map> <x> <z>", server.wait_for(r"state: ", 10))
     server.command("bluemap debug dump", r"created at: ", 30)
     check("/bluemap debug dump", any(folder.rglob("dump.json")))
-    server.command("bluemap storages", r"BlueMap Storages", 30)
-    check("/bluemap storages", True)
-    server.command("bluemap storages file", r"Type: bluemap:file", 30)
-    check("/bluemap storages <storage>", True)
+    texts = command_texts(server, map_id)
+    check("/bluemap storages", texts["bluemap storages"])
+    check("/bluemap storages <storage>", any("Type: bluemap:file" in l for l in texts["bluemap storages file"]))
+    save("rs-commands.json", json.dumps(texts, indent=1, ensure_ascii=False).encode())
+
+
+# console output that only depends on configs and the world on disk, compared verbatim with upstream
+STABLE_COMMANDS = [("bluemap storages", r"BlueMap Storages"), ("bluemap storages file", r"BlueMap Storage 'file'"),
+                   ("bluemap debug world {map} 0 64 0", r"World-Info \(debug\)")]
+
+
+def command_texts(server: Paper, map_id: str) -> dict[str, list[str]]:
+    return {cmd: server.command_text(cmd.format(map=map_id), header, 30) for cmd, header in STABLE_COMMANDS}
 
 
 def run_jvm_kill(folder: Path) -> None:
@@ -191,11 +200,17 @@ def run_upstream(world: Path) -> None:
         save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
         poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
         save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+        texts = command_texts(server, map_id)
+        save("upstream-commands.json", json.dumps(texts, indent=1, ensure_ascii=False).encode())
     finally:
         server.stop()
     for name in ["players-empty.json", "markers.json"]:
         ours, theirs = (OUT / f"rs-{name}").read_bytes(), (OUT / f"upstream-{name}").read_bytes()
         check(f"{name} byte-identical to upstream", ours == theirs, f"{len(ours)} vs {len(theirs)} B")
+    for cmd, lines in json.loads((OUT / "rs-commands.json").read_text(encoding="utf-8")).items():
+        other = texts[cmd]
+        diff = [f"{a!r} vs {b!r}" for a, b in zip(lines, other) if a != b] or len(lines) != len(other)
+        check(f"/{cmd.replace('{map}', '<map>')} text identical to upstream", not diff, str(diff)[:300] if diff else "")
     compare_configs(E2E / "rs" / "plugins" / "BlueMap", folder / "plugins" / "BlueMap")
 
 
