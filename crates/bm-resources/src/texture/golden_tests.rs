@@ -53,9 +53,8 @@ fn textures_match_java_bluemap_26_3() {
     let missing: Vec<&str> =
         java_by_key.keys().copied().filter(|k| !pool.contains_key(&ResourcePath::key(k))).collect();
     let extra: Vec<&str> = pool.keys().map(ResourcePath::as_str).filter(|k| !java_by_key.contains_key(k)).collect();
-    let (mut color, mut alpha, mut anim, mut pixels, mut same_url) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
-    let mut substituted = TexturePool::new();
+    let (mut color, mut alpha, mut anim, mut pixels, mut urls) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0);
+    let mut url_diffs = Vec::new();
     for (key, ours) in &pool {
         let Some(j) = java_by_key.get(key.as_str()) else { continue };
         let jc: Vec<f64> = j["color"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
@@ -71,31 +70,35 @@ fn textures_match_java_bluemap_26_3() {
             anim.push(format!("{key}: ours {:?} java {janim:?}", ours.animation));
         }
         let jurl = j["texture"].as_str().unwrap();
-        same_url += usize::from(ours.texture.as_deref() == Some(jurl));
+        urls += 1;
+        if ours.texture.as_deref() != Some(jurl) {
+            url_diffs.push(key.to_string());
+        }
         if decode_url(jurl) != ours.decode_image().unwrap() {
             pixels.push(key.to_string());
         }
-        substituted.insert(key.clone(), Texture { texture: Some(jurl.into()), ..ours.clone() });
     }
     eprintln!(
         "keys: java {} ours {} missing {missing:?} extra {extra:?}\ncolor {color:#?}\nhalfTransparent {alpha:?}\n\
-         animation {anim:#?}\npixels {pixels:?}\nidentical data URLs {same_url}",
+         animation {anim:#?}\npixels {pixels:?}\nidentical data URLs {}/{urls}, differing {:?}",
         java_by_key.len(),
-        pool.len()
+        pool.len(),
+        urls - url_diffs.len(),
+        &url_diffs[..url_diffs.len().min(20)]
     );
 
-    // ids and bytes, with each texture's base64 swapped for Java's (only the PNG encoder differs)
     let mut fresh = TextureGallery::new();
-    fresh.put_pool(&substituted);
+    fresh.put_pool(&pool);
     let mut ours_fresh = String::new();
     fresh.write_textures_file(&mut ours_fresh);
     let mut reloaded = TextureGallery::read_textures_file(&java_bytes).unwrap();
-    reloaded.put_pool(&substituted);
+    reloaded.put_pool(&pool);
     let mut ours_reloaded = String::new();
     reloaded.write_textures_file(&mut ours_reloaded);
 
     assert!(missing.is_empty() && extra.is_empty(), "key sets differ");
     assert!(color.is_empty() && alpha.is_empty() && anim.is_empty() && pixels.is_empty(), "texture data differs");
+    assert!(url_diffs.is_empty(), "data URLs differ");
     assert!(ours_fresh == java_text, "fresh gallery: {}", first_diff(&ours_fresh, &java_text));
     assert!(ours_reloaded == java_text, "reloaded gallery: {}", first_diff(&ours_reloaded, &java_text));
 }

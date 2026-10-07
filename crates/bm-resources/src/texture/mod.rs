@@ -1,9 +1,8 @@
 //! Textures: the `minecraft:blocks` atlas, PNG loading and analysis, animation meta and the per-map
 //! `textures.json` gallery (docs/02-resources.md §4, §9).
 //!
-//! `texture` data URLs embed the source PNG unchanged unless it was generated (unstitch, paletted
-//! permutations) or carries colour-management chunks; upstream always re-encodes. The webapp only decodes the
-//! image into a `<img>`, so pixels are identical either way, but the base64 strings differ from Java's.
+//! `texture` data URLs hold the image re-encoded the way `ImageIO.write` does it (`bm_java::png`), from the
+//! `BufferedImage` model `ImageIO.read` gives the source, so `textures.json` is byte-identical to BlueMap's.
 
 mod animation;
 mod atlas;
@@ -38,9 +37,7 @@ pub enum Error {
     #[error("png: {0}")]
     Decode(#[from] png::DecodingError),
     #[error("png: {0}")]
-    Encode(#[from] png::EncodingError),
-    #[error("png decoder returned an unexpanded palette image")]
-    UnexpandedPalette,
+    Read(#[from] bm_java::png::ReadError),
     #[error(transparent)]
     Json(#[from] crate::json::JsonError),
     #[error(transparent)]
@@ -82,31 +79,19 @@ impl Texture {
         }
     }
 
-    /// `Texture.from`. `png` is the source file to embed; `None` encodes `image`.
-    pub fn from_image(
-        key: ResourcePath,
-        image: &RgbaImage,
-        animation: Option<AnimationMeta>,
-        png: Option<&[u8]>,
-    ) -> Result<Self, Error> {
-        let encoded;
-        let png = match png {
-            Some(p) => p,
-            None => {
-                encoded = image.encode_png()?;
-                &encoded
-            }
-        };
-        let mut url = String::with_capacity(DATA_URL_PREFIX.len() + png.len() * 4 / 3 + 4);
+    /// `Texture.from`.
+    pub fn from_image(key: ResourcePath, image: &DecodedPng, animation: Option<AnimationMeta>) -> Self {
+        let png = image.encode_png();
+        let mut url = String::with_capacity(DATA_URL_PREFIX.len() + png.len().div_ceil(3) * 4);
         url.push_str(DATA_URL_PREFIX);
-        base64::engine::general_purpose::STANDARD.encode_string(png, &mut url);
-        Ok(Self {
+        base64::engine::general_purpose::STANDARD.encode_string(&png, &mut url);
+        Self {
             key,
-            color: *image.average_color().straight(),
-            half_transparent: image.half_transparent(),
+            color: *image.image.average_color().straight(),
+            half_transparent: image.image.half_transparent(),
             texture: Some(url.into()),
             animation,
-        })
+        }
     }
 
     pub fn color_premultiplied(&self) -> Color {
@@ -121,8 +106,13 @@ impl Texture {
     }
 
     /// `getTextureImage`: the embedded PNG decoded.
+    pub fn decode(&self) -> Result<DecodedPng, Error> {
+        decode_png(&self.png_bytes()?)
+    }
+
+    /// The embedded PNG's `getRGB` pixels.
     pub fn decode_image(&self) -> Result<RgbaImage, Error> {
-        Ok(decode_png(&self.png_bytes()?)?.image)
+        Ok(self.decode()?.image)
     }
 }
 

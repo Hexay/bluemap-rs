@@ -3,6 +3,8 @@
 pub mod fmt;
 mod hash_map;
 pub mod math;
+#[cfg(feature = "png")]
+pub mod png;
 mod random;
 pub mod trig;
 

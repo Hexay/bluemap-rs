@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use rayon::prelude::*;
 
 use super::atlas::{Atlas, Source};
-use super::image::{RgbaImage, decode_png};
+use super::image::{DecodedPng, decode_png};
 use super::{AnimationMeta, Texture};
 use crate::key::ResourcePath;
 use crate::vfs::Pack;
@@ -36,7 +36,7 @@ pub fn load_textures(packs: &[Pack], atlas: &Atlas, used: &(dyn Fn(&ResourcePath
     }
 
     let bake_inputs = bake_inputs(atlas);
-    let loaded: Vec<(ResourcePath, Texture, Option<RgbaImage>)> = keys
+    let loaded: Vec<(ResourcePath, Texture, Option<DecodedPng>)> = keys
         .into_par_iter()
         .filter_map(|(key, candidates)| {
             let (texture, image) = candidates.iter().find_map(|(pi, file)| load_file(&packs[*pi], file, &key))?;
@@ -133,14 +133,11 @@ fn bake_inputs(atlas: &Atlas) -> HashSet<ResourcePath> {
 }
 
 /// `Source.loadTexture`: `None` where upstream gets null or throws (missing file, bad PNG or mcmeta).
-fn load_file(pack: &Pack, file: &str, key: &ResourcePath) -> Option<(Texture, RgbaImage)> {
-    let bytes = pack.read(file)?;
-    let decoded = decode_png(&bytes).ok()?;
+fn load_file(pack: &Pack, file: &str, key: &ResourcePath) -> Option<(Texture, DecodedPng)> {
+    let decoded = decode_png(&pack.read(file)?).ok()?;
     let animation = match pack.read(&format!("{file}.mcmeta")) {
         Some(meta) => AnimationMeta::parse_mcmeta(&meta).ok()?,
         None => None,
     };
-    let embed = (!decoded.color_managed).then_some(bytes.as_slice());
-    let texture = Texture::from_image(key.clone(), &decoded.image, animation, embed).ok()?;
-    Some((texture, decoded.image))
+    Some((Texture::from_image(key.clone(), &decoded, animation), decoded))
 }
