@@ -71,6 +71,8 @@ tasks.processResources {
     inputs.property("version", version)
     filesMatching("plugin.yml") { expand("version" to version) }
     from("../../crates/bm-cli/src/plugin/commands.json")
+    // MIT: ships upstream-derived code (logger, skins, BlueMapAPI build) — carry both copyright notices
+    from("../../LICENSE") { into("META-INF") }
 }
 
 tasks.jar {
