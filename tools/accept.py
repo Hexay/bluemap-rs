@@ -92,19 +92,29 @@ def region_dir(world: Path, dimension: str) -> Path:
     return legacy / "region"
 
 
-def bump_first_chunk(region_dir: Path, delta: int) -> tuple[int, int]:
-    """Adds `delta` to the header timestamp of the first allocated chunk of the first region file; returns its
-    chunk position."""
-    for mca in sorted(region_dir.glob("r.*.*.mca")):
-        rx, rz = (int(v) for v in mca.name.split(".")[1:3])
-        data = bytearray(mca.read_bytes())
-        for i in range(1024):
-            if data[4 * i + 3] > 0:
-                (ts,) = struct.unpack_from(">I", data, 4096 + 4 * i)
-                struct.pack_into(">I", data, 4096 + 4 * i, ts + delta)
-                mca.write_bytes(bytes(data))
-                return rx * 32 + i % 32, rz * 32 + i // 32
-    sys.exit(f"no chunk in {region_dir}")
+def shared_chunk(webroot: Path, map_id: str) -> tuple[int, int]:
+    """Chunk 2t+2 of a rendered hires tile t whose +x, +z and diagonal neighbours are rendered too: it lies under
+    exactly those 4 tiles."""
+    tiles = set()
+    for f in (webroot / "maps" / map_id / "tiles" / "0").rglob("*.prbm*"):
+        flat = re.sub(r"\.prbm.*$", "", "".join(f.relative_to(webroot / "maps" / map_id / "tiles" / "0").parts))
+        m = re.fullmatch(r"x(-?\d+)z(-?\d+)", flat)
+        if m:
+            tiles.add((int(m[1]), int(m[2])))
+    for x, z in sorted(tiles):
+        if {(x + 1, z), (x, z + 1), (x + 1, z + 1)} <= tiles:
+            return 2 * x + 2, 2 * z + 2
+    sys.exit(f"no 2x2 block of rendered tiles in {webroot}")
+
+
+def bump_chunk(region_dir: Path, cx: int, cz: int, delta: int) -> None:
+    """Adds `delta` to the region-header timestamp of chunk cx, cz."""
+    mca = region_dir / f"r.{cx >> 5}.{cz >> 5}.mca"
+    data = bytearray(mca.read_bytes())
+    i = 4096 + 4 * ((cz & 31) * 32 + (cx & 31))
+    (ts,) = struct.unpack_from(">I", data, i)
+    struct.pack_into(">I", data, i, ts + delta)
+    mca.write_bytes(bytes(data))
 
 
 def incremental(fixture: str, failures: list[str]) -> None:
@@ -119,13 +129,15 @@ def incremental(fixture: str, failures: list[str]) -> None:
     check(all(rendered == 0 for rendered, _ in again.values()), f"{fixture}: second run renders nothing", failures)
     dim = re.search(r'^dimension:\s*"(.*)"', conf.read_text(), re.M)[1]
     regions = region_dir(out / "world", dim)
+    cx, cz = shared_chunk(out / "web", conf.stem)
     # bump one chunk's timestamp, then restore it: both are changes, and the final state must equal Java's again
     for delta in (1, -1):
-        cx, cz = bump_first_chunk(regions, delta)
-        processed = sum(p for _, p in bluemap(out, "-r").values())
+        bump_chunk(regions, cx, cz, delta)
+        counts = bluemap(out, "-r").values()
+        processed, rendered = sum(p for _, p in counts), sum(r for r, _ in counts)
         expected = touched_tiles(cx, cz)
-        what = f"{fixture}: chunk {cx},{cz} timestamp {delta:+} → {processed} tiles re-processed (expected {expected})"
-        check(processed == expected, what, failures)
+        what = f"{fixture}: chunk {cx},{cz} timestamp {delta:+} -> {rendered} rendered, {processed} processed (expected {expected})"
+        check(processed == expected == rendered, what, failures)
     check(compare(WORK / "bluemap" / fixture / "web", out / "web"), f"{fixture}: incremental output still equals Java's", failures)
 
 
@@ -134,11 +146,12 @@ def main() -> None:
     ap.add_argument("fixtures", nargs="*", default=DEFAULT_FIXTURES)
     ap.add_argument("--incremental", nargs="*", default=["vanilla", "structures"])
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--only-incremental", action="store_true")
     args = ap.parse_args()
     if not args.no_build:
         subprocess.run(["cargo", "build", "--release", "-p", "bm-cli", "-p", "bm-golden"], cwd=ROOT, check=True)
     failures: list[str] = []
-    for fx in args.fixtures:
+    for fx in [] if args.only_incremental else args.fixtures:
         print(f"full render {fx}", flush=True)
         out = prepare(fx, fx)
         bluemap(out, "-r")
