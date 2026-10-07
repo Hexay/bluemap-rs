@@ -19,6 +19,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+import hangdump
+
 ROOT = Path(__file__).resolve().parent.parent
 # work/ is git-ignored, so a worktree finds it in an enclosing checkout
 WORK = next(p / "work" for p in [ROOT, *ROOT.parents] if (p / "work" / "bluemap").is_dir())
@@ -26,6 +28,8 @@ EXE = ROOT / "target" / "release" / "bluemap.exe"
 GOLDEN_EXE = ROOT / "target" / "release" / "bm-golden.exe"
 MC = "26.3"
 DEFAULT_FIXTURES = ["vanilla", "structures", "nether", "dimensions", "debug"]
+# seconds per CLI invocation: far above any fixture render, so only a hang reaches it
+COMMAND_TIMEOUT = 600
 MAP_LINE = re.compile(r"Map '([^']+)': (\d+) regions, (\d+) tiles rendered, (\d+) skipped, (\d+) deleted")
 
 
@@ -54,10 +58,34 @@ def prepare(fixture: str, name: str, web_from: Path | None = None) -> Path:
     return out
 
 
+def run_bounded(cmd: list[str], cwd: Path | None = None, timeout: float = COMMAND_TIMEOUT) -> subprocess.CompletedProcess:
+    """`subprocess.run` that fails loudly on a hang: dumps the process (tools/hangdump.py), kills it and exits."""
+    proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        evidence = hangdump.dump(proc.pid, Path(cmd[0]).stem, Path(cmd[0]))
+        proc.kill()
+        out, err = proc.communicate()
+        sys.exit(f"HANG: {' '.join(cmd)} in {cwd} ran over {timeout:.0f}s\n{evidence}\n{out[-3000:]}\n{err[-3000:]}")
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def stop(proc: subprocess.Popen) -> None:
+    """Terminates a server; kills it if it doesn't exit (a stuck shutdown must not hang the run)."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        print(f"    pid {proc.pid} ignored terminate; killing\n{hangdump.dump(proc.pid, 'stop', EXE)}", flush=True)
+        proc.kill()
+        proc.wait()
+
+
 def bluemap(cwd: Path, *flags: str) -> dict[str, tuple[int, int]]:
     """Runs our CLI; returns map id → (tiles rendered, tiles processed incl. skipped/deleted)."""
     start = time.monotonic()
-    proc = subprocess.run([str(EXE), "-c", "config", "-v", MC, *flags], cwd=cwd, capture_output=True, text=True)
+    proc = run_bounded([str(EXE), "-c", "config", "-v", MC, *flags], cwd)
     if proc.returncode:
         sys.exit(f"bluemap failed in {cwd} ({proc.returncode}):\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")
     maps = {m[0]: (int(m[2]), int(m[2]) + int(m[3]) + int(m[4])) for m in MAP_LINE.findall(proc.stdout)}
@@ -66,7 +94,7 @@ def bluemap(cwd: Path, *flags: str) -> dict[str, tuple[int, int]]:
 
 
 def compare(golden: Path, candidate: Path) -> bool:
-    proc = subprocess.run([str(GOLDEN_EXE), "compare-webroots", str(golden), str(candidate)], capture_output=True, text=True)
+    proc = run_bounded([str(GOLDEN_EXE), "compare-webroots", str(golden), str(candidate)])
     print("\n".join("    " + line for line in proc.stdout.splitlines()), flush=True)
     if proc.returncode and not proc.stdout:
         print(proc.stderr)

@@ -202,9 +202,9 @@ fn sql_server(rt: &tokio::runtime::Runtime, url: &str, tiles: &Tiles, threads: u
             for table in ["grid_storage_data", "item_storage_data", "grid_storage", "item_storage", "compression", "map"] {
                 let drop = format!("DROP TABLE bmbench_{table}");
                 if scheme.starts_with("postgres") {
-                    sqlx::PgConnection::connect(&sqlx_url).await.unwrap().execute(drop.as_str()).await.unwrap();
+                    sqlx::PgConnection::connect(&sqlx_url).await.unwrap().execute(sqlx::AssertSqlSafe(drop.as_str())).await.unwrap();
                 } else {
-                    sqlx::MySqlConnection::connect(&sqlx_url).await.unwrap().execute(drop.as_str()).await.unwrap();
+                    sqlx::MySqlConnection::connect(&sqlx_url).await.unwrap().execute(sqlx::AssertSqlSafe(drop.as_str())).await.unwrap();
                 }
             }
         });

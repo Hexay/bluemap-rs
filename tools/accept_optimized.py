@@ -13,7 +13,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from accept import EXE, MC, ROOT, WORK, bluemap, check, compare, prepare, set_conf
+from accept import EXE, MC, ROOT, WORK, bluemap, check, compare, prepare, set_conf, stop
 
 
 def served_tiles_equal(golden: Path, cwd: Path, port: int) -> bool:
@@ -41,8 +41,7 @@ def served_tiles_equal(golden: Path, cwd: Path, port: int) -> bool:
         print(f"    {len(tiles)} hires tiles served identically", flush=True)
         return bool(tiles)
     finally:
-        server.terminate()
-        server.wait()
+        stop(server)
 
 
 def optimized(fixture: str, failures: list[str], port: int) -> None:

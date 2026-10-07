@@ -91,6 +91,14 @@ fn sql_config(c: &SqlStorageConfig) -> std::result::Result<SqlConfig, String> {
     sql.table_prefix = c.table_prefix()?.to_owned();
     sql.compression = compression(c.compression()?);
     sql.format = format(c.format);
+    if c.dialect.is_some() {
+        sql.dialect = Some(match c.dialect()? {
+            bm_config::Dialect::Mysql | bm_config::Dialect::Mariadb => bm_storage::Dialect::MySql,
+            bm_config::Dialect::Postgresql => bm_storage::Dialect::Postgres,
+            bm_config::Dialect::Sqlite => bm_storage::Dialect::Sqlite,
+        });
+    }
+    // Java: negative = unbounded (bm_storage::UNBOUNDED_CONNECTIONS, SqlConfig's default)
     if c.max_connections > 0 {
         sql.max_connections = c.max_connections as u32;
     }

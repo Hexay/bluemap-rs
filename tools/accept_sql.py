@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 
 import dbs
-from accept import EXE, MC, ROOT, WORK, bluemap, check, prepare, set_conf
+from accept import EXE, MC, ROOT, WORK, bluemap, check, prepare, run_bounded, set_conf, stop
 import paths
 
 # paths.WORK is this checkout's; accept.WORK also finds an enclosing one (worktrees)
@@ -45,15 +45,19 @@ def drop(s: dbs.Server, prefix: str) -> None:
         dbs.query(s, f"DROP TABLE IF EXISTS {prefix}{t}")
 
 
-def java(cwd: Path, *flags: str, **kw) -> subprocess.Popen:
-    cmd = [str(JAVA), "-jar", str(JAR), "-c", "config", "-v", MC, *flags]
-    return subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kw)
+def java_cmd(*flags: str) -> list[str]:
+    return [str(JAVA), "-jar", str(JAR), "-c", "config", "-v", MC, *flags]
+
+
+def java_server(cwd: Path) -> subprocess.Popen:
+    # output discarded: an unread pipe would block the server once full
+    return subprocess.Popen(java_cmd("-w"), cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def java_run(cwd: Path, *flags: str) -> str:
     start = time.monotonic()
-    proc = java(cwd, *flags)
-    out = proc.communicate()[0]
+    proc = run_bounded(java_cmd(*flags), cwd)
+    out = proc.stdout + proc.stderr
     if proc.returncode:
         sys.exit(f"java bluemap failed in {cwd} ({proc.returncode}):\n{out[-3000:]}")
     summary = [line for line in out.splitlines() if re.search(r"Start updating|up-to-date|regions", line)]
@@ -162,16 +166,15 @@ def java_to_rs(s: dbs.Server, failures: list[str], ports: tuple[int, int]) -> No
 
 
 def serve_both(jdir: Path, rdir: Path, ports: tuple[int, int], map_id: str, label: str, failures: list[str]) -> None:
-    jserver, rserver = java(jdir, "-w"), ours_server(rdir)
+    jserver, rserver = java_server(jdir), ours_server(rdir)
     try:
         wait_http(ports[0])
         wait_http(ports[1])
         check(served_equal(ports, sample_paths(map_id), label), f"{label}: our webserver == Java's", failures)
         check(served_golden(ports[0], map_id), f"{label}: Java's webserver serves golden tiles", failures)
     finally:
-        for p in (jserver, rserver):
-            p.terminate()
-            p.wait()
+        stop(jserver)
+        stop(rserver)
 
 
 def rs_to_java(s: dbs.Server, failures: list[str], ports: tuple[int, int]) -> None:
@@ -212,8 +215,7 @@ def optimized(s: dbs.Server, failures: list[str], ports: tuple[int, int]) -> Non
         wait_http(ports[1])
         check(served_golden(ports[1], map_id), f"{s.name}: optimized served tiles equal golden", failures)
     finally:
-        server.terminate()
-        server.wait()
+        stop(server)
     bluemap(rdir, "--convert-storage", "sql", "--to", "compat")
     configure(rdir, s, prefix, ports[1], "compat")
     serve_both(jdir, rdir, ports, map_id, f"{s.name}: optimized->compat", failures)

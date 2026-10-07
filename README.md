@@ -19,7 +19,7 @@ design and plan.
 
 ## Development
 
-Rust 1.88+, Python 3.11+ (stdlib only) for `tools/`. See `CLAUDE.md` for commands.
+Rust 1.94+, Python 3.11+ (stdlib only) for `tools/`. See `CLAUDE.md` for commands.
 
 ## License
 

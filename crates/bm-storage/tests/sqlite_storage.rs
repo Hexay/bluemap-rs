@@ -2,8 +2,8 @@ mod common;
 
 use std::path::Path;
 
-use bm_storage::{Compression, Error, FileStorage, GridKey, ItemKey, SqlConfig, SqlStorage, Storage, copy_map};
-use sqlx::{Connection, Row, SqliteConnection};
+use bm_storage::{Compression, Dialect, Error, FileStorage, GridKey, ItemKey, SqlConfig, SqlStorage, Storage, copy_map};
+use sqlx::{AssertSqlSafe, Connection, Row, SqliteConnection};
 use tokio::runtime::Runtime;
 
 fn config(db: &Path) -> SqlConfig {
@@ -14,7 +14,7 @@ fn config(db: &Path) -> SqlConfig {
 fn query_rows(rt: &Runtime, db: &Path, sql: &str) -> Vec<Vec<String>> {
     rt.block_on(async {
         let mut conn = SqliteConnection::connect(&format!("sqlite:{}", db.display())).await.unwrap();
-        let rows = sqlx::query(sql).fetch_all(&mut conn).await.unwrap();
+        let rows = sqlx::query(AssertSqlSafe(sql)).fetch_all(&mut conn).await.unwrap();
         rows.iter()
             .map(|r| {
                 (0..r.len())
@@ -36,6 +36,19 @@ fn conformance() {
     let storage = SqlStorage::connect(&config(&dir.path().join("bm.db")), rt.handle().clone()).unwrap();
     common::conformance(&storage);
     storage.close();
+}
+
+/// `dialect:` picks the statements, so one that contradicts the URL's driver is refused up front.
+#[test]
+fn dialect_must_match_url() {
+    let rt = Runtime::new().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("bm.db");
+    let wrong = SqlConfig { dialect: Some(Dialect::Postgres), ..config(&db) };
+    let err = SqlStorage::connect(&wrong, rt.handle().clone()).err().unwrap();
+    assert!(matches!(err, Error::DialectMismatch { configured: "postgresql", url: "sqlite" }), "{err}");
+    let right = SqlConfig { dialect: Some(Dialect::Sqlite), ..config(&db) };
+    SqlStorage::connect(&right, rt.handle().clone()).unwrap().close();
 }
 
 #[test]
