@@ -1,7 +1,8 @@
 //! File storage, path- and byte-compatible with upstream `FileStorage` (default root `bluemap/web/maps`).
 
-mod fsops;
-mod layout;
+pub(crate) mod fsops;
+pub(crate) mod layout;
+mod marker;
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,22 +13,51 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bm_compress::Compression;
 use bm_format::grid::Tile;
 
+pub(crate) use self::marker::{detect_format, set_marker};
 use crate::api::{MapStorage, Storage, Stored};
 use crate::error::{Error, IoContext, Result};
+use crate::format::{self, Format};
 use crate::key::{GridKey, ItemKey};
 use crate::locks::KeyLocks;
+use crate::optimized::OptimizedMapStorage;
+use crate::optimized::bundle::BundleStore;
+
+/// Directory of an optimized map's hires bundles, beside upstream's `tiles/`.
+pub(crate) const HIRES_BUNDLES: &str = "hires";
 
 /// Upstream's `atomic: false` is not honoured: every write is atomic.
 pub struct FileStorage {
     root: PathBuf,
     compression: Compression,
     read_only: bool,
+    format: Format,
     maps: Mutex<HashMap<String, Arc<FileMapStorage>>>,
+    optimized: Mutex<HashMap<String, Arc<OptimizedMapStorage>>>,
 }
 
 impl FileStorage {
+    /// A compat storage, without checking what `root` holds (see [`FileStorage::open`]).
     pub fn new(root: impl Into<PathBuf>, compression: Compression) -> Self {
-        Self { root: root.into(), compression, read_only: false, maps: Mutex::default() }
+        Self {
+            root: root.into(),
+            compression,
+            read_only: false,
+            format: Format::Compat,
+            maps: Mutex::default(),
+            optimized: Mutex::default(),
+        }
+    }
+
+    /// Opens a storage of `format`, refusing one that holds the other format and marking a new optimized one
+    /// (rules in [`crate::format`]).
+    pub fn open(root: impl Into<PathBuf>, compression: Compression, format: Format, read_only: bool) -> Result<Self> {
+        let storage = Self { format, ..Self::new(root, compression) }.read_only(read_only);
+        let found = detect_format(&storage.root)?;
+        format::check(&storage.root.display().to_string(), format, found)?;
+        if format == Format::Optimized && found.is_none() && !read_only {
+            set_marker(&storage.root, true)?;
+        }
+        Ok(storage)
     }
 
     /// Writes and deletes fail with [`Error::ReadOnly`].
@@ -38,6 +68,21 @@ impl FileStorage {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn format(&self) -> Format {
+        self.format
+    }
+
+    /// The map as an optimized map storage over this root, whatever this storage's format (for conversion).
+    pub(crate) fn optimized_map(&self, map_id: &str) -> Result<Arc<OptimizedMapStorage>> {
+        let inner = self.file_map(map_id)?;
+        let mut maps = self.optimized.lock().unwrap_or_else(PoisonError::into_inner);
+        let map = maps.entry(map_id.to_owned()).or_insert_with(|| {
+            let bundles = BundleStore::new(inner.root.join(HIRES_BUNDLES), self.read_only);
+            Arc::new(OptimizedMapStorage::new(inner, Box::new(bundles)))
+        });
+        Ok(map.clone())
     }
 
     pub fn file_map(&self, map_id: &str) -> Result<Arc<FileMapStorage>> {
@@ -64,7 +109,10 @@ fn validate_map_id(id: &str) -> Result<()> {
 
 impl Storage for FileStorage {
     fn map(&self, map_id: &str) -> Result<Arc<dyn MapStorage>> {
-        Ok(self.file_map(map_id)?)
+        match self.format {
+            Format::Compat => Ok(self.file_map(map_id)?),
+            Format::Optimized => Ok(self.optimized_map(map_id)?),
+        }
     }
 
     fn map_ids(&self) -> Result<Vec<String>> {

@@ -25,6 +25,15 @@ pub enum Error {
     MissingTables(String),
     #[error("unexpected sql result: {0}")]
     Protocol(&'static str),
+    #[error(transparent)]
+    Compact(#[from] bm_format::compact::CompactError),
+    #[error(
+        "storage {location} holds {found} data but is configured with format: {configured}. Convert it with \
+         `bluemap --convert-storage <storage-id> --to {configured}`, or set format: {found} in its storage config"
+    )]
+    FormatMismatch { location: String, configured: crate::Format, found: crate::Format },
+    #[error("corrupt tile bundle {path}: {reason}")]
+    CorruptBundle { path: PathBuf, reason: &'static str },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
