@@ -152,10 +152,8 @@ pub(crate) fn write_verified(mut reader: impl Read, file: &Path, sha1_hex: &str)
 }
 
 fn agent() -> ureq::Agent {
-    let tls = ureq::tls::TlsConfig::builder().provider(ureq::tls::TlsProvider::NativeTls).build();
     // upstream's 10 s read timeout is per read; ureq only has whole-body timeouts, so the body stays unbounded
     ureq::config::Config::builder()
-        .tls_config(tls)
         .timeout_connect(Some(TIMEOUT))
         .timeout_recv_response(Some(TIMEOUT))
         .build()

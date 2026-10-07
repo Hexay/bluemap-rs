@@ -2,6 +2,7 @@
 //! and `_bin` VARCHARs, PostgreSQL INT2/BOOL, SQLite INTEGER), so decoding is dialect-aware.
 
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use sqlx::mysql::{MySqlPool, MySqlPoolOptions, MySqlRow};
@@ -11,7 +12,7 @@ use sqlx::sqlite::{
 };
 use sqlx::{Executor, Row};
 
-use super::Dialect;
+use super::{Dialect, SqlConfig};
 use crate::error::{Error, Result};
 
 #[derive(Debug, Clone, Copy)]
@@ -62,22 +63,32 @@ macro_rules! on_pool {
 }
 
 impl Pool {
-    pub async fn connect(dialect: Dialect, url: &str, max_connections: u32, read_only: bool) -> Result<Self> {
+    pub async fn connect(dialect: Dialect, url: &str, config: &SqlConfig) -> Result<Self> {
+        let (max_connections, read_only) = (config.max_connections.max(1), config.read_only);
         let acquire = Duration::from_secs(30);
-        Ok(match dialect {
-            Dialect::MySql => Self::MySql(
-                MySqlPoolOptions::new().max_connections(max_connections).acquire_timeout(acquire).connect(url).await?,
-            ),
-            Dialect::Postgres => Self::Postgres(
-                PgPoolOptions::new()
-                    .max_connections(max_connections)
-                    .acquire_timeout(acquire)
-                    .after_connect(|conn, _| {
-                        Box::pin(async move { conn.execute("SET synchronous_commit = off").await.map(drop) })
+        // SQLite's default pragmas are connect options; the server dialects' run as statements
+        let init: Arc<[String]> = match (&config.init_sql, dialect) {
+            (Some(sql), _) => sql.iter().cloned().collect(),
+            (None, Dialect::Postgres) => ["SET synchronous_commit = off".to_owned()].into(),
+            (None, _) => [].into(),
+        };
+        macro_rules! with_init {
+            ($options:expr) => {{
+                let init = init.clone();
+                $options.max_connections(max_connections).acquire_timeout(acquire).after_connect(move |conn, _| {
+                    let init = init.clone();
+                    Box::pin(async move {
+                        for sql in init.iter() {
+                            conn.execute(sql.as_str()).await?;
+                        }
+                        Ok(())
                     })
-                    .connect(url)
-                    .await?,
-            ),
+                })
+            }};
+        }
+        Ok(match dialect {
+            Dialect::MySql => Self::MySql(with_init!(MySqlPoolOptions::new()).connect(url).await?),
+            Dialect::Postgres => Self::Postgres(with_init!(PgPoolOptions::new()).connect(url).await?),
             Dialect::Sqlite => {
                 let mut options = SqliteConnectOptions::from_str(url)?
                     .synchronous(SqliteSynchronous::Normal)
@@ -89,13 +100,7 @@ impl Pool {
                 if !read_only {
                     options = options.journal_mode(SqliteJournalMode::Wal);
                 }
-                Self::Sqlite(
-                    SqlitePoolOptions::new()
-                        .max_connections(max_connections)
-                        .acquire_timeout(acquire)
-                        .connect_with(options)
-                        .await?,
-                )
+                Self::Sqlite(with_init!(SqlitePoolOptions::new()).connect_with(options).await?)
             }
         })
     }

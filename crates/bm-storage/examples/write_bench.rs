@@ -1,6 +1,8 @@
 //! Storage write throughput, CPU split (user/kernel) and allocations per write, on real hires tiles.
 //! Usage: cargo run -p bm-storage --profile profiling --example write_bench -- <hires tiles dir> <scratch dir> [--threads T]
-//!   <hires tiles dir> is a webroot's `maps/<id>/tiles/0`; the scratch dir is wiped.
+//!        [--sql <url>]...
+//!   <hires tiles dir> is a webroot's `maps/<id>/tiles/0`; the scratch dir is wiped. `--sql` also benches a MySQL or
+//!   PostgreSQL server (`tools/dbs.py`) in tables `bmbench_*`, dropped afterwards.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::fs;
@@ -177,6 +179,36 @@ fn main() {
         println!("sqlite db size after {t}-thread run: {} B (+wal {} B)", fs::metadata(&db).map_or(0, |m| m.len()), fs::metadata(db.with_extension("db-wal")).map_or(0, |m| m.len()));
     }
     sqlite_batched(&rt, &scratch.join("sqlite-batch.db"), &tiles);
+    for (i, _) in args.iter().enumerate().filter(|(_, a)| *a == "--sql") {
+        sql_server(&rt, &args[i + 1], &tiles, threads);
+    }
+}
+
+fn sql_server(rt: &tokio::runtime::Runtime, url: &str, tiles: &Tiles, threads: usize) {
+    use sqlx::{Connection, Executor};
+    let n = tiles.gz.len();
+    let gz_bytes: usize = tiles.gz.iter().map(Vec::len).sum();
+    let scheme = url.split(':').next().unwrap_or(url);
+    for t in [1, threads] {
+        let config = SqlConfig { table_prefix: "bmbench_".into(), max_connections: t as u32, ..SqlConfig::new(url) };
+        let storage = SqlStorage::connect(&config, rt.handle().clone()).unwrap();
+        let map = storage.map("m").unwrap();
+        run(&format!("{scheme} write_grid_encoded (fresh)"), n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
+        run(&format!("{scheme} write_grid_encoded (overwrite)"), n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
+        run(&format!("{scheme} read_grid"), n, gz_bytes, t, |i| drop(map.read_grid(GridKey::Hires, tiles.raw[i].0).unwrap()));
+        storage.close();
+        rt.block_on(async {
+            let (_, sqlx_url) = bm_storage::Dialect::from_url(url).unwrap();
+            for table in ["grid_storage_data", "item_storage_data", "grid_storage", "item_storage", "compression", "map"] {
+                let drop = format!("DROP TABLE bmbench_{table}");
+                if scheme.starts_with("postgres") {
+                    sqlx::PgConnection::connect(&sqlx_url).await.unwrap().execute(drop.as_str()).await.unwrap();
+                } else {
+                    sqlx::MySqlConnection::connect(&sqlx_url).await.unwrap().execute(drop.as_str()).await.unwrap();
+                }
+            }
+        });
+    }
 }
 
 /// One transaction around all upserts on one connection: the ceiling for batched SQL writes.

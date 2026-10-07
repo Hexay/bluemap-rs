@@ -68,6 +68,15 @@ Six tables (MySQL form, `MySQLCommandSet.java:49-157`, all `COLLATE utf8mb4_bin`
 - **Migrations/versioning: none.** `initializeTables` lists existing tables; if all six exist, return, else run `CREATE TABLE IF NOT EXISTS` (`AbstractCommandSet.java:87-118`). No schema-version table.
 - Map delete: paged `DELETE ... LIMIT 1000` loop then delete map row (cascade) (`SQLMapStorage.java:70-91`).
 
+bluemap-rs against real servers (MariaDB 11.8, MySQL 8.4, PostgreSQL 18; `tools/dbs.py`, `tools/accept_sql.py`,
+`tests/sql_remote.rs`): schema (`SHOW CREATE TABLE` / `information_schema` + constraints + indexes) identical to the
+tables Java 5.28 creates; Java-rendered DBs re-render 0 tiles here and Java's `-r` rewrites no tile of ours; both
+webservers serve the same tile bytes. Intentional differences: `max-connections: -1` (Java: unbounded) = 8; blobs above
+MySQL `max_allowed_packet` fail before sending (`BlobTooLarge`, #694) instead of mid-protocol; JDBC `user`/`password`
+are taken from the URL query too and percent-encoded; dead pooled connections (server restart, `wait_timeout`) are
+replaced on the next acquire. JSON items (settings/markers) are stored uncompressed and gzipped per request, so their
+gzip bytes differ from Java's (decoded bodies equal).
+
 ## 3. Web server
 
 Hand-written HTTP/1.1 server (`common/.../web/http/`, ~1.1k LOC):

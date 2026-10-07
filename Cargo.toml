@@ -58,14 +58,15 @@ rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.11"
-# native-tls (schannel on Windows): rustls pulls aws-lc/ring C builds; macros/migrate/any unused
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-native-tls", "mysql", "postgres", "sqlite"] }
+# TLS: rustls on ring with webpki roots — no OpenSSL, so Linux builds can be static musl; aws-lc needs CMake on
+# Windows. macros/migrate/any unused
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "mysql", "postgres", "sqlite"] }
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 twox-hash = { version = "2.1", default-features = false, features = ["xxhash32"] }
-# native-tls: rustls' default aws-lc backend needs CMake on Windows
-ureq = { version = "3", default-features = false, features = ["native-tls"] }
+# `rustls` = rustls on ring with webpki roots, as for sqlx
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 zstd = "0.13"
 # deflate via flate2 only: the default features pull C builds (bzip2, zstd) and crypto we don't need
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
