@@ -70,14 +70,25 @@ fn lifecycle_without_resources() {
         name: "CONSOLE".into(),
         world: None,
         position: None,
-        permissions: vec!["bluemap.status".into()],
+        permissions: vec!["bluemap.status".into(), "bluemap.debug.dump".into()],
     };
-    send(&mut stdin, &ShimMsg::Command { id: 7, input: "bluemap".into(), sender });
+    send(&mut stdin, &ShimMsg::Command { id: 7, input: "bluemap".into(), sender: sender.clone() });
     match next(&mut stdout) {
         CoreMsg::CommandOutput { id: 7, component } => assert!(component.to_string().contains("not loaded")),
         other => panic!("expected CommandOutput, got {other:?}"),
     }
     assert!(matches!(next(&mut stdout), CoreMsg::CommandDone { id: 7, result: 0 }));
+
+    send(&mut stdin, &ShimMsg::Command { id: 8, input: "bluemap debug dump".into(), sender });
+    assert!(matches!(next(&mut stdout), CoreMsg::CommandOutput { id: 8, .. }));
+    assert!(matches!(next(&mut stdout), CoreMsg::CommandDone { id: 8, result: 1 }));
+    let dump = std::fs::read_to_string(dir.path().join("dump.json")).unwrap();
+    assert!(dump.starts_with("{\n \"system-info\": {\n  \""), "StateDumper's layout and indent: {dump}");
+    let dump: serde_json::Value = serde_json::from_str(&dump).unwrap();
+    assert_eq!(dump["system-info"]["bluemap-version"], "5.28");
+    assert_eq!(dump["dump"][0]["#identity"], "Plugin");
+    assert_eq!(dump["dump"][0]["loaded"], false);
+    assert!(dump["registries"].is_array() && dump["threads"].is_array());
 
     let (mut second, mut stdin2, mut stdout2) = spawn(dir.path());
     send(&mut stdin2, &hello(dir.path()));
