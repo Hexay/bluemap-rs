@@ -47,7 +47,7 @@ Dedicated servers only, Minecraft 26.1–26.3, Java 25. In singleplayer or on a 
 one line), so a modpack can keep it on the client side too. Fabric addons that `depend` on `bluemap` keep working.
 Permission nodes go through fabric-permissions-api (LuckPerms etc.); without one, `/bluemap` needs operator status (the "moderators" level, as upstream).
 
-### Memory and thread limits (Pterodactyl, Pelican and other panels)
+## Memory and thread limits (Pterodactyl, Pelican and other panels)
 
 The core runs outside the Java heap, so the container's memory limit now covers **the JVM plus the core**. The
 stock Paper egg starts Java with `-XX:MaxRAMPercentage=95.0`, which leaves the core almost nothing; the host may
