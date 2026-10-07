@@ -120,8 +120,9 @@ impl MapConfig {
         if legacy.iter().any(Option::is_some) { Err(LEGACY_MESSAGE) } else { Ok(()) }
     }
 
-    /// `marker-sets` as the JSON BlueMap feeds to MarkerGson (`{}` when absent).
-    pub fn marker_sets_json(&self) -> serde_json::Value {
-        self.marker_sets.as_ref().map_or_else(|| serde_json::Value::Object(Default::default()), Value::to_json)
+    /// `marker-sets` as the JSON text BlueMap feeds to MarkerGson (`{}` when absent); see
+    /// [`Value::to_configurate_json`].
+    pub fn marker_sets_json(&self) -> String {
+        self.marker_sets.as_ref().map_or_else(|| "{}".to_owned(), Value::to_configurate_json)
     }
 }

@@ -18,7 +18,7 @@ mkdir -p "$ROOT/crates/bm-resources/tests/data"
 "$J/javac" -nowarn -d "$OUT" -sourcepath "$FLOWMATH;$BLUEMAP/core/src/main/java" "$ROOT/tools/javaref/ModelRef.java"
 MODEL_REF="$ROOT/crates/bm-resources/src/model/java_ref.rs"
 { head -12 "$MODEL_REF"; "$J/java" -cp "$OUT" ModelRef; } > "$OUT/java_ref.rs" && mv "$OUT/java_ref.rs" "$MODEL_REF"
-# Double/Float.toString and HashMap order (plain JDK)
+# Double/Float.toString and (Concurrent)HashMap order (plain JDK)
 "$J/javac" -nowarn -d "$OUT" "$ROOT/tools/javaref/JdkRef.java"
 "$J/java" -cp "$OUT" JdkRef "$ROOT/crates/bm-java/tests/data"
 # render masks: the shipped 5.28 classes (sources need lombok); own out dir so no source-compiled class shadows the jar

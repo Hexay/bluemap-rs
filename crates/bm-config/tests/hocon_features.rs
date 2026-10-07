@@ -50,10 +50,12 @@ fn strings() {
 #[test]
 fn scalars() {
     let v =
-        parse("i: -5\nl: 9999999999\nf: 1.5e2\nt: true\nn: null\nver: 1.0.0\nip: 192.168.0.1\nmix: 10abc\nlead: 007");
+        parse("i: -5\nl: 9999999999\nf: 1.5e2\ng: 1.25\nt: true\nn: null\nver: 1.0.0\nip: 192.168.0.1\nmix: 10abc\nlead: 007");
     assert_eq!(at(&v, "i"), &Value::Int(-5));
     assert_eq!(at(&v, "l"), &Value::Int(9_999_999_999));
-    assert_eq!(at(&v, "f"), &Value::Float(150.0));
+    // typesafe stores whole doubles as ints
+    assert_eq!(at(&v, "f"), &Value::Int(150));
+    assert_eq!(at(&v, "g"), &Value::Float(1.25));
     assert_eq!(at(&v, "t"), &Value::Bool(true));
     assert_eq!(at(&v, "n"), &Value::Null);
     assert_eq!(at(&v, "ver"), &s("1.0.0"));

@@ -7,6 +7,12 @@ use crate::value::Value;
 /// Characters that end unquoted text; those without a token meaning are errors outside quotes.
 const NOT_IN_UNQUOTED: &str = "$\"{}[]:=,+#`^?!@*&\\";
 
+/// typesafe `ConfigNumber.newNumber(double)`: a whole double becomes an int (`1.0`, `1e3` → `ConfigInt`).
+fn number_from_double(d: f64) -> Value {
+    let l = d as i64;
+    if l as f64 == d { Value::Int(l) } else { Value::Float(d) }
+}
+
 pub(crate) fn is_ws(c: char) -> bool {
     c != '\n' && (c.is_whitespace() || c == '\u{feff}' || ('\u{1c}'..='\u{1f}').contains(&c))
 }
@@ -135,7 +141,7 @@ impl Lexer {
     fn number(&mut self) -> LexResult<Tok> {
         let text = self.take_while(|c| "0123456789eE+-.".contains(c));
         let value = if text.contains(['.', 'e', 'E']) {
-            text.parse::<f64>().ok().map(Value::Float)
+            text.parse::<f64>().ok().map(number_from_double)
         } else {
             text.parse::<i64>().ok().map(Value::Int)
         };
