@@ -4,6 +4,7 @@
 
 mod block_pass;
 mod context;
+mod flags;
 mod liquid;
 mod mesh;
 mod relative;
@@ -11,6 +12,7 @@ mod renderer;
 mod resource;
 mod settings;
 mod states;
+mod tints;
 mod view;
 
 pub use mesh::{CapacityReached, MAX_FACES};

@@ -96,12 +96,10 @@ impl Renderer<'_, '_, '_> {
         let (ctx, block) = (self.ctx, self.block);
 
         // Java tests light and caves first; every test is side-effect free, so the cheapest goes first
-        if let Some(cull) = face.cullface {
-            let [cx, cy, cz] = self.v.relative.get(cull.to_vector());
-            let (id, info) = block.neighbor(ctx, cx, cy, cz);
-            if info.props.culling || (info.props.culling_identical && id == block.id) {
-                return Ok(());
-            }
+        if let Some(cull) = face.cullface
+            && ctx.states.culls(block.neighbor_id(ctx, self.v.relative.get(cull.to_vector())), block.id)
+        {
+            return Ok(());
         }
         let mut facing = VectorM3f::default();
         facing.set_i(dir.to_vector());
@@ -111,8 +109,7 @@ impl Renderer<'_, '_, '_> {
             return Ok(());
         }
 
-        let [nx, ny, nz] = self.v.relative.get(dir.to_vector());
-        let (sky, block_light) = block.neighbor_light(ctx, nx, ny, nz);
+        let (sky, block_light) = block.neighbor_light(ctx, self.v.relative.get(dir.to_vector()));
         let sun = block.sky.max(sky);
         let block_light = block.block_light.max(block_light);
         if block.culled_as_cave(ctx, sun, block_light) {
@@ -136,7 +133,7 @@ impl Renderer<'_, '_, '_> {
         }
 
         let tint = if face.tinted {
-            let t = *self.tint.get_or_insert_with(|| ctx.tint(block.info, block.x, block.y, block.z));
+            let t = *self.tint.get_or_insert_with(|| ctx.tint(block.id, block.info, block.x, block.y, block.z));
             [t.r, t.g, t.b]
         } else {
             [1.0; 3]

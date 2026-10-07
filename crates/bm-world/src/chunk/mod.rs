@@ -115,6 +115,11 @@ impl Chunk {
         })
     }
 
+    /// Whether [`Chunk::biome`] is constant over every aligned 4×4×4 cell: all formats but 1.13–1.14's per-column ids.
+    pub fn biome_cells(&self) -> bool {
+        !matches!(self.legacy_biomes, Some(LegacyBiomes::Columns(_)))
+    }
+
     /// `(sky, block)` light, with BlueMap's fallbacks: open sky without light data, dark below the lowest section.
     pub fn light(&self, x: i32, y: i32, z: i32) -> (u8, u8) {
         if !self.has_light {

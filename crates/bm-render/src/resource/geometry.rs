@@ -16,8 +16,7 @@ impl Renderer<'_, '_, '_> {
     }
 
     fn occluding(&self, offset: [i32; 3]) -> bool {
-        let [dx, dy, dz] = self.v.relative.get(offset);
-        self.block.neighbor(self.ctx, dx, dy, dz).1.props.occluding
+        self.block.neighbor_flags(self.ctx, self.v.relative.get(offset)).occluding()
     }
 
     /// `testAo`: one corner of a face, in element space.

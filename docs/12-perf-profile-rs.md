@@ -156,3 +156,27 @@ Starting point on testbox: compat 53.4 s CPU / 5.7 s / ~435 MB / 84 MB disk, opt
   (and so the unit tests) still decode and compare every blob, and `oracle_optimized` passes.
 - **Next candidates:** `Block::neighbor` (~10%), liquids (5%), `Volume::fill` (5%), and gzip, still ~13% after
   libdeflate. Compat-mode gzip can't drop further without a format change, which is what optimized storage is.
+
+## Round 4 (render CPU, from master `82ae6a5`)
+
+Structures on testbox, 3 interleaved runs, each commit measured against the previous one. In total, compat CPU fell
+47.7–48.0 s → 27.0–27.1 s (−44%) and wall 5.2–5.6 s → 3.4–3.6 s.
+
+| commit | change | CPU |
+|---|---|---|
+| `0304edd` | neighbour reads via one flag byte per state; rotated offsets carry a precomputed volume step | −4.5% |
+| `42d088c` | air/water/waterlogged bits copied into `StateInfo`; variant weights contiguous for the pick | −2.4% |
+| `408a453` | buried blocks: a state whose faces all have in-range cullfaces, every one culled, is skipped like air | −29% |
+| `4c67d27` | submerged plain water skipped the same way (`flags.rs`) | −7.5% |
+| `208edd3` | tints: if the 5×3×5 blend box is one biome, one cached blend per tile, state and biome | −6.6% |
+
+- **Skips stay exact:** debug builds re-render every skipped block and assert it adds no faces and no colour. They
+  also compare every cached tint with the full blend. The debug golden run exercises both. Swamp grass (noise) and
+  1.13–1.14 per-column biomes always take the full blend.
+- **Tried and dropped** (noise is ±1%):
+  - per-face precomputed tables: +3%, because each table entry is several times larger
+  - division-free palette unpacking, per column or per section: +1.5%; the fill is bound by memory traffic
+  - interleaving state and light: +1.5%
+  - caching AO neighbours, forced inlining, gathering corners after culling: +1–2.4%
+  - running-max column light, per-biome colour cache inside the blend, reordered cullface checks: neutral
+- **Left:** compat gzip ~30% (fixed by the format), `Volume::fill` ~10%, face meshing ~11%.

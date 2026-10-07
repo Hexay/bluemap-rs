@@ -12,7 +12,8 @@ use bm_resources::resource_pack::ResourcePack;
 use bm_resources::texture::TextureGallery;
 use bm_world::{BlockState, BlockStates, StateId};
 
-use crate::relative::RelativeOffsets;
+use crate::flags::{Flags, Hidden};
+use crate::relative::{Offset, RelativeOffsets};
 
 /// Resolved `BlockProperties` (undefined reads as false).
 #[derive(Clone, Copy, Debug, Default)]
@@ -57,24 +58,26 @@ pub struct VariantInfo<'a> {
 }
 
 pub struct SetInfo<'a> {
-    set: &'a VariantSet,
     pub variants: Vec<VariantInfo<'a>>,
+    /// The variants' weights, contiguous for the pick loop.
+    weights: Box<[f64]>,
+    total_weight: f64,
+    /// One variant the pick always takes: a finite non-negative weight wins the loop's first step.
+    only: bool,
 }
 
 impl SetInfo<'_> {
     /// `VariantSet.pick` as an index.
     pub fn pick(&self, x: i32, y: i32, z: i32) -> Option<&VariantInfo<'_>> {
-        if let [only] = &*self.variants
-            && only.variant.weight >= 0.0
-            && only.variant.weight.is_finite()
-        {
-            return Some(only);
+        if self.only {
+            return self.variants.first();
         }
-        let mut selection = f64::from(hash_to_float(x, y, z)) * self.set.total_weight();
-        self.variants.iter().find(|v| {
-            selection -= v.variant.weight;
+        let mut selection = f64::from(hash_to_float(x, y, z)) * self.total_weight;
+        let i = self.weights.iter().position(|w| {
+            selection -= w;
             selection <= 0.0
-        })
+        })?;
+        Some(&self.variants[i])
     }
 }
 
@@ -85,20 +88,25 @@ pub struct StateInfo<'a> {
     pub liquid_level: i32,
     /// The matching sets in `forEach` order; empty when there is no blockstate file.
     pub sets: Vec<SetInfo<'a>>,
+    /// Copies of the `state` bits read per block, so they don't chase the `Arc`.
+    air: bool,
+    water: bool,
+    renders_water: bool,
+    pub(crate) hidden: Hidden,
 }
 
 impl StateInfo<'_> {
     pub fn is_air(&self) -> bool {
-        self.state.is_air
+        self.air
     }
 
     pub fn is_water(&self) -> bool {
-        self.state.is_water
+        self.water
     }
 
     /// Rendered with an extra water model.
     pub fn renders_water(&self) -> bool {
-        self.state.waterlogged || self.props.always_waterlogged
+        self.renders_water
     }
 }
 
@@ -107,6 +115,7 @@ pub struct StateCache<'a> {
     pack: &'a ResourcePack,
     gallery: &'a TextureGallery,
     infos: Vec<StateInfo<'a>>,
+    flags: Vec<Flags>,
     /// `BlockState.WATER`: `minecraft:water` without properties.
     pub water: StateId,
 }
@@ -114,7 +123,7 @@ pub struct StateCache<'a> {
 impl<'a> StateCache<'a> {
     pub fn new(pack: &'a ResourcePack, gallery: &'a TextureGallery, registry: &BlockStates) -> Self {
         let water = registry.intern("minecraft:water", &mut []);
-        let mut cache = Self { pack, gallery, infos: Vec::new(), water };
+        let mut cache = Self { pack, gallery, infos: Vec::new(), flags: Vec::new(), water };
         cache.update(registry);
         cache
     }
@@ -123,6 +132,9 @@ impl<'a> StateCache<'a> {
     pub fn update(&mut self, registry: &BlockStates) {
         for id in self.infos.len()..registry.len() {
             let info = self.resolve(registry.get(StateId(id as u32)));
+            let p = info.props;
+            let watery = info.is_water() || info.renders_water();
+            self.flags.push(Flags::new(info.is_air(), p.culling, p.culling_identical, p.occluding, watery));
             self.infos.push(info);
         }
     }
@@ -139,6 +151,16 @@ impl<'a> StateCache<'a> {
         &self.infos[id.0 as usize]
     }
 
+    pub(crate) fn flags(&self, id: StateId) -> Flags {
+        self.flags[id.0 as usize]
+    }
+
+    /// Whether `neighbor` culls a face of `own` it covers.
+    pub(crate) fn culls(&self, neighbor: StateId, own: StateId) -> bool {
+        let flags = self.flags(neighbor);
+        flags.culling() || (flags.culling_identical() && neighbor == own)
+    }
+
     fn resolve(&self, state: Arc<BlockState>) -> StateInfo<'a> {
         let pack = self.pack;
         let mut sets = Vec::new();
@@ -148,11 +170,28 @@ impl<'a> StateCache<'a> {
             let parts = def.multipart.iter().flat_map(|m| &m.parts);
             sets.extend(parts.filter(|p| p.condition.matches(&state)).map(|s| self.set_info(s)));
         }
-        StateInfo { props: pack.block_properties(&state).into(), liquid_level: liquid_level(&state), sets, state }
+        let props: Props = pack.block_properties(&state).into();
+        let renders_water = state.waterlogged || props.always_waterlogged;
+        StateInfo {
+            air: state.is_air,
+            water: state.is_water,
+            renders_water,
+            hidden: if renders_water { Hidden::Never } else { hidden(&sets, state.is_water) },
+            props,
+            liquid_level: liquid_level(&state),
+            sets,
+            state,
+        }
     }
 
     fn set_info(&self, set: &'a VariantSet) -> SetInfo<'a> {
-        SetInfo { set, variants: set.variants.iter().map(|v| self.variant_info(v)).collect() }
+        let weights: Box<[f64]> = set.variants.iter().map(|v| v.weight).collect();
+        SetInfo {
+            variants: set.variants.iter().map(|v| self.variant_info(v)).collect(),
+            only: matches!(*weights, [w] if w >= 0.0 && w.is_finite()),
+            weights,
+            total_weight: set.total_weight(),
+        }
     }
 
     fn variant_info(&self, variant: &'a Variant) -> VariantInfo<'a> {
@@ -185,6 +224,31 @@ impl<'a> StateCache<'a> {
             color: path.and_then(|p| self.pack.textures.get(p)).map(|t| t.color_premultiplied()),
         }
     }
+}
+
+/// [`Hidden`] for a state not rendered with extra water. A face without an in-range cullface, or a liquid variant
+/// mixed with others or of another liquid, could render whatever the neighbours are.
+fn hidden(sets: &[SetInfo], is_water: bool) -> Hidden {
+    let mut variants = sets.iter().flat_map(|s| &s.variants).peekable();
+    let liquid = |v: &VariantInfo| v.renderer == RendererType::Liquid;
+    if is_water && variants.peek().is_some() && variants.clone().all(liquid) {
+        return Hidden::Water;
+    }
+    let mut slots = 0u32;
+    for v in variants {
+        if liquid(v) {
+            return Hidden::Never;
+        }
+        for face in v.model.iter().flat_map(|m| &m.elements).flat_map(|e| e.faces.iter().flatten()) {
+            let Some(cull) = face.cullface else { return Hidden::Never };
+            let slot = v.relative.get(cull.to_vector()).slot;
+            if slot == Offset::FAR {
+                return Hidden::Never;
+            }
+            slots |= 1 << slot;
+        }
+    }
+    Hidden::Cullfaces(slots)
 }
 
 /// `level` clamped to 0..=15; absent or unparseable is 0.

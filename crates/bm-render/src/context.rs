@@ -5,7 +5,9 @@ use bm_resources::datapack::BiomeTable;
 use bm_resources::resource_pack::ResourcePack;
 use bm_world::StateId;
 
+use crate::relative::Offset;
 use crate::settings::RenderSettings;
+use crate::flags::Flags;
 use crate::states::{StateCache, StateInfo};
 use crate::view::View;
 
@@ -18,9 +20,14 @@ pub(crate) struct Ctx<'r, 'a> {
 }
 
 impl<'r, 'a> Ctx<'r, 'a> {
-    /// `BlockColorCalculator.getBlockColor` for `state` at the position.
-    pub fn tint(&self, state: &StateInfo, x: i32, y: i32, z: i32) -> Color {
-        self.pack.block_colors.color(&state.state, (x, y, z), self.biomes, |x, y, z| self.view.biome(x, y, z))
+    /// `BlockColorCalculator.getBlockColor` for `state` (`id`) at the position.
+    pub fn tint(&self, id: StateId, state: &StateInfo, x: i32, y: i32, z: i32) -> Color {
+        let colors = &self.pack.block_colors;
+        let uniform = |biome| colors.uniform_blend(&state.state, self.biomes.get(biome));
+        let full = || colors.color(&state.state, (x, y, z), self.biomes, |x, y, z| self.view.biome(x, y, z));
+        let tint = self.view.uniform_tint(id, (x, y, z), uniform).unwrap_or_else(full);
+        debug_assert_eq!(tint, full());
+        tint
     }
 }
 
@@ -57,24 +64,36 @@ impl<'r, 'a> Block<'r, 'a> {
     }
 
     /// The neighbour's volume index when the direct read is in bounds.
-    fn neighbor_index(&self, ctx: &Ctx, dx: i32, dy: i32, dz: i32) -> Option<usize> {
-        let unit = |d: i32| d.wrapping_add(1) as u32 <= 2;
-        let i = self.index.filter(|_| unit(dx) && unit(dy) && unit(dz))?;
-        Some(ctx.view.step(i, dx, dy, dz))
+    fn neighbor_index(&self, ctx: &Ctx, o: Offset) -> Option<usize> {
+        let i = self.index.filter(|_| o.slot != Offset::FAR)?;
+        Some(ctx.view.step(i, o.slot))
     }
 
-    pub fn neighbor(&self, ctx: &Ctx<'r, 'a>, dx: i32, dy: i32, dz: i32) -> (StateId, &'r StateInfo<'a>) {
-        let id = match self.neighbor_index(ctx, dx, dy, dz) {
+    pub fn neighbor_id(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> StateId {
+        match self.neighbor_index(ctx, o) {
             Some(i) => ctx.view.state_at(i),
-            None => ctx.view.state(self.x + dx, self.y + dy, self.z + dz),
-        };
-        (id, ctx.states.get(id))
+            None => {
+                let [dx, dy, dz] = o.get();
+                ctx.view.state(self.x + dx, self.y + dy, self.z + dz)
+            }
+        }
     }
 
-    pub fn neighbor_light(&self, ctx: &Ctx<'r, 'a>, dx: i32, dy: i32, dz: i32) -> (u8, u8) {
-        match self.neighbor_index(ctx, dx, dy, dz) {
+    pub fn neighbor(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> &'r StateInfo<'a> {
+        ctx.states.get(self.neighbor_id(ctx, o))
+    }
+
+    pub fn neighbor_flags(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> Flags {
+        ctx.states.flags(self.neighbor_id(ctx, o))
+    }
+
+    pub fn neighbor_light(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> (u8, u8) {
+        match self.neighbor_index(ctx, o) {
             Some(i) => ctx.view.light_at(i),
-            None => ctx.view.light(self.x + dx, self.y + dy, self.z + dz),
+            None => {
+                let [dx, dy, dz] = o.get();
+                ctx.view.light(self.x + dx, self.y + dy, self.z + dz)
+            }
         }
     }
 

@@ -6,9 +6,11 @@
 
 use std::cell::Cell;
 
+use bm_math::Color;
 use bm_world::{BiomeId, Chunk, ChunkArea, StateId};
 
 use crate::settings::{RenderMask, RenderSettings};
+use crate::tints::UniformTints;
 
 /// Blocks around the tile the renderers read states and light of (AO diagonals, liquid corners).
 const BORDER: i32 = 1;
@@ -75,6 +77,9 @@ pub(crate) struct Volume {
     /// Biome ids, read on first use: only tinted blocks need them, 75 each (`BLEND`).
     biome_bounds: Bounds,
     biomes: Vec<Cell<u16>>,
+    /// Every chunk the blends read stores biomes per 4×4×4 cell.
+    biome_cells: bool,
+    tints: UniformTints,
 }
 
 /// Blocks the biome blend reaches around a block.
@@ -113,12 +118,6 @@ impl Bounds {
         let interior = |p: i32, s: i32| p >= 1 && p < s - 1;
         (interior(dx, w) && interior(dy, h) && interior(dz, d)).then(|| ((dx * d + dz) * h + dy) as usize)
     }
-
-    /// The index `(dx, dy, dz)` away from `i`.
-    fn step(&self, i: usize, dx: i32, dy: i32, dz: i32) -> usize {
-        let [_, h, d] = self.size;
-        i.wrapping_add_signed(((dx * d + dz) * h + dy) as isize)
-    }
 }
 
 impl Volume {
@@ -153,6 +152,11 @@ impl Volume {
         self.biome_bounds = Bounds::new([min[0] - BLEND, y0, min[1] - BLEND], [max[0] + BLEND, y1, max[1] + BLEND]);
         self.biomes.clear();
         self.biomes.resize(self.biome_bounds.len(), Cell::new(UNREAD));
+        let chunks = |lo: i32, hi: i32| (lo >> 4)..=(hi >> 4);
+        self.biome_cells = chunks(min[0] - BLEND, max[0] + BLEND).all(|cx| {
+            chunks(min[1] - BLEND, max[1] + BLEND).all(|cz| area.chunk(cx, cz).is_none_or(Chunk::biome_cells))
+        });
+        self.tints.clear();
     }
 
     fn biome(&self, area: &ChunkArea, x: i32, y: i32, z: i32) -> BiomeId {
@@ -169,11 +173,18 @@ pub(crate) struct View<'a> {
     pub area: &'a ChunkArea,
     masking: Masking<'a>,
     volume: &'a Volume,
+    /// Index distance per [`crate::relative::Offset::slot`].
+    steps: [isize; 27],
 }
 
 impl<'a> View<'a> {
     pub fn new(area: &'a ChunkArea, masking: Masking<'a>, volume: &'a Volume) -> Self {
-        Self { area, masking, volume }
+        let steps = std::array::from_fn(|k| {
+            let [_, h, d] = volume.bounds.size;
+            let [dx, dy, dz] = [k as i32 / 9 - 1, k as i32 / 3 % 3 - 1, k as i32 % 3 - 1];
+            ((dx * d + dz) * h + dy) as isize
+        });
+        Self { area, masking, volume, steps }
     }
 
     pub fn inside(&self, x: i32, y: i32, z: i32) -> bool {
@@ -206,8 +217,9 @@ impl<'a> View<'a> {
         self.volume.bounds.interior_index(x, y, z)
     }
 
-    pub fn step(&self, i: usize, dx: i32, dy: i32, dz: i32) -> usize {
-        self.volume.bounds.step(i, dx, dy, dz)
+    /// The index `slot` (a [`crate::relative::Offset::slot`] other than `FAR`) away from `i`.
+    pub fn step(&self, i: usize, slot: u8) -> usize {
+        i.wrapping_add_signed(self.steps[slot as usize])
     }
 
     pub fn state_at(&self, i: usize) -> StateId {
@@ -222,6 +234,29 @@ impl<'a> View<'a> {
 
     pub fn biome(&self, x: i32, y: i32, z: i32) -> BiomeId {
         self.volume.biome(self.area, x, y, z)
+    }
+
+    /// The blended tint of `state` at a block whose blend samples (±2, ±1, ±2) all lie in one biome, from `compute`
+    /// once per state and biome; `None` when the samples differ or `compute` has no uniform tint.
+    pub fn uniform_tint(
+        &self,
+        state: StateId,
+        (x, y, z): (i32, i32, i32),
+        compute: impl FnOnce(BiomeId) -> Option<Color>,
+    ) -> Option<Color> {
+        if !self.volume.biome_cells {
+            return None;
+        }
+        // with biomes constant per aligned 4-cube, a 5×3×5 box spans at most two cells per axis: its corners cover them
+        let b = BLEND;
+        let [first, rest @ ..] =
+            [(-b, -1, -b), (-b, -1, b), (-b, 1, -b), (-b, 1, b), (b, -1, -b), (b, -1, b), (b, 1, -b), (b, 1, b)];
+        let at = |(dx, dy, dz)| self.biome(x + dx, y + dy, z + dz);
+        let biome = at(first);
+        if !rest.into_iter().all(|corner| at(corner) == biome) {
+            return None;
+        }
+        self.volume.tints.get_or_insert_with(state, biome, || compute(biome))
     }
 
     pub fn ocean_floor_y(&self, x: i32, z: i32) -> Option<i32> {
