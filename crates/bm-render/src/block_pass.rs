@@ -39,7 +39,7 @@ pub(crate) fn render(
                     }
                     let index = top.map(|t| t - (max_y - y) as usize);
                     // air renders nothing and leaves the colour alone; only its light reaches the column
-                    if let Some(i) = index.filter(|&i| ctx.states.get(ctx.view.state_at(i)).is_air()) {
+                    if let Some(i) = index.filter(|&i| ctx.states.flags(ctx.view.state_at(i)).is_air()) {
                         light_under(ctx.view.light_at(i).1, &column_color);
                         continue;
                     }

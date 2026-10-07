@@ -5,8 +5,9 @@ use bm_resources::datapack::BiomeTable;
 use bm_resources::resource_pack::ResourcePack;
 use bm_world::StateId;
 
+use crate::relative::Offset;
 use crate::settings::RenderSettings;
-use crate::states::{StateCache, StateInfo};
+use crate::states::{Flags, StateCache, StateInfo};
 use crate::view::View;
 
 pub(crate) struct Ctx<'r, 'a> {
@@ -57,24 +58,36 @@ impl<'r, 'a> Block<'r, 'a> {
     }
 
     /// The neighbour's volume index when the direct read is in bounds.
-    fn neighbor_index(&self, ctx: &Ctx, dx: i32, dy: i32, dz: i32) -> Option<usize> {
-        let unit = |d: i32| d.wrapping_add(1) as u32 <= 2;
-        let i = self.index.filter(|_| unit(dx) && unit(dy) && unit(dz))?;
-        Some(ctx.view.step(i, dx, dy, dz))
+    fn neighbor_index(&self, ctx: &Ctx, o: Offset) -> Option<usize> {
+        let i = self.index.filter(|_| o.slot != Offset::FAR)?;
+        Some(ctx.view.step(i, o.slot))
     }
 
-    pub fn neighbor(&self, ctx: &Ctx<'r, 'a>, dx: i32, dy: i32, dz: i32) -> (StateId, &'r StateInfo<'a>) {
-        let id = match self.neighbor_index(ctx, dx, dy, dz) {
+    pub fn neighbor_id(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> StateId {
+        match self.neighbor_index(ctx, o) {
             Some(i) => ctx.view.state_at(i),
-            None => ctx.view.state(self.x + dx, self.y + dy, self.z + dz),
-        };
-        (id, ctx.states.get(id))
+            None => {
+                let [dx, dy, dz] = o.get();
+                ctx.view.state(self.x + dx, self.y + dy, self.z + dz)
+            }
+        }
     }
 
-    pub fn neighbor_light(&self, ctx: &Ctx<'r, 'a>, dx: i32, dy: i32, dz: i32) -> (u8, u8) {
-        match self.neighbor_index(ctx, dx, dy, dz) {
+    pub fn neighbor(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> &'r StateInfo<'a> {
+        ctx.states.get(self.neighbor_id(ctx, o))
+    }
+
+    pub fn neighbor_flags(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> Flags {
+        ctx.states.flags(self.neighbor_id(ctx, o))
+    }
+
+    pub fn neighbor_light(&self, ctx: &Ctx<'r, 'a>, o: Offset) -> (u8, u8) {
+        match self.neighbor_index(ctx, o) {
             Some(i) => ctx.view.light_at(i),
-            None => ctx.view.light(self.x + dx, self.y + dy, self.z + dz),
+            None => {
+                let [dx, dy, dz] = o.get();
+                ctx.view.light(self.x + dx, self.y + dy, self.z + dz)
+            }
         }
     }
 

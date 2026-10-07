@@ -113,12 +113,6 @@ impl Bounds {
         let interior = |p: i32, s: i32| p >= 1 && p < s - 1;
         (interior(dx, w) && interior(dy, h) && interior(dz, d)).then(|| ((dx * d + dz) * h + dy) as usize)
     }
-
-    /// The index `(dx, dy, dz)` away from `i`.
-    fn step(&self, i: usize, dx: i32, dy: i32, dz: i32) -> usize {
-        let [_, h, d] = self.size;
-        i.wrapping_add_signed(((dx * d + dz) * h + dy) as isize)
-    }
 }
 
 impl Volume {
@@ -169,11 +163,18 @@ pub(crate) struct View<'a> {
     pub area: &'a ChunkArea,
     masking: Masking<'a>,
     volume: &'a Volume,
+    /// Index distance per [`crate::relative::Offset::slot`].
+    steps: [isize; 27],
 }
 
 impl<'a> View<'a> {
     pub fn new(area: &'a ChunkArea, masking: Masking<'a>, volume: &'a Volume) -> Self {
-        Self { area, masking, volume }
+        let steps = std::array::from_fn(|k| {
+            let [_, h, d] = volume.bounds.size;
+            let [dx, dy, dz] = [k as i32 / 9 - 1, k as i32 / 3 % 3 - 1, k as i32 % 3 - 1];
+            ((dx * d + dz) * h + dy) as isize
+        });
+        Self { area, masking, volume, steps }
     }
 
     pub fn inside(&self, x: i32, y: i32, z: i32) -> bool {
@@ -206,8 +207,9 @@ impl<'a> View<'a> {
         self.volume.bounds.interior_index(x, y, z)
     }
 
-    pub fn step(&self, i: usize, dx: i32, dy: i32, dz: i32) -> usize {
-        self.volume.bounds.step(i, dx, dy, dz)
+    /// The index `slot` (a [`crate::relative::Offset::slot`] other than `FAR`) away from `i`.
+    pub fn step(&self, i: usize, slot: u8) -> usize {
+        i.wrapping_add_signed(self.steps[slot as usize])
     }
 
     pub fn state_at(&self, i: usize) -> StateId {

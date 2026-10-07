@@ -102,11 +102,50 @@ impl StateInfo<'_> {
     }
 }
 
+/// The [`StateInfo`] bits neighbour tests read, one byte per state so they stay in cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Flags(u8);
+
+impl Flags {
+    const AIR: u8 = 1;
+    const CULLING: u8 = 2;
+    const CULLING_IDENTICAL: u8 = 4;
+    const OCCLUDING: u8 = 8;
+
+    fn of(info: &StateInfo) -> Self {
+        let bit = |set: bool, b: u8| if set { b } else { 0 };
+        let p = info.props;
+        Self(
+            bit(info.is_air(), Self::AIR)
+                | bit(p.culling, Self::CULLING)
+                | bit(p.culling_identical, Self::CULLING_IDENTICAL)
+                | bit(p.occluding, Self::OCCLUDING),
+        )
+    }
+
+    pub fn is_air(self) -> bool {
+        self.0 & Self::AIR != 0
+    }
+
+    pub fn culling(self) -> bool {
+        self.0 & Self::CULLING != 0
+    }
+
+    pub fn culling_identical(self) -> bool {
+        self.0 & Self::CULLING_IDENTICAL != 0
+    }
+
+    pub fn occluding(self) -> bool {
+        self.0 & Self::OCCLUDING != 0
+    }
+}
+
 /// Dense per-state table. Build after the chunks to render are loaded: chunk decoding interns new states.
 pub struct StateCache<'a> {
     pack: &'a ResourcePack,
     gallery: &'a TextureGallery,
     infos: Vec<StateInfo<'a>>,
+    flags: Vec<Flags>,
     /// `BlockState.WATER`: `minecraft:water` without properties.
     pub water: StateId,
 }
@@ -114,7 +153,7 @@ pub struct StateCache<'a> {
 impl<'a> StateCache<'a> {
     pub fn new(pack: &'a ResourcePack, gallery: &'a TextureGallery, registry: &BlockStates) -> Self {
         let water = registry.intern("minecraft:water", &mut []);
-        let mut cache = Self { pack, gallery, infos: Vec::new(), water };
+        let mut cache = Self { pack, gallery, infos: Vec::new(), flags: Vec::new(), water };
         cache.update(registry);
         cache
     }
@@ -123,6 +162,7 @@ impl<'a> StateCache<'a> {
     pub fn update(&mut self, registry: &BlockStates) {
         for id in self.infos.len()..registry.len() {
             let info = self.resolve(registry.get(StateId(id as u32)));
+            self.flags.push(Flags::of(&info));
             self.infos.push(info);
         }
     }
@@ -137,6 +177,10 @@ impl<'a> StateCache<'a> {
 
     pub fn get(&self, id: StateId) -> &StateInfo<'a> {
         &self.infos[id.0 as usize]
+    }
+
+    pub(crate) fn flags(&self, id: StateId) -> Flags {
+        self.flags[id.0 as usize]
     }
 
     fn resolve(&self, state: Arc<BlockState>) -> StateInfo<'a> {

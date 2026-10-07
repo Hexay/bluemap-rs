@@ -9,6 +9,7 @@ use bm_resources::model::Direction;
 
 use crate::context::{Block, Ctx};
 use crate::mesh::{CapacityReached, Face, MeshExt};
+use crate::relative::Offset;
 use crate::states::{StateInfo, VariantInfo};
 
 const BLOCK_SCALE: f32 = 1.0 / 16.0;
@@ -44,7 +45,7 @@ impl Liquid<'_, '_, '_> {
         }
 
         let level = self.liquid.liquid_level;
-        let top = if level < 8 && !(level == 0 && self.same_liquid(block.neighbor(ctx, 0, 1, 0).1)) {
+        let top = if level < 8 && !(level == 0 && self.same_liquid(block.neighbor(ctx, Offset::new(0, 1, 0)))) {
             [self.corner_height(-1, -1), self.corner_height(-1, 0), self.corner_height(0, -1), self.corner_height(0, 0)]
         } else {
             [16.0; 4]
@@ -112,7 +113,7 @@ impl Liquid<'_, '_, '_> {
         let (ctx, block) = (self.ctx, self.block);
         for ix in x..=x + 1 {
             for iz in z..=z + 1 {
-                if self.same_liquid(block.neighbor(ctx, ix, 1, iz).1) {
+                if self.same_liquid(block.neighbor(ctx, Offset::new(ix, 1, iz))) {
                     return 16.0;
                 }
             }
@@ -120,7 +121,7 @@ impl Liquid<'_, '_, '_> {
         let (mut sum, mut count) = (0.0f32, 0);
         for ix in x..=x + 1 {
             for iz in z..=z + 1 {
-                let neighbor = block.neighbor(ctx, ix, 0, iz).1;
+                let neighbor = block.neighbor(ctx, Offset::new(ix, 0, iz));
                 if self.same_liquid(neighbor) {
                     if neighbor.liquid_level == 0 {
                         return 14.0;
@@ -145,7 +146,8 @@ impl Liquid<'_, '_, '_> {
     ) -> Result<bool, CapacityReached> {
         let (ctx, block) = (self.ctx, self.block);
         let [dx, dy, dz] = dir.to_vector();
-        let neighbor = block.neighbor(ctx, dx, dy, dz).1;
+        let to_neighbor = Offset::new(dx, dy, dz);
+        let neighbor = block.neighbor(ctx, to_neighbor);
         if self.same_liquid(neighbor) || (dir != Direction::Up && neighbor.props.culling) {
             return Ok(false);
         }
@@ -170,7 +172,7 @@ impl Liquid<'_, '_, '_> {
         }
 
         let (sky, block_light) =
-            if dir == Direction::Up { (block.sky, block.block_light) } else { block.neighbor_light(ctx, dx, dy, dz) };
+            if dir == Direction::Up { (block.sky, block.block_light) } else { block.neighbor_light(ctx, to_neighbor) };
         let material = if flow { self.v.flow.id } else { self.v.still.id };
         let uv = uvs.map(|v| [v.x, v.y]);
         let tri = |a: usize, b: usize, d: usize| Face {
@@ -206,7 +208,7 @@ impl Liquid<'_, '_, '_> {
     }
 
     fn compare_heights(&self, own: f32, dx: i32, dz: i32) -> f32 {
-        let neighbor = self.block.neighbor(self.ctx, dx, 0, dz).1;
+        let neighbor = self.block.neighbor(self.ctx, Offset::new(dx, 0, dz));
         if neighbor.is_air() || !self.same_liquid(neighbor) {
             return 0.0;
         }
