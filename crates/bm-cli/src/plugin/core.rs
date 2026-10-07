@@ -11,6 +11,7 @@ use super::Hello;
 use super::live::LiveData;
 use super::outbox::Outbox;
 use super::session::{NotReady, Session, world_id};
+use super::tasks_dat;
 use crate::log;
 
 pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -80,6 +81,7 @@ impl Core {
                 let session = Arc::new(session);
                 self.live.publish_players(&session);
                 *self.session.write().unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+                tasks_dat::resume(&session);
                 self.out.send(CoreMsg::Ready(Box::new(self.ready_info(&session))));
                 log::info("Loaded!");
                 true
@@ -107,6 +109,7 @@ impl Core {
         }
         if session.is_loaded() {
             self.live.write_markers(&session);
+            tasks_dat::save(&session);
         }
         session.unload();
         if reloading {
@@ -125,6 +128,7 @@ impl Core {
     pub fn save(&self) {
         if let Some(s) = self.session().filter(|s| s.is_loaded()) {
             s.save_state();
+            tasks_dat::save(&s);
             self.live.write_markers(&s);
         }
     }

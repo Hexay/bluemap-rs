@@ -13,6 +13,7 @@ import bluemaprs.paper.ipc.Proto;
 import bluemaprs.paper.ipc.Proto.ReadyInfo;
 import bluemaprs.paper.markers.MarkerPusher;
 import bluemaprs.paper.players.PlayerTracker;
+import bluemaprs.paper.skins.PlayerSkinUpdater;
 import de.bluecolored.bluemap.core.logger.JavaLogger;
 import de.bluecolored.bluemap.core.logger.Logger;
 import io.papermc.paper.plugin.lifecycle.event.types.LifecycleEvents;
@@ -41,6 +42,7 @@ public final class BlueMapPaperPlugin extends JavaPlugin {
     private MarkerPusher markers;
     private WorldEvents worldEvents;
     private CoreSupervisor supervisor;
+    private PlayerSkinUpdater skins;
 
     public BlueMapPaperPlugin() {
         Logger.global.clear();
@@ -82,7 +84,9 @@ public final class BlueMapPaperPlugin extends JavaPlugin {
                 getPluginMeta().getVersion());
         CoreDispatcher dispatcher = new CoreDispatcher(getLogger(), link, backend, markers, command, worldEvents::save);
         supervisor = new CoreSupervisor(getLogger(), getDataFolder().toPath(), link, backend, markers, players,
-                dispatcher, this::hello, this::startMetrics);
+                dispatcher, this::hello, this::onReady);
+        skins = new PlayerSkinUpdater(backend);
+        players.setJoinListener(skins::onPlayerJoin);
 
         getServer().getPluginManager().registerEvents(players, this);
         getServer().getPluginManager().registerEvents(worldEvents, this);
@@ -102,6 +106,7 @@ public final class BlueMapPaperPlugin extends JavaPlugin {
         players.stop();
         supervisor.stop();
         markers.stop();
+        skins.stop();
         getLogger().info("Saved and stopped!");
     }
 
@@ -120,6 +125,11 @@ public final class BlueMapPaperPlugin extends JavaPlugin {
                 ServerInfo.worlds()
         );
         return new Frame(Msg.of("Hello", hello), blockstates);
+    }
+
+    private void onReady(ReadyInfo ready) {
+        skins.reset();
+        startMetrics(ready);
     }
 
     /** Own bStats id only (never upstream's 5912), and only if {@code metrics} is enabled in core.conf. */

@@ -65,7 +65,8 @@ fn match_usage(u: &'static Usage, words: &[&str], ids: &Ids) -> Option<Matched> 
             Some(name) => {
                 let known = |list: &[String]| list.is_empty() || list.iter().any(|id| id == word);
                 let ok = match name {
-                    "map" => known(ids.maps),
+                    // `storages <s> delete <map>` names maps that are not loaded
+                    "map" => u.usage.starts_with("storages") || known(ids.maps),
                     "storage" => known(ids.storages),
                     "x" | "y" | "z" | "radius" => word.parse::<i32>().is_ok(),
                     _ => true,
@@ -104,6 +105,7 @@ mod tests {
         assert_eq!((m.int("x"), m.int("z")), (Some(1), Some(-2)));
         let m = parse("bluemap storages file delete world", &ids).unwrap();
         assert_eq!(m.permission, "bluemap.storages.delete");
+        assert_eq!(parse("bluemap storages file delete old", &ids).unwrap().get("map"), Some("old"));
         assert_eq!(parse("bluemap reload light", &ids).unwrap().permission, "bluemap.reload.light");
         assert!(parse("other", &ids).is_none());
         assert!(parse("bluemap maps extra", &ids).is_none());
