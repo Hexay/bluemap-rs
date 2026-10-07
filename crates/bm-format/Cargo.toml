@@ -5,8 +5,13 @@ version.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "BlueMap's on-disk and on-the-wire formats: tile grids and paths"
+description = "BlueMap's on-disk and on-the-wire formats: tile grids and paths, PRBM, compact tiles"
 
 [dependencies]
 png.workspace = true
 thiserror.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+rayon.workspace = true

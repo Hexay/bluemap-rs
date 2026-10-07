@@ -251,8 +251,11 @@ dependencies = [
 name = "bm-format"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "png",
+ "rayon",
  "thiserror",
+ "zstd",
 ]
 
 [[package]]
@@ -355,6 +358,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "twox-hash",
 ]
 
 [[package]]
