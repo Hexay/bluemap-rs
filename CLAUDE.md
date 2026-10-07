@@ -38,7 +38,9 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`); musl builds
   use tuned mimalloc (`src/alloc.rs`)
 - `bm-ipc` — shim↔core wire protocol (stdin/stdout frames, JSON headers); crate docs are the canonical spec
-- `platforms/paper` — Java shim (Gradle, Java 21, BlueMapAPI 2.8.1 proxy); bundles the core from `natives/<target>/`
+- `platforms/` — one Gradle build (run on JDK 25): `common` (loader-neutral shim `bluemaprs.shim`, Java 21, BlueMapAPI
+  2.8.1 proxy), `paper` (Java 21), `fabric` (Java 25, no-remap Loom, dedicated servers only; docs/14); jars bundle the
+  core from `platforms/natives/<target>/`; version `5.28+rs.<crate>`
 - `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` / `compare-webroots` CLI
 
 ## Commands
@@ -54,7 +56,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   tests: `BM_TEST_MYSQL_URL=… BM_TEST_POSTGRES_URL=… cargo test -p bm-storage --test sql_remote -- --ignored`; vs Java
   over the same DBs: `py -3 tools/accept_sql.py [--servers …]`
 - Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots, upstream compare): `py -3 tools/e2e_paper.py`
-  (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one)
+  (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one); Fabric mod e2e (Fabric 26.3 + Carpet bots +
+  a Fabric addon): `py -3 tools/e2e_fabric.py` (same flags)
 - Plugin cores per target (musl via cargo-zigbuild + `pip install ziglang cargo-zigbuild`) + jars, same as CI:
   `py -3 tools/build_core.py [windows-x64 linux-x64 linux-arm64 linux-armv7 …] [--jars]`
 

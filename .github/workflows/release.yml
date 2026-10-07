@@ -1,7 +1,7 @@
 name: Release
 
-# Builds the core for every plugin target (tools/build_core.py, as locally), tests, then packs one Paper jar per
-# target plus the universal jar (docs/13 §5, §7.1). Tags `v*` publish a draft GitHub release.
+# Builds the core for every plugin target (tools/build_core.py, as locally), tests, then packs one Paper and one Fabric
+# jar per target plus the universal jars (docs/13 §5, §7.1; docs/14). Tags `v*` publish a draft GitHub release.
 on:
   push:
     tags: ["v*"]
