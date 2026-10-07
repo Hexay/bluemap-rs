@@ -21,13 +21,14 @@ from pathlib import Path
 
 import hangdump
 from bounded import run_bounded
+from paths import DEFAULT, EXE as EXE_SUFFIX, Toolchain
 
 ROOT = Path(__file__).resolve().parent.parent
 # work/ is git-ignored, so a worktree finds it in an enclosing checkout
-WORK = next(p / "work" for p in [ROOT, *ROOT.parents] if (p / "work" / "bluemap").is_dir())
-EXE = ROOT / "target" / "release" / "bluemap.exe"
-GOLDEN_EXE = ROOT / "target" / "release" / "bm-golden.exe"
-MC = "26.3"
+WORK = next((p / "work" for p in [ROOT, *ROOT.parents] if (p / "work" / "bluemap").is_dir()), ROOT / "work")
+EXE = ROOT / "target" / "release" / f"bluemap{EXE_SUFFIX}"
+GOLDEN_EXE = ROOT / "target" / "release" / f"bm-golden{EXE_SUFFIX}"
+MC = DEFAULT.mc
 DEFAULT_FIXTURES = ["vanilla", "structures", "nether", "dimensions", "debug"]
 MAP_LINE = re.compile(r"Map '([^']+)': (\d+) regions, (\d+) tiles rendered, (\d+) skipped, (\d+) deleted")
 
@@ -38,9 +39,9 @@ def set_conf(path: Path, key: str, value: str) -> None:
     path.write_text(new if n else text.rstrip() + f"\n{key}: {value}\n")
 
 
-def prepare(fixture: str, name: str, web_from: Path | None = None) -> Path:
-    """work/accept/<name> with a copy of the fixture's config, the client jar and (optionally) a copied webroot."""
-    src = WORK / "bluemap" / fixture
+def prepare(fixture: str, name: str, web_from: Path | None = None, tc: Toolchain = DEFAULT) -> Path:
+    """work/accept/<name> with a copy of the fixture's config, the client jars and (optionally) a copied webroot."""
+    src = (WORK / "bluemap" if tc == DEFAULT else tc.bluemap_root) / fixture
     out = WORK / "accept" / name
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree(src / "config", out / "config")
@@ -50,8 +51,9 @@ def prepare(fixture: str, name: str, web_from: Path | None = None) -> Path:
     set_conf(cfg / "webserver.conf", "webroot", '"web"')
     set_conf(cfg / "storages" / "file.conf", "root", '"web/maps"')
     (out / "data").mkdir()
-    jar = f"minecraft-client-{MC}.jar"
-    shutil.copy2(src / "data" / jar, out / "data" / jar)
+    # worlds older than 1.19.4 need two: the resource-pack and the data-pack version (docs/02 §1)
+    for jar in (src / "data").glob("minecraft-client-*.jar"):
+        shutil.copy2(jar, out / "data" / jar.name)
     if web_from:
         shutil.copytree(web_from, out / "web")
     return out
@@ -68,10 +70,10 @@ def stop(proc: subprocess.Popen) -> None:
         proc.wait()
 
 
-def bluemap(cwd: Path, *flags: str) -> dict[str, tuple[int, int]]:
+def bluemap(cwd: Path, *flags: str, mc: str = MC, exe: Path = EXE) -> dict[str, tuple[int, int]]:
     """Runs our CLI; returns map id → (tiles rendered, tiles processed incl. skipped/deleted)."""
     start = time.monotonic()
-    proc = run_bounded([str(EXE), "-c", "config", "-v", MC, *flags], cwd)
+    proc = run_bounded([str(exe), "-c", "config", "-v", mc, *flags], cwd)
     if proc.returncode:
         sys.exit(f"bluemap failed in {cwd} ({proc.returncode}):\n{proc.stdout[-3000:]}\n{proc.stderr[-3000:]}")
     maps = {m[0]: (int(m[2]), int(m[2]) + int(m[3]) + int(m[4])) for m in MAP_LINE.findall(proc.stdout)}

@@ -9,10 +9,11 @@ import sys
 from pathlib import Path
 
 from accept import EXE, MC, WORK, prepare, set_conf
+from paths import DEFAULT, EXE as EXE_SUFFIX
 
 TOOLS = Path(__file__).resolve().parent
-JAVA = WORK / "downloads" / "jdk25" / "bin" / "java.exe"
-JAR = WORK / "downloads" / "bluemap-5.28-cli.jar"
+JAVA = WORK / "downloads" / f"jdk{DEFAULT.bluemap_java_major}" / "bin" / f"java{EXE_SUFFIX}"
+JAR = WORK / "downloads" / DEFAULT.bluemap_jar.name
 
 
 def main() -> None:

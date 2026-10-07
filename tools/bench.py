@@ -12,6 +12,7 @@ Example (Java BlueMap baseline; render_serve.py vanilla-512 --no-render --no-ser
 import argparse
 import ctypes
 import json
+import os
 import shutil
 import statistics
 import subprocess
@@ -46,21 +47,55 @@ def process_stats(handle) -> tuple[float, int]:
     return cpu, mem.PeakWorkingSetSize
 
 
+def wait_stats(proc: subprocess.Popen) -> tuple[int, float, int]:
+    """Waits for `proc`: (exit code, user+kernel CPU seconds, peak RSS / working set bytes)."""
+    if sys.platform == "win32":
+        proc.wait()
+        return proc.returncode, *process_stats(proc._handle)
+    _, status, usage = os.wait4(proc.pid, 0)
+    proc.returncode = os.waitstatus_to_exitcode(status)
+    return proc.returncode, usage.ru_utime + usage.ru_stime, usage.ru_maxrss * 1024
+
+
 def run_once(cmd: list[str], timings_path: Path, cwd: Path = ROOT) -> dict:
     t = time.perf_counter()
-    proc = subprocess.Popen([c.replace("{timings}", str(timings_path)) for c in cmd], cwd=cwd,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    _, err = proc.communicate()
-    wall = time.perf_counter() - t
-    if proc.returncode:
-        raise SystemExit(f"command failed ({proc.returncode}): {err.decode(errors='replace')[-2000:]}")
-    cpu, peak = process_stats(proc._handle)
+    with tempfile.TemporaryFile() as err:
+        proc = subprocess.Popen([c.replace("{timings}", str(timings_path)) for c in cmd], cwd=cwd,
+                                stdout=subprocess.DEVNULL, stderr=err)
+        code, cpu, peak = wait_stats(proc)
+        wall = time.perf_counter() - t
+        if code:
+            err.seek(0)
+            raise SystemExit(f"command failed ({code}): {err.read().decode(errors='replace')[-2000:]}")
     stages = json.loads(timings_path.read_text()) if timings_path.exists() else {}
     return {"wall": wall, "cpu": cpu, "peak_mb": peak / 2**20, "stages": stages}
 
 
 def summary(values: list[float]) -> dict:
     return {"median": round(statistics.median(values), 3), "min": round(min(values), 3), "max": round(max(values), 3)}
+
+
+def record(label: str, runs: list[dict], **extra) -> dict:
+    """Prints the medians of `runs` and appends them (plus `extra` fields) to docs/results/bench.jsonl."""
+    stages = {s: summary([r["stages"][s] for r in runs if s in r["stages"]]) for s in runs[0]["stages"]}
+    line = {
+        "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip(),
+        "label": label,
+        "runs": len(runs),
+        "wall_s": summary([r["wall"] for r in runs]),
+        "cpu_s": summary([r["cpu"] for r in runs]),
+        "peak_mb": summary([r["peak_mb"] for r in runs]),
+        "stages_s": {s: v["median"] for s, v in stages.items()},
+        **extra,
+    }
+    print(f"{label}: wall {line['wall_s']['median']}s  cpu {line['cpu_s']['median']}s  peak {line['peak_mb']['median']:.0f} MB (median of {len(runs)})")
+    for s, v in stages.items():
+        print(f"  {s:<26} {v['median']:>8.3f}s  [{v['min']:.3f} .. {v['max']:.3f}]")
+    RESULTS.mkdir(exist_ok=True)
+    with open(RESULTS / "bench.jsonl", "a") as f:
+        f.write(json.dumps(line) + "\n")
+    return line
 
 
 def main() -> None:
@@ -89,25 +124,7 @@ def main() -> None:
             runs.append(run_once(cmd, timings, args.cwd))
             r = runs[-1]
             print(f"run {i + 1}/{args.n}: wall {r['wall']:.2f}s  cpu {r['cpu']:.2f}s  peak {r['peak_mb']:.0f} MB")
-
-    stage_names = list(runs[0]["stages"])
-    stages = {s: summary([r["stages"][s] for r in runs if s in r["stages"]]) for s in stage_names}
-    line = {
-        "time": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip(),
-        "label": args.label,
-        "runs": args.n,
-        "wall_s": summary([r["wall"] for r in runs]),
-        "cpu_s": summary([r["cpu"] for r in runs]),
-        "peak_mb": summary([r["peak_mb"] for r in runs]),
-        "stages_s": {s: v["median"] for s, v in stages.items()},
-    }
-    print(f"{args.label}: wall {line['wall_s']['median']}s  cpu {line['cpu_s']['median']}s  peak {line['peak_mb']['median']:.0f} MB (median of {args.n})")
-    for s, v in stages.items():
-        print(f"  {s:<26} {v['median']:>8.3f}s  [{v['min']:.3f} .. {v['max']:.3f}]")
-    RESULTS.mkdir(exist_ok=True)
-    with open(RESULTS / "bench.jsonl", "a") as f:
-        f.write(json.dumps(line) + "\n")
+    record(args.label, runs)
 
 
 if __name__ == "__main__":
