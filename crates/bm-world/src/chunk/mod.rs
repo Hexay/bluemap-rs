@@ -167,6 +167,32 @@ impl Chunk {
         }
     }
 
+    /// Top y of the highest section holding anything but one state `is_air` accepts; every block above it is air.
+    pub fn top_y(&self, is_air: impl Fn(StateId) -> bool) -> Option<i32> {
+        let solid = |s: &Option<Section>| s.as_ref().is_some_and(|s| !matches!(s.blocks, Blocks::Single(id) if is_air(id)));
+        let i = self.sections.iter().rposition(solid)?;
+        Some((self.min_section + i as i32) * 16 + 15)
+    }
+
+    /// The highest [`Chunk::light`] block light of column `x, z` over `y0..=y1`.
+    pub fn max_block_light(&self, x: i32, z: i32, y0: i32, y1: i32) -> u8 {
+        if !self.has_light {
+            return 0;
+        }
+        let mut max = 0;
+        let mut y = y0;
+        while y <= y1 {
+            let end = (y | 15).min(y1);
+            max = max.max(match self.section(y).map(|s| &s.block_light) {
+                Ok(Some(Light::Uniform(v))) => *v,
+                Ok(Some(l)) => (y..=end).map(|y| l.get(block_index(x, y, z))).max().unwrap_or(0),
+                Ok(None) | Err(_) => 0,
+            });
+            y = end + 1;
+        }
+        max
+    }
+
     /// Lowest block y with a stored section (light-only padding sections included, as BlueMap).
     pub fn min_y(&self) -> i32 {
         self.min_section * 16

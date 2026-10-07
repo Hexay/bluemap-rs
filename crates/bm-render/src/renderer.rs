@@ -52,7 +52,7 @@ impl HiresRenderer<'_, '_> {
         let max = [min_x + grid.size[0] - 1, min_z + grid.size[1] - 1];
         let min = [min_x, min_z];
         let masking = Masking::new(self.settings, self.dimension.has_skylight, min, max);
-        out.volume.fill(area, &masking, min, max);
+        out.volume.fill(area, &masking, min, max, |s| self.states.flags(s).is_air());
         let ctx = Ctx {
             pack: self.pack,
             states: self.states,

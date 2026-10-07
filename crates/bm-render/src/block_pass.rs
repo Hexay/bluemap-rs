@@ -30,12 +30,21 @@ pub(crate) fn render(
             let mut column_color = Color { premultiplied: true, ..Color::default() };
 
             if ctx.view.inside_column(x, z) {
-                let (min_y, max_y) = ctx.view.column_y_range(x, z);
-                // the volume spans every column's y range plus a border, so the whole column is interior or none of it
-                let top = ctx.view.interior_index(x, max_y, z);
+                let (min_y, column_max_y) = ctx.view.column_y_range(x, z);
                 let mut light_under = |block_light: u8, column: &Color| {
                     top_block_light = top_block_light.max(f64::from(f32::from(block_light) * (1.0 - column.a)));
                 };
+                // all air up there, so only its light reaches the column, as below
+                let max_y = column_max_y.min(ctx.view.solid_top());
+                if max_y < column_max_y {
+                    let above = (max_y + 1..=column_max_y).filter(|&y| ctx.view.inside(x, y, z));
+                    debug_assert!(above.clone().all(|y| ctx.states.flags(ctx.view.state(x, y, z)).is_air()));
+                    let light = ctx.view.max_block_light(x, z, max_y + 1, column_max_y);
+                    debug_assert_eq!(Some(light), above.map(|y| ctx.view.light(x, y, z).1).max().or(Some(0)));
+                    light_under(light, &column_color);
+                }
+                // the volume spans every column's y range plus a border, so the whole column is interior or none of it
+                let top = ctx.view.interior_index(x, max_y, z);
                 for y in (min_y..=max_y).rev() {
                     if !ctx.view.inside(x, y, z) {
                         continue;

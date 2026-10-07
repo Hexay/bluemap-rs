@@ -74,6 +74,7 @@ pub(crate) struct Volume {
     states: Vec<StateId>,
     /// `[sky, block]`.
     light: Vec<[u8; 2]>,
+    solid_top: i32,
     /// Biome ids, read on first use: only tinted blocks need them, 75 each (`BLEND`).
     biome_bounds: Bounds,
     biomes: Vec<Cell<u16>>,
@@ -122,16 +123,25 @@ impl Bounds {
 
 impl Volume {
     /// Fills the volume for blocks x in `min[0]..=max[0]`, z in `min[1]..=max[1]` plus the border.
-    pub fn fill(&mut self, area: &ChunkArea, masking: &Masking, min: [i32; 2], max: [i32; 2]) {
+    /// Above the highest block that isn't `is_air`, only up to the border: see [`View::solid_top`].
+    pub fn fill(
+        &mut self,
+        area: &ChunkArea,
+        masking: &Masking,
+        min: [i32; 2],
+        max: [i32; 2],
+        is_air: impl Fn(StateId) -> bool,
+    ) {
         let (x0, z0) = (min[0] - BORDER, min[1] - BORDER);
         let (x1, z1) = (max[0] + BORDER, max[1] + BORDER);
-        let (mut y0, mut y1) = (i32::MAX, i32::MIN);
-        for x in x0..=x1 {
-            for z in z0..=z1 {
-                let (lo, hi) = area.chunk_at_block(x, z).map_or((0, 255), |c| (c.min_y(), c.max_y()));
-                (y0, y1) = (y0.min(lo - BORDER), y1.max(hi + BORDER));
-            }
+        let (mut y0, mut y1, mut top) = (i32::MAX, i32::MIN, i32::MIN);
+        for (cx, cz) in ((x0 >> 4)..=(x1 >> 4)).flat_map(|cx| ((z0 >> 4)..=(z1 >> 4)).map(move |cz| (cx, cz))) {
+            let (lo, hi) = area.chunk(cx, cz).map_or((0, 255), |c| (c.min_y(), c.max_y()));
+            (y0, y1) = (y0.min(lo - BORDER), y1.max(hi + BORDER));
+            top = top.max(area.chunk(cx, cz).and_then(|c| c.top_y(&is_air)).unwrap_or(i32::MIN));
         }
+        self.solid_top = top.max(y0);
+        let y1 = y1.min(self.solid_top + BORDER);
         self.bounds = Bounds::new([x0, y0, z0], [x1, y1, z1]);
         self.states.clear();
         self.light.clear();
@@ -257,6 +267,19 @@ impl<'a> View<'a> {
             return None;
         }
         self.volume.tints.get_or_insert_with(state, biome, || compute(biome))
+    }
+
+    /// Every block of the tile above this y is air; the dense copy ends one block above it.
+    pub fn solid_top(&self) -> i32 {
+        self.volume.solid_top
+    }
+
+    /// The highest block light over the blocks of column `x, z` in `y0..=y1` inside the mask.
+    pub fn max_block_light(&self, x: i32, z: i32, y0: i32, y1: i32) -> u8 {
+        if self.masking.mask.is_some() {
+            return (y0..=y1).filter(|&y| self.inside(x, y, z)).map(|y| self.light(x, y, z).1).max().unwrap_or(0);
+        }
+        self.area.chunk_at_block(x, z).map_or(0, |c| c.max_block_light(x, z, y0, y1))
     }
 
     pub fn ocean_floor_y(&self, x: i32, z: i32) -> Option<i32> {
