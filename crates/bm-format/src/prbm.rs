@@ -106,17 +106,17 @@ fn group(out: &mut Vec<u8>, material: u32, start: usize, end: usize) {
 }
 
 /// Name, NUL, attribute type byte, then zero padding to 4 bytes from the start of the file.
-fn attribute(out: &mut Vec<u8>, name: &str, ty: u8) {
+pub(crate) fn attribute(out: &mut Vec<u8>, name: &str, ty: u8) {
     out.extend(name.as_bytes());
     out.extend([0, ty]);
     pad(out);
 }
 
-fn pad(out: &mut Vec<u8>) {
+pub(crate) fn pad(out: &mut Vec<u8>) {
     out.resize(out.len().next_multiple_of(4), 0);
 }
 
-fn u24(out: &mut Vec<u8>, v: usize) {
+pub(crate) fn u24(out: &mut Vec<u8>, v: usize) {
     out.extend(&(v as u32).to_le_bytes()[..3]);
 }
 
@@ -132,12 +132,12 @@ fn unit_byte(v: f32) -> u8 {
 }
 
 /// `(byte)(v * 0x80 - 0.5)`: the subtraction happens in double.
-fn normal_byte(v: f32) -> u8 {
+pub(crate) fn normal_byte(v: f32) -> u8 {
     ((v * 128.0) as f64 - 0.5) as i32 as u8
 }
 
 /// Unit normal of the triangle's plane, in Java's float/double mix.
-fn surface_normal(p: &[f32]) -> [f32; 3] {
+pub(crate) fn surface_normal(p: &[f32]) -> [f32; 3] {
     let (ax, ay, az) = (p[3] - p[0], p[4] - p[1], p[5] - p[2]);
     let (bx, by, bz) = (p[6] - p[0], p[7] - p[1], p[8] - p[2]);
     let (nx, ny, nz) = (ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);

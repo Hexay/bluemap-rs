@@ -60,6 +60,16 @@ impl Service {
         Ok(self.storages.get(&self.config, &map.storage)?.map(id)?)
     }
 
+    /// Converts storage `id` in place between compat and optimized; nothing else may use it meanwhile.
+    pub fn convert_storage(
+        &self,
+        id: &str,
+        to: bm_storage::Format,
+        progress: bm_storage::Progress,
+    ) -> Result<bm_storage::ConvertStats> {
+        self.storages.convert(&self.config, id, to, progress)
+    }
+
     /// `BlueMapCLI.updateMarkers` for one map: its config marker sets, written to its storage. Returns warnings
     /// about skipped invalid markers.
     pub fn write_config_markers(&self, id: &str) -> Result<Vec<String>> {

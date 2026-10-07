@@ -32,6 +32,10 @@ pub(crate) struct Statements {
     pub grid_count_map: String,
     /// map, limit
     pub grid_purge_map: String,
+    /// map, storage (bluemap-rs only: format conversion)
+    pub grid_purge_storage: String,
+    /// key (bluemap-rs only: the optimized marker row)
+    pub delete_grid_storage: String,
     /// map id (numeric)
     pub purge_map: String,
     /// map_id
@@ -107,6 +111,8 @@ impl Statements {
                                    WHERE d.`map` = ? AND d.`storage` = s.`id`) ORDER BY s.`key`"),
             grid_count_map: s("SELECT COUNT(*) FROM `${prefix}grid_storage_data` WHERE `map` = ?"),
             grid_purge_map,
+            grid_purge_storage: s("DELETE FROM `${prefix}grid_storage_data` WHERE `map` = ? AND `storage` = ?"),
+            delete_grid_storage: s("DELETE FROM `${prefix}grid_storage` WHERE `key` = ?"),
             purge_map: s("DELETE FROM `${prefix}map` WHERE `id` = ?"),
             has_map: s("SELECT COUNT(*) > 0 FROM `${prefix}map` m WHERE m.`map_id` = ?"),
             list_map_ids: s("SELECT `map_id` FROM `${prefix}map` m ORDER BY `id` LIMIT ? OFFSET ?"),

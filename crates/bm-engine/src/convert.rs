@@ -15,6 +15,13 @@ pub fn compression(c: bm_config::Compression) -> Compression {
     }
 }
 
+pub fn format(f: bm_config::StorageFormat) -> bm_storage::Format {
+    match f {
+        bm_config::StorageFormat::Compat => bm_storage::Format::Compat,
+        bm_config::StorageFormat::Optimized => bm_storage::Format::Optimized,
+    }
+}
+
 pub fn mask_configs(masks: &[RenderMask]) -> Vec<MaskConfig> {
     masks.iter().map(mask_config).collect()
 }

@@ -4,9 +4,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use bm_config::{BlueMapConfig, SqlStorageConfig, StorageConfig};
-use bm_storage::{FileStorage, SqlConfig, SqlStorage, Storage};
+use bm_storage::{
+    ConvertStats, FileStorage, Format, Progress, SqlConfig, SqlStorage, Storage, convert_file_storage,
+    convert_sql_storage,
+};
 
-use crate::convert::compression;
+use crate::convert::{compression, format};
 use crate::error::{Error, Result};
 
 #[derive(Default)]
@@ -28,10 +31,15 @@ impl Storages {
                  the map-config to use a storage-config that exists."
             ))
         })?;
-        let invalid = |e: String| Error::Invalid(format!("Failed to load and initialize the storage '{id}': {e}"));
+        let invalid = |e: String| {
+            let e = e.replace("<storage-id>", id);
+            Error::Invalid(format!("Failed to load and initialize the storage '{id}': {e}"))
+        };
         let storage: Arc<dyn Storage> = match storage_config {
             StorageConfig::File(c) => {
-                Arc::new(FileStorage::new(c.root.clone(), compression(c.compression().map_err(invalid)?)))
+                let compression = compression(c.compression().map_err(invalid)?);
+                let opened = FileStorage::open(c.root.clone(), compression, format(c.format), false);
+                Arc::new(opened.map_err(|e| invalid(e.to_string()))?)
             }
             StorageConfig::Sql(c) => {
                 let sql = sql_config(c).map_err(invalid)?;
@@ -41,6 +49,26 @@ impl Storages {
         };
         open.insert(id.to_owned(), storage.clone());
         Ok(storage)
+    }
+
+    /// Converts storage `id` in place to `to` (see `bm_storage::convert_file_storage`). It must not be open.
+    pub fn convert(&self, config: &BlueMapConfig, id: &str, to: Format, progress: Progress) -> Result<ConvertStats> {
+        let storage_config = config
+            .storages
+            .get(id)
+            .ok_or_else(|| Error::Invalid(format!("There is no storage-configuration for '{id}'!")))?;
+        let invalid = |e: String| Error::Invalid(format!("Failed to convert the storage '{id}': {e}"));
+        match storage_config {
+            StorageConfig::File(c) => {
+                let compression = compression(c.compression().map_err(invalid)?);
+                convert_file_storage(&c.root, compression, to, progress).map_err(|e| invalid(e.to_string()))
+            }
+            StorageConfig::Sql(c) => {
+                let sql = sql_config(c).map_err(invalid)?;
+                let handle = self.runtime()?.handle().clone();
+                convert_sql_storage(&sql, handle, to, progress).map_err(|e| invalid(e.to_string()))
+            }
+        }
     }
 
     fn runtime(&self) -> Result<&tokio::runtime::Runtime> {
@@ -72,6 +100,7 @@ fn sql_config(c: &SqlStorageConfig) -> std::result::Result<SqlConfig, String> {
     let mut sql = SqlConfig::new(url);
     sql.table_prefix = c.table_prefix()?.to_owned();
     sql.compression = compression(c.compression()?);
+    sql.format = format(c.format);
     if c.max_connections > 0 {
         sql.max_connections = c.max_connections as u32;
     }
