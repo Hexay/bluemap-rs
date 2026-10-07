@@ -12,6 +12,8 @@ use bm_resources::resource_pack::ResourcePack;
 use bm_resources::texture::TextureGallery;
 use bm_world::{BlockState, BlockStates, StateId};
 
+use crate::relative::RelativeOffsets;
+
 /// Resolved `BlockProperties` (undefined reads as false).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Props {
@@ -51,6 +53,7 @@ pub struct VariantInfo<'a> {
     /// The liquid renderer's `still` and `flow` textures.
     pub still: Material,
     pub flow: Material,
+    pub relative: RelativeOffsets,
 }
 
 pub struct SetInfo<'a> {
@@ -172,6 +175,7 @@ impl<'a> StateCache<'a> {
             materials,
             still: named("still"),
             flow: named("flow"),
+            relative: RelativeOffsets::new(variant),
         }
     }
 

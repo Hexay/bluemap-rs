@@ -18,11 +18,6 @@ pub(crate) struct Ctx<'r, 'a> {
 }
 
 impl<'r, 'a> Ctx<'r, 'a> {
-    pub fn state(&self, x: i32, y: i32, z: i32) -> (StateId, &'r StateInfo<'a>) {
-        let id = self.view.state(x, y, z);
-        (id, self.states.get(id))
-    }
-
     /// `BlockColorCalculator.getBlockColor` for `state` at the position.
     pub fn tint(&self, state: &StateInfo, x: i32, y: i32, z: i32) -> Color {
         self.pack.block_colors.color(&state.state, (x, y, z), self.biomes, |x, y, z| self.view.biome(x, y, z))
@@ -40,26 +35,47 @@ pub(crate) struct Block<'r, 'a> {
     pub block_light: u8,
     /// `ExtendedBlock.isRemoveIfCave`.
     pub remove_if_cave: bool,
+    /// [`View::interior_index`] of the block.
+    index: Option<usize>,
 }
 
 impl<'r, 'a> Block<'r, 'a> {
-    pub fn new(ctx: &Ctx<'r, 'a>, x: i32, y: i32, z: i32) -> Self {
-        let (id, info) = ctx.state(x, y, z);
-        let (sky, block_light) = ctx.view.light(x, y, z);
+    /// `index` must be `ctx.view.interior_index(x, y, z)`; callers walking a column derive it without the bounds math.
+    pub fn new(ctx: &Ctx<'r, 'a>, x: i32, y: i32, z: i32, index: Option<usize>) -> Self {
+        debug_assert_eq!(index, ctx.view.interior_index(x, y, z));
+        let (id, (sky, block_light)) = match index {
+            Some(i) => (ctx.view.state_at(i), ctx.view.light_at(i)),
+            None => (ctx.view.state(x, y, z), ctx.view.light(x, y, z)),
+        };
+        let info = ctx.states.get(id);
         let s = ctx.settings;
         // air renders nothing, so it never needs the heightmap read
         let remove_if_cave = !info.is_air()
             && y < s.remove_caves_below_y
             && ctx.view.ocean_floor_y(x, z).is_none_or(|floor| y < floor.wrapping_add(s.cave_detection_ocean_floor));
-        Self { x, y, z, id, info, sky, block_light, remove_if_cave }
+        Self { x, y, z, id, info, sky, block_light, remove_if_cave, index }
+    }
+
+    /// The neighbour's volume index when the direct read is in bounds.
+    fn neighbor_index(&self, ctx: &Ctx, dx: i32, dy: i32, dz: i32) -> Option<usize> {
+        let unit = |d: i32| d.wrapping_add(1) as u32 <= 2;
+        let i = self.index.filter(|_| unit(dx) && unit(dy) && unit(dz))?;
+        Some(ctx.view.step(i, dx, dy, dz))
     }
 
     pub fn neighbor(&self, ctx: &Ctx<'r, 'a>, dx: i32, dy: i32, dz: i32) -> (StateId, &'r StateInfo<'a>) {
-        ctx.state(self.x + dx, self.y + dy, self.z + dz)
+        let id = match self.neighbor_index(ctx, dx, dy, dz) {
+            Some(i) => ctx.view.state_at(i),
+            None => ctx.view.state(self.x + dx, self.y + dy, self.z + dz),
+        };
+        (id, ctx.states.get(id))
     }
 
     pub fn neighbor_light(&self, ctx: &Ctx<'r, 'a>, dx: i32, dy: i32, dz: i32) -> (u8, u8) {
-        ctx.view.light(self.x + dx, self.y + dy, self.z + dz)
+        match self.neighbor_index(ctx, dx, dy, dz) {
+            Some(i) => ctx.view.light_at(i),
+            None => ctx.view.light(self.x + dx, self.y + dy, self.z + dz),
+        }
     }
 
     /// The cave filter on a face's light.

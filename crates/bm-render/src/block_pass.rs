@@ -28,11 +28,13 @@ pub(crate) fn render(
 
             if ctx.view.inside_column(x, z) {
                 let (min_y, max_y) = ctx.view.column_y_range(x, z);
+                // the volume spans every column's y range plus a border, so the whole column is interior or none of it
+                let top = ctx.view.interior_index(x, max_y, z);
                 for y in (min_y..=max_y).rev() {
                     if !ctx.view.inside(x, y, z) {
                         continue;
                     }
-                    let block = Block::new(ctx, x, y, z);
+                    let block = Block::new(ctx, x, y, z, top.map(|t| t - (max_y - y) as usize));
                     let start = out.faces();
                     render_block(ctx, &block, out, &mut block_color)?;
                     top_block_light =
