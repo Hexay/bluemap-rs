@@ -31,8 +31,9 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - `bm-web` — axum server: embedded BlueMap 5.28 webapp, storage-backed map routes, live JSON + SSE; conformance vs
   Java's server: `cargo test -p bm-web --test conformance -- --ignored`
 - `bm-engine` — render pipeline (`Service`, `MapContext`, `update_map`): region tasks, tile actions, persistence
-  thread for lowres + rstate; each region-boundary tile rendered once (crate docs)
-- `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes; `-u`/`--markers` not supported yet
+  thread for lowres + rstate; each region-boundary tile rendered once (crate docs); `-u` render queue + region
+  watcher (`task`, `queue`, `runner`, `watch/`)
+- `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes/log format; `-u`, `--markers`, `--convert-storage`
 - `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` / `compare-webroots` CLI
 
 ## Commands
@@ -42,6 +43,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
 - Acceptance (our CLI on Java's fixture configs, webroot vs Java's, incremental, drop-in): `py -3 tools/accept.py`
+  (`--watch <fx>` for `-u`); optimized storage: `py -3 tools/accept_optimized.py`
 
 ## Gotchas
 
