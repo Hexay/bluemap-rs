@@ -131,6 +131,37 @@ impl Chunk {
         }
     }
 
+    /// [`Chunk::block`] and [`Chunk::light`] (as `[sky, block]`) of column `x, z` for every y in `y0..=y1`,
+    /// appended: one section lookup per 16 blocks, uniform runs filled in bulk.
+    pub fn column_into(&self, x: i32, z: i32, y0: i32, y1: i32, states: &mut Vec<StateId>, light: &mut Vec<[u8; 2]>) {
+        let mut y = y0;
+        while y <= y1 {
+            let end = (y | 15).min(y1);
+            let n = (end - y + 1) as usize;
+            let section = self.section(y);
+            match section {
+                Ok(Section { blocks: Blocks::Single(s), .. }) => states.extend(std::iter::repeat_n(*s, n)),
+                Ok(Section { blocks, .. }) => states.extend((y..=end).map(|y| blocks.get(block_index(x, y, z)))),
+                Err(_) => states.extend(std::iter::repeat_n(StateId::AIR, n)),
+            }
+            let uniform = match section {
+                _ if !self.has_light => Some([self.sky_default, 0]),
+                Ok(s) => Light::uniform(&s.sky_light).zip(Light::uniform(&s.block_light)).map(|(s, b)| [s, b]),
+                Err(below) if below < 0 => Some([0, 0]),
+                Err(_) => Some([self.sky_default, 0]),
+            };
+            match (uniform, section) {
+                (Some(l), _) => light.extend(std::iter::repeat_n(l, n)),
+                (None, Ok(s)) => light.extend((y..=end).map(|y| {
+                    let i = block_index(x, y, z);
+                    [s.sky_light.as_ref().map_or(0, |l| l.get(i)), s.block_light.as_ref().map_or(0, |l| l.get(i))]
+                })),
+                (None, Err(_)) => unreachable!("absent sections have uniform light"),
+            }
+            y = end + 1;
+        }
+    }
+
     /// Lowest block y with a stored section (light-only padding sections included, as BlueMap).
     pub fn min_y(&self) -> i32 {
         self.min_section * 16
@@ -177,6 +208,15 @@ impl Light {
         match self {
             Self::Uniform(v) => *v,
             Self::Nibbles(n) => (n[i >> 1] >> ((i & 1) * 4)) & 15,
+        }
+    }
+
+    /// The one value of a section's light, if it has one; absent light reads as 0.
+    fn uniform(light: &Option<Self>) -> Option<u8> {
+        match light {
+            None => Some(0),
+            Some(Self::Uniform(v)) => Some(*v),
+            Some(Self::Nibbles(_)) => None,
         }
     }
 }

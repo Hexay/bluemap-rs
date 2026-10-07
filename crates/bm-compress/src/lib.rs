@@ -32,8 +32,9 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Java's `Deflater.DEFAULT_COMPRESSION`.
-const DEFLATE_LEVEL: u32 = 6;
+/// One below Java's `Deflater.DEFAULT_COMPRESSION` (6): zlib-rs bytes never match Java's anyway, and 5 halves
+/// hires gzip CPU for +0.5% size (docs/12-perf-profile-rs.md).
+const DEFLATE_LEVEL: u32 = 5;
 /// airlift `ZstdOutputStream`'s level.
 const ZSTD_LEVEL: i32 = 3;
 
