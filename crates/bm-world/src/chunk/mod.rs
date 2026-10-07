@@ -146,7 +146,11 @@ impl Chunk {
             let section = self.section(y);
             match section {
                 Ok(Section { blocks: Blocks::Single(s), .. }) => states.extend(std::iter::repeat_n(*s, n)),
-                Ok(Section { blocks, .. }) => states.extend((y..=end).map(|y| blocks.get(block_index(x, y, z)))),
+                Ok(Section { blocks: Blocks::Paletted { palette, indices }, .. }) => states.extend(
+                    indices
+                        .strided(block_index(x, y, z), 256, n)
+                        .map(|p| palette.get(p as usize).copied().unwrap_or(StateId::MISSING)),
+                ),
                 Err(_) => states.extend(std::iter::repeat_n(StateId::AIR, n)),
             }
             let uniform = match section {
@@ -157,10 +161,11 @@ impl Chunk {
             };
             match (uniform, section) {
                 (Some(l), _) => light.extend(std::iter::repeat_n(l, n)),
-                (None, Ok(s)) => light.extend((y..=end).map(|y| {
+                (None, Ok(s)) => {
                     let i = block_index(x, y, z);
-                    [s.sky_light.as_ref().map_or(0, |l| l.get(i)), s.block_light.as_ref().map_or(0, |l| l.get(i))]
-                })),
+                    let (sky, block) = (Light::column(&s.sky_light, i, n), Light::column(&s.block_light, i, n));
+                    light.extend(sky[..n].iter().zip(&block[..n]).map(|(&s, &b)| [s, b]));
+                }
                 (None, Err(_)) => unreachable!("absent sections have uniform light"),
             }
             y = end + 1;
@@ -240,6 +245,23 @@ impl Light {
             Self::Uniform(v) => *v,
             Self::Nibbles(n) => (n[i >> 1] >> ((i & 1) * 4)) & 15,
         }
+    }
+
+    /// Values `start`, `start + 256`, … (`n` ≤ 16 of them: one column within the section); absent light reads as 0.
+    fn column(light: &Option<Self>, start: usize, n: usize) -> [u8; 16] {
+        let mut out = [0; 16];
+        match light {
+            None => {}
+            Some(Self::Uniform(v)) => out = [*v; 16],
+            Some(Self::Nibbles(nibbles)) => {
+                // a 256 stride keeps the nibble half fixed: 128 bytes apart
+                let shift = (start & 1) * 4;
+                for (k, o) in out[..n].iter_mut().enumerate() {
+                    *o = (nibbles[(start >> 1) + 128 * k] >> shift) & 15;
+                }
+            }
+        }
+        out
     }
 
     /// The one value of a section's light, if it has one; absent light reads as 0.

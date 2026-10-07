@@ -21,6 +21,21 @@ impl Padded {
         self.data.get(long).map_or(0, |&l| ((l >> (slot * self.bits as usize)) & self.mask) as u32)
     }
 
+    /// Values `start`, `start + stride`, … (`count` of them), [`Padded::get`] each, with no division per value.
+    pub fn strided(&self, start: usize, stride: usize, count: usize) -> impl Iterator<Item = u32> + '_ {
+        let per = self.per_long as usize;
+        let (step_long, step_slot) = (stride / per, stride % per);
+        let (mut long, mut slot) = (start / per, start % per);
+        (0..count).map(move |_| {
+            let v = self.data.get(long).map_or(0, |&l| ((l >> (slot * self.bits as usize)) & self.mask) as u32);
+            (long, slot) = (long + step_long, slot + step_slot);
+            if slot >= per {
+                (long, slot) = (long + 1, slot - per);
+            }
+            v
+        })
+    }
+
     /// Whether `count` values fit, i.e. the array isn't truncated.
     pub fn holds(&self, count: usize) -> bool {
         self.data.len() * self.per_long as usize >= count
@@ -63,6 +78,18 @@ mod tests {
         assert_eq!((0..13).map(|i| p.get(i)).collect::<Vec<_>>(), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 31]);
         assert_eq!(p.get(10_000), 0);
         assert!(p.holds(24) && !p.holds(25));
+    }
+
+    #[test]
+    fn strided_reads_match_get() {
+        let data: Box<[u64]> = (0..400u64).map(|i| i.wrapping_mul(0x9E37_79B9_7F4A_7C15)).collect();
+        for bits in [1, 4, 5, 7, 11, 13, 32] {
+            let p = Padded::new(bits, data.clone());
+            for (start, stride) in [(0, 256), (37, 256), (255, 256), (3, 1), (100, 61)] {
+                let want: Vec<u32> = (0..16).map(|k| p.get(start + k * stride)).collect();
+                assert_eq!(p.strided(start, stride, 16).collect::<Vec<_>>(), want, "bits {bits} start {start}");
+            }
+        }
     }
 
     #[test]
