@@ -15,8 +15,10 @@ path = "src/main.rs"
 anyhow.workspace = true
 bm-config.workspace = true
 bm-engine.workspace = true
+bm-web.workspace = true
 clap.workspace = true
 rayon.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 
 [dev-dependencies]
 bm-golden = { path = "../bm-golden" }

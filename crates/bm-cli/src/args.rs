@@ -55,12 +55,6 @@ impl Args {
         if self.watch {
             out.push("-u/--watch (watching world files for changes)");
         }
-        if self.webserver {
-            out.push("-w/--webserver (webserver not built yet)");
-        }
-        if self.generate_webapp {
-            out.push("-g/--generate-webapp (the webapp files ship with the webserver, not built yet)");
-        }
         if self.markers {
             out.push("--markers (writing config marker sets)");
         }

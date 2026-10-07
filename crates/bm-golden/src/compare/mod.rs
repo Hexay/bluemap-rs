@@ -1,6 +1,6 @@
 //! Whole-webroot comparison of a bluemap-rs render against Java BlueMap's: file listing, hires (byte-identical
 //! decompressed PRBM, plus the face diff), lowres pixels per LOD, JSON files byte for byte, render state by meaning.
-//! Only map data and the root `settings.json` are compared; the webapp files come from the webserver.
+//! Webapp files only take part in the listing (their bytes are bm-web's concern).
 
 mod rstate;
 mod tiles;
@@ -110,13 +110,9 @@ fn same_bytes(section: &mut Section, golden: &Path, candidate: &Path, rel: &str)
     Ok(())
 }
 
-/// Root `settings.json` and everything under `maps/`, as `/`-separated paths.
+/// Every file of the webroot (map data, settings and webapp files), as `/`-separated paths.
 fn data_files(webroot: &Path) -> Result<BTreeSet<String>> {
-    let mut files: BTreeSet<String> = walk(&webroot.join("maps"))?.into_iter().map(|f| format!("maps/{f}")).collect();
-    if webroot.join("settings.json").is_file() {
-        files.insert("settings.json".to_owned());
-    }
-    Ok(files)
+    walk(webroot)
 }
 
 /// Files under `dir`, relative and `/`-separated; empty when `dir` doesn't exist.

@@ -199,8 +199,10 @@ dependencies = [
  "bm-config",
  "bm-engine",
  "bm-golden",
+ "bm-web",
  "clap",
  "rayon",
+ "tokio",
 ]
 
 [[package]]

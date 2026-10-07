@@ -4,6 +4,7 @@
 mod args;
 mod log;
 mod render;
+mod web;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -97,6 +98,8 @@ fn run(args: &Args) -> Result<ExitCode> {
     };
     let service = Service::new(config, options);
 
+    let webserver = args.webserver.then(|| web::start(&service, args.verbose)).transpose()?;
+    let mut ok = true;
     if args.renders() {
         let strategy = if args.force_render {
             TileUpdateStrategy::ForceAll
@@ -105,12 +108,18 @@ fn run(args: &Args) -> Result<ExitCode> {
         } else {
             TileUpdateStrategy::ForceNone
         };
-        let ok = render::render_maps(&service, strategy, args.maps.as_deref())?;
-        return Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) });
-    }
-    if args.generate_websettings {
+        ok = render::render_maps(&service, strategy, args.maps.as_deref(), args.generate_webapp)?;
+    } else if args.generate_webapp || args.generate_websettings {
+        if args.generate_webapp {
+            bm_web::install_webapp(&service.config.webapp.webroot, true)?;
+        }
         service.write_webapp_settings()?;
-        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(server) = webserver {
+        server.wait()?;
+    }
+    if args.renders() || args.webserver || args.generate_webapp || args.generate_websettings {
+        return Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) });
     }
     log::info(&format!(
         "Generated default config files for you, here: {}\n",

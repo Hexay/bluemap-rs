@@ -54,6 +54,12 @@ impl Service {
         MapContext::open(id, &self.config, self.resources()?, &self.storages)
     }
 
+    /// The storage of map `id` (`getOrLoadStorage(config.storage).map(id)`), e.g. for the webserver.
+    pub fn map_storage(&self, id: &str) -> Result<std::sync::Arc<dyn bm_storage::MapStorage>> {
+        let map = self.config.maps.get(id).ok_or_else(|| crate::Error::Invalid(format!("no map '{id}'")))?;
+        Ok(self.storages.get(&self.config, &map.storage)?.map(id)?)
+    }
+
     /// Configured map ids passing `filter`, by `sorting` (stable, ties by id).
     pub fn map_ids(&self, filter: impl Fn(&str) -> bool) -> Vec<String> {
         let mut ids: Vec<(&String, i32)> =

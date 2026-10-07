@@ -11,8 +11,15 @@ use crate::log;
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Returns whether every map updated without errors.
-pub fn render_maps(service: &Service, strategy: TileUpdateStrategy, maps: Option<&str>) -> Result<bool> {
+pub fn render_maps(
+    service: &Service,
+    strategy: TileUpdateStrategy,
+    maps: Option<&str>,
+    force_webapp: bool,
+) -> Result<bool> {
     if service.config.webapp.enabled {
+        // `createOrUpdateWebApp`: webapp files when forced (-g) or missing, then settings.json
+        bm_web::install_webapp(&service.config.webapp.webroot, force_webapp)?;
         service.write_webapp_settings()?;
     }
     service.resources()?;
