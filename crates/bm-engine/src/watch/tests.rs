@@ -21,7 +21,7 @@ fn next_task(queue: &RenderQueue, timeout: Duration) -> Option<RenderTask> {
     let end = Instant::now() + timeout;
     while Instant::now() < end {
         if let Some(t) = queue.take(true) {
-            return Some(t.task);
+            return Some(t.into_task().task);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -104,5 +104,5 @@ fn periodic_rescan_catches_changes_the_watcher_missed() {
     std::fs::write(dir.path().join("r.1.1.mca"), b"0").unwrap();
     service.on_time(Instant::now());
     service.on_time(Instant::now() + Duration::from_secs(1));
-    assert_eq!(regions(&queue.take(true).unwrap().task), vec![(1, 1)]);
+    assert_eq!(regions(&queue.take(true).unwrap().into_task().task), vec![(1, 1)]);
 }

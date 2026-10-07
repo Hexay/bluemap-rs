@@ -1,10 +1,11 @@
 //! `RenderManager`'s task list: one running task plus a deduplicated queue. Producers (file watchers, timers,
-//! commands) schedule from any thread; [`crate::run_queue`] works it off.
+//! commands) schedule from any thread; [`crate::run_queue`] works it off. [`Job`]s run ahead of queued tasks.
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
+use crate::job::Job;
 use crate::task::{Regions, RenderTask};
 
 #[derive(Default)]
@@ -16,13 +17,18 @@ pub struct RenderQueue {
 #[derive(Default)]
 struct State {
     pending: VecDeque<RenderTask>,
+    jobs: VecDeque<Job>,
     current: Option<Running>,
     stopped: bool,
     paused: bool,
+    /// Tasks taken so far; numbers the running one for [`RenderQueue::current_run`].
+    runs: u64,
 }
 
 struct Running {
-    task: RenderTask,
+    /// `None` while a [`Job`] runs.
+    task: Option<RenderTask>,
+    description: String,
     cancel: Arc<AtomicBool>,
     progress: f64,
 }
@@ -31,6 +37,21 @@ struct Running {
 pub(crate) struct Taken {
     pub task: RenderTask,
     pub cancel: Arc<AtomicBool>,
+}
+
+pub(crate) enum Next {
+    Task(Taken),
+    Job(Job, Arc<AtomicBool>),
+}
+
+#[cfg(test)]
+impl Next {
+    pub(crate) fn into_task(self) -> Taken {
+        match self {
+            Next::Task(t) => t,
+            Next::Job(..) => panic!("expected a task, got a job"),
+        }
+    }
 }
 
 impl RenderQueue {
@@ -53,6 +74,18 @@ impl RenderQueue {
         self.insert(task, true)
     }
 
+    /// `scheduleRenderTaskNext` of a non-update task: runs after the queued jobs, before any queued task. False
+    /// when a queued job has the same key or the queue is stopped.
+    pub fn schedule_job(&self, job: Job) -> bool {
+        let mut s = self.lock();
+        if s.stopped || s.jobs.iter().any(|j| j.key == job.key) {
+            return false;
+        }
+        s.jobs.push_back(job);
+        self.changed.notify_all();
+        true
+    }
+
     fn insert(&self, task: RenderTask, front: bool) -> bool {
         let mut s = self.lock();
         if s.stopped || s.pending.iter().any(|t| t.contains(&task)) {
@@ -60,7 +93,7 @@ impl RenderQueue {
         }
         s.pending.retain(|t| !task.contains(t));
         if let Some(running) = &s.current
-            && task.contains(&running.task)
+            && running.task.as_ref().is_some_and(|t| task.contains(t))
         {
             running.cancel.store(true, Ordering::Relaxed);
         }
@@ -79,6 +112,7 @@ impl RenderQueue {
         let mut s = self.lock();
         s.stopped = true;
         s.pending.clear();
+        s.jobs.clear();
         if let Some(running) = &s.current {
             running.cancel.store(true, Ordering::Relaxed);
         }
@@ -91,15 +125,17 @@ impl RenderQueue {
 
     /// `RenderManager.stop()` of a plugin (`/bluemap stop`, player render limit): the running task is cancelled
     /// and queued again in front, and nothing is taken until [`RenderQueue::resume`]. Finished regions stay done.
+    /// A running job finishes.
     pub fn pause(&self) {
         let mut s = self.lock();
         if s.paused {
             return;
         }
         s.paused = true;
-        if let Some(running) = &s.current {
+        if let Some(running) = &s.current
+            && let Some(task) = running.task.clone()
+        {
             running.cancel.store(true, Ordering::Relaxed);
-            let task = running.task.clone();
             if !s.pending.iter().any(|t| t.contains(&task)) {
                 s.pending.push_front(task);
             }
@@ -116,14 +152,14 @@ impl RenderQueue {
         self.lock().paused
     }
 
-    /// The queued tasks (without the running one), in order.
+    /// The queued tasks (without the running one and jobs), in order.
     pub fn pending_tasks(&self) -> Vec<RenderTask> {
         self.lock().pending.iter().cloned().collect()
     }
 
-    /// The running task, if any.
+    /// The running task, if any (not a job).
     pub fn current_task(&self) -> Option<RenderTask> {
-        self.lock().current.as_ref().map(|r| r.task.clone())
+        self.lock().current.as_ref().and_then(|r| r.task.clone())
     }
 
     /// Drops queued tasks matching `filter` and cancels a matching running one; returns how many were affected.
@@ -133,7 +169,7 @@ impl RenderQueue {
         s.pending.retain(|t| !filter(t));
         let mut removed = before - s.pending.len();
         if let Some(running) = &s.current
-            && filter(&running.task)
+            && running.task.as_ref().is_some_and(&filter)
         {
             running.cancel.store(true, Ordering::Relaxed);
             removed += 1;
@@ -142,24 +178,32 @@ impl RenderQueue {
         removed
     }
 
-    /// The running task's description and estimated progress (0..1).
+    /// The running task's (or job's) description and estimated progress (0..1).
     pub fn current(&self) -> Option<(String, f64)> {
-        self.lock().current.as_ref().map(|r| (r.task.description(), r.progress))
+        self.lock().current.as_ref().map(|r| (r.description.clone(), r.progress))
+    }
+
+    /// The running task's sequence number (new for every task taken, so an ETA tracker can tell tasks apart)
+    /// and its estimated progress.
+    pub fn current_run(&self) -> Option<(u64, f64)> {
+        let s = self.lock();
+        s.current.as_ref().map(|r| (s.runs, r.progress))
     }
 
     pub fn pending(&self) -> usize {
-        self.lock().pending.len()
+        let s = self.lock();
+        s.pending.len() + s.jobs.len()
     }
 
     pub fn is_idle(&self) -> bool {
         let s = self.lock();
-        s.current.is_none() && s.pending.is_empty()
+        s.current.is_none() && s.pending.is_empty() && s.jobs.is_empty()
     }
 
-    /// Next task, merged with every queued region update of the same map and strategy (one pass over shared
-    /// tiles instead of one per region). Blocks while the queue is empty, unless `exit_when_idle`; `None` once
-    /// stopped (or idle with `exit_when_idle`).
-    pub(crate) fn take(&self, exit_when_idle: bool) -> Option<Taken> {
+    /// Next job, else next task merged with every queued region update of the same map and strategy (one pass
+    /// over shared tiles instead of one per region). Blocks while the queue is empty, unless `exit_when_idle`;
+    /// `None` once stopped (or idle with `exit_when_idle`).
+    pub(crate) fn take(&self, exit_when_idle: bool) -> Option<Next> {
         let mut s = self.lock();
         s.current = None;
         self.changed.notify_all();
@@ -167,15 +211,31 @@ impl RenderQueue {
             if s.stopped {
                 return None;
             }
-            if !s.paused
-                && let Some(mut task) = s.pending.pop_front()
-            {
-                if matches!(task.regions, Regions::Only(_)) {
-                    s.pending.retain(|t| !task.absorb(t));
-                }
+            if !s.paused {
                 let cancel = Arc::new(AtomicBool::new(false));
-                s.current = Some(Running { task: task.clone(), cancel: cancel.clone(), progress: 0.0 });
-                return Some(Taken { task, cancel });
+                if let Some(job) = s.jobs.pop_front() {
+                    s.runs += 1;
+                    s.current = Some(Running {
+                        task: None,
+                        description: job.description.clone(),
+                        cancel: cancel.clone(),
+                        progress: 0.0,
+                    });
+                    return Some(Next::Job(job, cancel));
+                }
+                if let Some(mut task) = s.pending.pop_front() {
+                    if matches!(task.regions, Regions::Only(_)) {
+                        s.pending.retain(|t| !task.absorb(t));
+                    }
+                    s.runs += 1;
+                    s.current = Some(Running {
+                        task: Some(task.clone()),
+                        description: task.description(),
+                        cancel: cancel.clone(),
+                        progress: 0.0,
+                    });
+                    return Some(Next::Task(Taken { task, cancel }));
+                }
             }
             if exit_when_idle {
                 return None;
@@ -198,65 +258,4 @@ impl RenderQueue {
 }
 
 #[cfg(test)]
-mod tests {
-    use bm_map::renderstate::TileUpdateStrategy::ForceNone;
-
-    use super::*;
-
-    #[test]
-    fn dedups_and_merges_like_render_manager() {
-        let q = RenderQueue::new();
-        assert!(q.schedule(RenderTask::region("w", (0, 0))));
-        assert!(!q.schedule(RenderTask::region("w", (0, 0))));
-        assert!(q.schedule(RenderTask::region("w", (1, 0))));
-        assert!(q.schedule(RenderTask::region("n", (0, 0))));
-        let first = q.take(true).unwrap();
-        assert_eq!(first.task.description(), "updating 2 regions of map 'w'");
-        // a full update swallows queued region updates of its map and cancels a running one
-        assert!(q.schedule(RenderTask::region("w", (5, 5))));
-        let full = RenderTask::full("w", ForceNone);
-        assert!(q.schedule_next(full.clone()));
-        assert!(first.cancel.load(Ordering::Relaxed));
-        assert_eq!(q.pending(), 2);
-        assert_eq!(q.take(true).unwrap().task, full);
-        assert_eq!(q.take(true).unwrap().task, RenderTask::region("n", (0, 0)));
-        assert!(q.take(true).is_none());
-        assert!(q.is_idle());
-    }
-
-    #[test]
-    fn pause_requeues_running_task_and_blocks_takes() {
-        let q = Arc::new(RenderQueue::new());
-        q.schedule(RenderTask::region("w", (0, 0)));
-        q.schedule(RenderTask::region("n", (0, 0)));
-        let running = q.take(false).unwrap();
-        q.pause();
-        assert!(running.cancel.load(Ordering::Relaxed));
-        assert_eq!(q.pending_tasks(), vec![RenderTask::region("w", (0, 0)), RenderTask::region("n", (0, 0))]);
-        let waiter = {
-            let q = q.clone();
-            std::thread::spawn(move || q.take(false).map(|t| t.task))
-        };
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        assert!(!waiter.is_finished());
-        q.resume();
-        assert_eq!(waiter.join().unwrap(), Some(RenderTask::region("w", (0, 0))));
-        assert_eq!(q.remove_where(|t| t.map == "n"), 1);
-        assert!(q.pending_tasks().is_empty());
-    }
-
-    #[test]
-    fn stop_cancels_and_wakes() {
-        let q = Arc::new(RenderQueue::new());
-        q.schedule(RenderTask::region("w", (0, 0)));
-        let running = q.take(false).unwrap();
-        let waiter = {
-            let q = q.clone();
-            std::thread::spawn(move || q.take(false).is_none())
-        };
-        q.stop();
-        assert!(running.cancel.load(Ordering::Relaxed));
-        assert!(waiter.join().unwrap());
-        assert!(!q.schedule(RenderTask::region("w", (0, 0))));
-    }
-}
+mod tests;
