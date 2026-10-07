@@ -23,7 +23,7 @@ mod locks;
 mod optimized;
 mod sql;
 
-pub use api::{MAX_DECODED, MapStorage, Storage, Stored};
+pub use api::{MAX_DECODED, MapStorage, Storage, Stored, Version};
 pub use bm_compress::Compression;
 pub use bm_format::grid::Tile;
 pub use convert::{ConvertStats, Progress, convert_file_storage, convert_sql_storage};

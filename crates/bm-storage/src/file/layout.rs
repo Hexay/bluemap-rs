@@ -5,11 +5,18 @@ use std::path::{Path, PathBuf};
 use bm_compress::Compression;
 use bm_format::grid::{Tile, tile_path};
 
+use crate::error::{Error, Result};
 use crate::key::{GridKey, ItemKey, escape_asset_name};
 
 pub(crate) const TILES: &str = "tiles";
 pub(crate) const RSTATE: &str = "rstate";
 pub(crate) const ASSETS: &str = "assets";
+
+/// Map ids become directory names; refuse anything that could leave the storage root.
+pub(crate) fn validate_map_id(id: &str) -> Result<()> {
+    let bad = id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\', ':', '\0']);
+    if bad { Err(Error::InvalidMapId(id.to_owned())) } else { Ok(()) }
+}
 
 /// Directory holding the grid and the file name suffix of its cells.
 pub(crate) fn grid_dir(map_root: &Path, grid: GridKey, configured: Compression) -> (PathBuf, String) {

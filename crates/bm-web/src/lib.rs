@@ -22,6 +22,7 @@ mod error;
 mod http_date;
 mod javafmt;
 mod live;
+mod map_data;
 mod map_handler;
 mod paths;
 mod response;
@@ -29,6 +30,7 @@ mod server;
 mod static_cache;
 mod static_files;
 mod transcode;
+mod validators;
 mod webapp;
 
 pub use access_log::{AccessLog, FileSink, Level, LogSink, RequestInfo, StdoutSink, java_host_address};

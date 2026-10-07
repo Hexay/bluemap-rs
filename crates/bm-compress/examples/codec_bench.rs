@@ -35,6 +35,15 @@ fn gz(level: u32) -> Enc {
     })
 }
 
+fn libdeflate_gz(level: i32) -> Enc {
+    let mut c = libdeflater::Compressor::new(libdeflater::CompressionLvl::new(level).unwrap());
+    Box::new(move |data, out| {
+        out.resize(c.gzip_compress_bound(data.len()), 0);
+        let n = c.gzip_compress(data, out).unwrap();
+        out.truncate(n);
+    })
+}
+
 /// One reused context, like a per-thread compressor would be; `window_log` enables long-distance matching.
 fn zstd_ctx(level: i32, window_log: Option<u32>) -> Enc {
     let mut c = zstd::bulk::Compressor::new(level).unwrap();
@@ -70,13 +79,16 @@ fn codecs() -> Vec<Codec> {
         c("gzip-1", false, Dec::None, gz(1)),
         c("gzip-3", false, Dec::None, gz(3)),
         c("gzip-4", false, Dec::None, gz(4)),
-        c("gzip-5", false, Dec::None, gz(5)),
-        c("gzip-6 (product Gzip)", false, Dec::Product(Compression::Gzip), product(Compression::Gzip)),
+        c("gzip-5 (product Gzip)", false, Dec::Product(Compression::Gzip), product(Compression::Gzip)),
+        c("gzip-6", false, Dec::None, gz(6)),
         c("gzip-9", true, Dec::None, gz(9)),
         c("deflate-6 (product)", false, Dec::Product(Compression::Deflate), product(Compression::Deflate)),
         c("lz4-java blocks (product)", false, Dec::Product(Compression::Lz4), product(Compression::Lz4)),
         c("zstd-3 (product, stream)", false, Dec::Product(Compression::Zstd), product(Compression::Zstd)),
     ];
+    for level in 4..=9 {
+        v.push(c(&format!("libdeflate gzip-{level}"), false, Dec::Product(Compression::Gzip), libdeflate_gz(level)));
+    }
     for level in [1, 3, 6, 9, 12, 15, 16, 17, 18, 19] {
         v.push(c(&format!("zstd-{level} ctx"), level >= 15, Dec::ZstdBulk, zstd_ctx(level, None)));
     }

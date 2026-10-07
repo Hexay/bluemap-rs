@@ -13,7 +13,7 @@ use bm_format::compact::CompactCodec;
 use bm_format::grid::Tile;
 
 use crate::Result;
-use crate::api::{MapStorage, Stored};
+use crate::api::{MapStorage, Stored, Version};
 use crate::key::{GridKey, ItemKey};
 use crate::locks::KeyLocks;
 
@@ -23,6 +23,16 @@ pub(crate) trait HiresStore: Send + Sync {
     fn write(&self, tile: Tile, blob: &[u8]) -> Result<()>;
     fn delete(&self, tile: Tile) -> Result<()>;
     fn exists(&self, tile: Tile) -> Result<bool>;
+    /// [`MapStorage::grid_version`] of a hires tile.
+    fn version(&self, tile: Tile) -> Result<Option<Version>> {
+        let _ = tile;
+        Ok(None)
+    }
+    /// The blob with a version no newer than it (see [`MapStorage::read_grid_versioned`]).
+    fn read_versioned(&self, tile: Tile) -> Result<Option<(Vec<u8>, Option<Version>)>> {
+        let version = self.version(tile)?;
+        Ok(self.read(tile)?.map(|blob| (blob, version)))
+    }
     fn list(&self) -> Result<Vec<Tile>>;
     /// Removes every hires tile of the map.
     fn clear(&self) -> Result<()>;
@@ -74,10 +84,7 @@ impl MapStorage for OptimizedMapStorage {
         if grid != GridKey::Hires {
             return self.inner.read_grid(grid, tile);
         }
-        let Some(blob) = self.hires.read(tile)? else { return Ok(None) };
-        let mut prbm = Vec::new();
-        CODEC.with(|c| c.borrow_mut().0.decode_into(&blob, &mut prbm))?;
-        Ok(Some(Stored { data: prbm, compression: Compression::None }))
+        self.hires.read(tile)?.map(|blob| decode(&blob)).transpose()
     }
 
     fn write_grid_encoded(&self, grid: GridKey, tile: Tile, encoded: &[u8]) -> Result<()> {
@@ -147,4 +154,31 @@ impl MapStorage for OptimizedMapStorage {
     fn key_locks(&self) -> &KeyLocks {
         self.inner.key_locks()
     }
+
+    fn grid_version(&self, grid: GridKey, tile: Tile) -> Result<Option<Version>> {
+        if grid == GridKey::Hires { self.hires.version(tile) } else { self.inner.grid_version(grid, tile) }
+    }
+
+    fn item_version(&self, item: &ItemKey) -> Result<Option<Version>> {
+        self.inner.item_version(item)
+    }
+
+    fn read_grid_versioned(&self, grid: GridKey, tile: Tile) -> Result<Option<(Stored, Option<Version>)>> {
+        if grid != GridKey::Hires {
+            return self.inner.read_grid_versioned(grid, tile);
+        }
+        let Some((blob, version)) = self.hires.read_versioned(tile)? else { return Ok(None) };
+        Ok(Some((decode(&blob)?, version)))
+    }
+
+    fn read_item_versioned(&self, item: &ItemKey) -> Result<Option<(Stored, Option<Version>)>> {
+        self.inner.read_item_versioned(item)
+    }
+}
+
+/// A BMQ2 blob back to its PRBM bytes.
+fn decode(blob: &[u8]) -> Result<Stored> {
+    let mut prbm = Vec::new();
+    CODEC.with(|c| c.borrow_mut().0.decode_into(blob, &mut prbm))?;
+    Ok(Stored { data: prbm, compression: Compression::None })
 }

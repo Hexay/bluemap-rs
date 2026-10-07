@@ -1,6 +1,7 @@
 //! Backend-neutral storage traits, mirroring BlueMap's `Storage` / `MapStorage` / `GridStorage` / `ItemStorage`.
 
 use std::cell::RefCell;
+use std::fmt;
 use std::sync::Arc;
 
 use bm_compress::Compression;
@@ -23,6 +24,18 @@ pub struct Stored {
 impl Stored {
     pub fn decompress(&self) -> Result<Vec<u8>> {
         Ok(self.compression.decompress(&self.data, MAX_DECODED)?)
+    }
+}
+
+/// Identity of a key's stored bytes, read without the bytes (HTTP validators): an unchanged version means
+/// unchanged bytes, and every write gives a new version (even of equal bytes). Opaque; compare or print it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Version(pub(crate) [u64; 3]);
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let [a, b, c] = self.0;
+        write!(f, "{a:x}-{b:x}-{c:x}")
     }
 }
 
@@ -74,6 +87,33 @@ pub trait MapStorage: Send + Sync {
     fn exists(&self) -> Result<bool>;
 
     fn key_locks(&self) -> &KeyLocks;
+
+    /// The cell's [`Version`] from metadata only. `None` when it is missing or the backend has no cheap identity
+    /// (SQL: Java's schema has no change column).
+    fn grid_version(&self, grid: GridKey, tile: Tile) -> Result<Option<Version>> {
+        let _ = (grid, tile);
+        Ok(None)
+    }
+
+    /// The item's [`Version`], like [`MapStorage::grid_version`].
+    fn item_version(&self, item: &ItemKey) -> Result<Option<Version>> {
+        let _ = item;
+        Ok(None)
+    }
+
+    /// [`MapStorage::read_grid`] with a version no newer than the bytes. Taken first here, so a concurrent
+    /// rewrite can pair new bytes with the old version (a needless refetch later), never the reverse; backends
+    /// override it to take both from one file handle.
+    fn read_grid_versioned(&self, grid: GridKey, tile: Tile) -> Result<Option<(Stored, Option<Version>)>> {
+        let version = self.grid_version(grid, tile)?;
+        Ok(self.read_grid(grid, tile)?.map(|s| (s, version)))
+    }
+
+    /// [`MapStorage::read_item`] with its version, like [`MapStorage::read_grid_versioned`].
+    fn read_item_versioned(&self, item: &ItemKey) -> Result<Option<(Stored, Option<Version>)>> {
+        let version = self.item_version(item)?;
+        Ok(self.read_item(item)?.map(|s| (s, version)))
+    }
 
     fn grid_compression(&self, grid: GridKey) -> Compression {
         grid.compression(self.compression())

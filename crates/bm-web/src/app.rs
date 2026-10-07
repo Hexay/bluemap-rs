@@ -39,6 +39,9 @@ pub struct WebOptions {
     /// Serve the bundled webapp for files missing from `webroot`.
     pub serve_embedded_webapp: bool,
     pub access_log: AccessLog,
+    /// Send `ETag` (and `Vary`) on map data. Off by default: Java sends neither, and the conformance suite holds
+    /// us to its headers. A matching `If-None-Match` gets a 304 either way.
+    pub map_etags: bool,
 }
 
 impl WebOptions {
@@ -49,6 +52,7 @@ impl WebOptions {
             server_name: format!("BlueMap/{WEBAPP_VERSION}"),
             serve_embedded_webapp: true,
             access_log: AccessLog::disabled(),
+            map_etags: false,
         }
     }
 
@@ -64,6 +68,7 @@ impl WebOptions {
         Ok(Self {
             additional_headers: config.additional_headers.clone(),
             access_log: AccessLog::new(&config.log.format, sinks)?,
+            map_etags: config.map_etags,
             ..Self::new(&config.webroot)
         })
     }
@@ -79,6 +84,7 @@ pub struct WebApp {
     server: HeaderValue,
     extra: ExtraHeaders,
     log: AccessLog,
+    map_etags: bool,
     shutdown: CancellationToken,
 }
 
@@ -94,6 +100,7 @@ impl WebApp {
             server,
             extra: ExtraHeaders::new(&options.additional_headers)?,
             log: options.access_log,
+            map_etags: options.map_etags,
             shutdown: CancellationToken::new(),
         })
     }
@@ -137,7 +144,8 @@ impl WebApp {
             if let Some(rest) = rest.filter(|r| !r.contains(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])) {
                 let rest = rest.strip_prefix('/').unwrap_or(rest);
                 let rest = if rest.is_empty() { "/" } else { rest };
-                return map_handler::handle(map, rest, &req.headers, &self.shutdown).await;
+                return map_handler::handle(map, rest, &req.method, &req.headers, self.map_etags, &self.shutdown)
+                    .await;
             }
         }
         self.statics.handle(&req.method, route_path, query, &req.headers).await
