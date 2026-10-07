@@ -49,9 +49,23 @@ fn decodes_every_color_type_to_rgba8() {
     assert_eq!(pixels(&indexed), [[10, 20, 30, 77], [40, 50, 60, 255]]);
     let sixteen = png(1, 1, Rgba, Sixteen, &[0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x7F, 0x7F], |_| {});
     assert_eq!(pixels(&sixteen), [[255, 128, 0, 127]]);
-    let managed = png(1, 1, Rgb, Eight, &[0, 0, 0], |e| e.set_source_gamma(png::ScaledFloat::new(0.45455)));
-    assert!(decode_png(&managed).unwrap().color_managed);
-    assert!(!decode_png(&indexed).unwrap().color_managed);
+    let gray_trns = png(2, 1, Grayscale, Eight, &[7, 8], |e| e.set_trns(vec![0, 7]));
+    assert_eq!(pixels(&gray_trns), [[7, 7, 7, 0], [8, 8, 8, 255]]);
+}
+
+#[test]
+fn reencodes_like_imageio() {
+    use png::{BitDepth::*, ColorType::*};
+    let managed = png(1, 1, Rgb, Eight, &[1, 2, 3], |e| e.set_source_gamma(png::ScaledFloat::new(0.45455)));
+    let t = Texture::from_image(ResourcePath::key("a"), &decode_png(&managed).unwrap(), None);
+    let bytes = t.png_bytes().unwrap();
+    assert!(!bytes.windows(4).any(|w| w == b"gAMA"), "colour management chunks are dropped");
+    assert_eq!(t.decode_image().unwrap().pixels, [1, 2, 3, 255]);
+    let indexed = png(2, 1, Indexed, Four, &[0x10], |e| e.set_palette(vec![10, 20, 30, 40, 50, 60]));
+    let t = Texture::from_image(ResourcePath::key("a"), &decode_png(&indexed).unwrap(), None);
+    let bytes = t.png_bytes().unwrap();
+    assert_eq!(bytes[24..26], [4, 3], "palette images keep their bit depth");
+    assert_eq!(decode_png(&bytes).unwrap().image.pixels, [40, 50, 60, 255, 10, 20, 30, 255]);
 }
 
 #[test]
@@ -64,8 +78,8 @@ fn half_transparency_needs_a_partial_alpha_pixel() {
 
 #[test]
 fn average_color_is_the_premultiplied_mean_stored_straight() {
-    let img = decode_png(&rgba(1, 2, &[[255, 0, 0, 255], [0, 0, 255, 0]])).unwrap().image;
-    let t = Texture::from_image(ResourcePath::key("a"), &img, None, None).unwrap();
+    let img = decode_png(&rgba(1, 2, &[[255, 0, 0, 255], [0, 0, 255, 0]])).unwrap();
+    let t = Texture::from_image(ResourcePath::key("a"), &img, None);
     assert_eq!((t.color.r, t.color.g, t.color.b, t.color.a), (1.0, 0.0, 0.0, 0.5));
     assert!(!t.color.premultiplied);
     let img = decode_png(&rgba(1, 2, &[[51, 102, 0, 51], [255, 255, 255, 255]])).unwrap().image;
@@ -191,7 +205,7 @@ fn loads_and_bakes_like_upstream() {
     assert_eq!(keys, expected, "bad PNG falls through to the lower pack; bake inputs load unfiltered");
     let id = |k: &str| ResourcePath::key(k);
     assert_eq!(pool[&id("minecraft:b/anim")].animation.as_ref().unwrap().frametime, 3);
-    assert_eq!(pool[&id("minecraft:b/stone")].png_bytes().unwrap(), red, "source PNG embedded as is");
+    assert_eq!(pool[&id("minecraft:b/stone")].decode_image().unwrap().pixels, [255, 0, 0, 255]);
     let cut = pool[&id("minecraft:cut")].decode_image().unwrap();
     assert_eq!(cut.pixels, [4, 0, 0, 128]);
     let gold = pool[&id("minecraft:trim/src_gold")].decode_image().unwrap();

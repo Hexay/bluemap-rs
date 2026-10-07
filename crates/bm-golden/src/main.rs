@@ -24,6 +24,8 @@ enum Command {
         #[arg(long)]
         map: Option<String>,
     },
+    /// Compare a whole bluemap-rs webroot with Java BlueMap's (map data and root settings.json); exit 1 if different
+    CompareWebroots { golden: PathBuf, candidate: PathBuf },
 }
 
 #[derive(clap::Args)]
@@ -51,6 +53,12 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Command::DiffRender(a) => diff_render(a),
         Command::Roundtrip { webroot, map } => roundtrip(&webroot, map.as_deref()),
+        Command::CompareWebroots { golden, candidate } => {
+            let comparison = bm_golden::compare::compare_webroots(&golden, &candidate)?;
+            println!("{comparison}");
+            ensure!(comparison.ok(), "the webroots differ");
+            Ok(())
+        }
     }
 }
 

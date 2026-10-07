@@ -14,7 +14,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 
 - `bm-compress` — storage + region chunk compressions (gzip/deflate/zstd/lz4-java)
 - `bm-format` — tile grid and digit-split paths (more formats land here)
-- `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`)
+- `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`,
+  ImageIO PNG read/write behind feature `png` — madler zlib via `libz-sys`, since zlib-rs output differs)
 - `bm-map` — map layer: `lowres` (LODs, seams, single-writer flush via `LowresStore`), `renderstate` (rstate `.dat`
   cells, TileState machine), `mask`, map/webroot `settings.json` writers (Gson 2.8.9 byte-identical); oracles
   `cargo test -p bm-map -- --ignored`
@@ -25,18 +26,24 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - `bm-config` — HOCON parser (Configurate-compatible), typed BlueMap configs, template generation
 - `bm-web` — axum server: embedded BlueMap 5.28 webapp, storage-backed map routes, live JSON + SSE; conformance vs
   Java's server: `cargo test -p bm-web --test conformance -- --ignored`
-- `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` CLI
+- `bm-engine` — render pipeline (`Service`, `MapContext`, `update_map`): region tasks, tile actions, persistence
+  thread for lowres + rstate; each region-boundary tile rendered once (crate docs)
+- `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes; `-u`/`--markers` not supported yet
+- `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` / `compare-webroots` CLI
 
 ## Commands
 
 - Test: `cargo test --workspace` (first build compiles zstd's C code — run in background)
 - Golden renders (Java BlueMap 5.28, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
-- Bench: `py -3 tools/bench.py <label> -n 3 -- <command…>`
+- Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
+- Acceptance (our CLI on Java's fixture configs, webroot vs Java's, incremental, drop-in): `py -3 tools/accept.py`
 
 ## Gotchas
 
 - `work/downloads` is a junction to `bluemap_reverse/work/downloads` (shared JDKs/jars); `work/` is git-ignored.
+- BlueMap configs use paths relative to the working directory: run `bluemap`/Java with cwd = the folder holding
+  `config/` (fixtures: `work/bluemap/<fx>`).
 - BlueMap renders unlit chunks dark/skips them: worlds written without light need `render_serve.py --relight`.
 - `diff-render` compares every face by default. Pass `--inset 16` only when the two renders read different worlds
   (sky light leaks 15 blocks sideways where one world ends).

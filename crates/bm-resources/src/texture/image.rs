@@ -3,6 +3,7 @@
 
 use std::io::Cursor;
 
+use bm_java::png::{JavaImage, Model, RawPng};
 use bm_math::Color;
 
 use super::Error;
@@ -15,41 +16,91 @@ pub struct RgbaImage {
     pub pixels: Vec<u8>,
 }
 
-/// A decoded PNG plus whether it carries colour-management chunks a browser would apply.
+/// A `BufferedImage`: the model `ImageIO` re-encodes (`java`) and its `getRGB` pixels (`image`).
 #[derive(Clone, Debug)]
 pub struct DecodedPng {
+    pub java: JavaImage,
     pub image: RgbaImage,
-    /// `gAMA`, `cHRM`, `iCCP` or `sRGB` present: Java's re-encode drops them, so the original bytes would
-    /// render differently in the webapp.
-    pub color_managed: bool,
 }
 
-/// Decodes any PNG colour type and bit depth to RGBA8 (palette, gray and `tRNS` expanded).
+/// `ImageIO.read`: any PNG colour type and bit depth.
 pub fn decode_png(bytes: &[u8]) -> Result<DecodedPng, Error> {
     let mut decoder = png::Decoder::new(Cursor::new(bytes));
-    decoder.set_transformations(png::Transformations::EXPAND);
+    decoder.set_transformations(png::Transformations::IDENTITY);
     let mut reader = decoder.read_info()?;
     let size = reader.output_buffer_size().ok_or(Error::Decode(png::DecodingError::LimitsExceeded))?;
     let mut buf = vec![0; size];
     let frame = reader.next_frame(&mut buf)?;
-    buf.truncate(frame.buffer_size());
     let info = reader.info();
-    let color_managed =
-        info.gama_chunk.is_some() || info.chrm_chunk.is_some() || info.icc_profile.is_some() || info.srgb.is_some();
-    let sixteen = frame.bit_depth == png::BitDepth::Sixteen;
-    let samples: Vec<u8> = if sixteen {
-        buf.as_chunks::<2>().0.iter().map(|s| sixteen_to_eight(u16::from_be_bytes(*s))).collect()
-    } else {
-        buf
+    // png keeps only the low byte of each gray/RGB tRNS sample below 16 bits; RawPng wants the chunk payload
+    let trns: Option<Vec<u8>> = match (frame.color_type, frame.bit_depth, info.trns.as_deref()) {
+        (png::ColorType::Grayscale | png::ColorType::Rgb, d, Some(t)) if d != png::BitDepth::Sixteen => {
+            Some(t.iter().flat_map(|&b| [0, b]).collect())
+        }
+        (_, _, t) => t.map(<[u8]>::to_vec),
     };
-    let pixels = match frame.color_type {
-        png::ColorType::Rgba => samples,
-        png::ColorType::Rgb => samples.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect(),
-        png::ColorType::GrayscaleAlpha => samples.as_chunks::<2>().0.iter().flat_map(|&[v, a]| [v, v, v, a]).collect(),
-        png::ColorType::Grayscale => samples.iter().flat_map(|&g| [g, g, g, 255]).collect(),
-        png::ColorType::Indexed => return Err(Error::UnexpandedPalette),
+    let raw = RawPng {
+        width: frame.width,
+        height: frame.height,
+        bit_depth: frame.bit_depth as u8,
+        color_type: frame.color_type as u8,
+        data: &buf[..frame.buffer_size()],
+        palette: info.palette.as_deref(),
+        trns: trns.as_deref(),
     };
-    Ok(DecodedPng { image: RgbaImage { width: frame.width, height: frame.height, pixels }, color_managed })
+    Ok(DecodedPng::new(JavaImage::read(&raw)?))
+}
+
+impl DecodedPng {
+    pub fn new(java: JavaImage) -> Self {
+        Self { image: rgb_of(&java), java }
+    }
+
+    /// A `TYPE_INT_ARGB` image.
+    pub fn from_rgba(image: RgbaImage) -> Self {
+        Self { java: JavaImage::int_argb(image.width, image.height, &image.pixels), image }
+    }
+
+    /// `BufferedImage.getSubimage`; `None` where it throws `RasterFormatException`.
+    pub fn sub_image(&self, x: i32, y: i32, w: i32, h: i32) -> Option<Self> {
+        let image = self.image.sub_image(x, y, w, h)?;
+        Some(Self { java: self.java.sub_image(x as u32, y as u32, w as u32, h as u32), image })
+    }
+
+    /// `ImageIO.write(image, "png", out)`.
+    pub fn encode_png(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.java.write_png_into(&mut out);
+        out
+    }
+}
+
+/// `getRGB` of every pixel.
+fn rgb_of(java: &JavaImage) -> RgbaImage {
+    let bits = java.model.bits();
+    let to8 = |s: u16| if bits == 16 { sixteen_to_eight(s) } else { s as u8 };
+    let s = &java.samples;
+    let pixels = match &java.model {
+        Model::Indexed { rgb, alpha, .. } => s
+            .iter()
+            .flat_map(|&i| {
+                let [r, g, b] = rgb[i as usize];
+                [r, g, b, alpha.as_ref().map_or(255, |a| a[i as usize])]
+            })
+            .collect(),
+        Model::Gray { bits } => {
+            // sub-byte gray is an IndexColorModel ramp i*255/(2^bits-1)
+            let max = (1u32 << bits) - 1;
+            let gray = |v: u16| if *bits < 8 { (v as u32 * 255 / max) as u8 } else { to8(v) };
+            s.iter().flat_map(|&v| [gray(v); 3].into_iter().chain([255])).collect()
+        }
+        Model::GrayAlpha { .. } => {
+            s.as_chunks::<2>().0.iter().flat_map(|&[v, a]| [to8(v); 3].into_iter().chain([to8(a)])).collect()
+        }
+        Model::Rgb { .. } => s.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [to8(r), to8(g), to8(b), 255]).collect(),
+        Model::Rgba { .. } => s.iter().map(|&v| to8(v)).collect(),
+    };
+    RgbaImage { width: java.width, height: java.height, pixels }
 }
 
 /// `ComponentColorModel` scaling a 16-bit sample to 8 bits. 16-bit gray goes through Java's linear-gray
@@ -123,14 +174,5 @@ impl RgbaImage {
             out.pixels[dst..dst + row].copy_from_slice(&self.pixels[src..src + row]);
         }
         Some(out)
-    }
-
-    pub fn encode_png(&self) -> Result<Vec<u8>, png::EncodingError> {
-        let mut out = Vec::new();
-        let mut encoder = png::Encoder::new(&mut out, self.width, self.height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.write_header()?.write_image_data(&self.pixels)?;
-        Ok(out)
     }
 }

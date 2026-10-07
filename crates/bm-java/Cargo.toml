@@ -8,3 +8,10 @@ publish.workspace = true
 description = "Bit-exact reimplementations of the Java library behaviour BlueMap's output depends on"
 
 [dependencies]
+# madler zlib built from source: the JDK's Deflater output differs from zlib-rs (flate2's backend)
+libz-sys = { version = "1.1", default-features = false, features = ["libc", "static", "stock-zlib"], optional = true }
+thiserror = { workspace = true, optional = true }
+
+[features]
+# ImageIO PNG round trip; off by default so crates that don't need it skip the C zlib build
+png = ["dep:libz-sys", "dep:thiserror"]

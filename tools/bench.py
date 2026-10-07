@@ -46,9 +46,9 @@ def process_stats(handle) -> tuple[float, int]:
     return cpu, mem.PeakWorkingSetSize
 
 
-def run_once(cmd: list[str], timings_path: Path) -> dict:
+def run_once(cmd: list[str], timings_path: Path, cwd: Path = ROOT) -> dict:
     t = time.perf_counter()
-    proc = subprocess.Popen([c.replace("{timings}", str(timings_path)) for c in cmd], cwd=ROOT,
+    proc = subprocess.Popen([c.replace("{timings}", str(timings_path)) for c in cmd], cwd=cwd,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     _, err = proc.communicate()
     wall = time.perf_counter() - t
@@ -73,6 +73,7 @@ def main() -> None:
     ap.add_argument("label")
     ap.add_argument("-n", type=int, default=3)
     ap.add_argument("--clean", help="directory removed before every run")
+    ap.add_argument("--cwd", type=Path, default=ROOT, help="working directory of the command (BlueMap configs use relative paths)")
     args = ap.parse_args(argv[:split])
     cmd = argv[split + 1:]
     # CreateProcess does not resolve a relative executable against cwd
@@ -85,7 +86,7 @@ def main() -> None:
             if args.clean:
                 shutil.rmtree(ROOT / args.clean, ignore_errors=True)
             timings = Path(tmp) / f"timings{i}.json"
-            runs.append(run_once(cmd, timings))
+            runs.append(run_once(cmd, timings, args.cwd))
             r = runs[-1]
             print(f"run {i + 1}/{args.n}: wall {r['wall']:.2f}s  cpu {r['cpu']:.2f}s  peak {r['peak_mb']:.0f} MB")
 

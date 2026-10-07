@@ -76,6 +76,11 @@ impl World {
         Region::open(&self.region_dir, x, z)
     }
 
+    /// Whether `r.<x>.<z>.mca` exists (even empty), like `Region.exists()`.
+    pub fn region_exists(&self, x: i32, z: i32) -> bool {
+        self.region_dir.join(format!("r.{x}.{z}.mca")).exists()
+    }
+
     /// Decodes every chunk in the rectangle, in parallel. Region headers that can't be read fail their chunks only.
     pub fn load_area(&self, x0: i32, z0: i32, width: i32, depth: i32) -> ChunkArea {
         let ctx = ChunkContext { states: &self.states, biomes: &self.biomes, dimension: &self.dimension_type };

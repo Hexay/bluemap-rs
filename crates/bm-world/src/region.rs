@@ -52,6 +52,12 @@ impl Region {
         u32::from_be_bytes(self.header[i..i + 4].try_into().unwrap())
     }
 
+    /// The timestamp of a chunk with sectors allocated, as `MCARegion.iterateAllChunks` reports them (signed, like
+    /// Java's `int`); `None` for chunks it skips.
+    pub fn listed_timestamp(&self, lx: usize, lz: usize) -> Option<i32> {
+        (self.file.is_some() && self.location(lx, lz).1 > 0).then(|| self.timestamp(lx, lz) as i32)
+    }
+
     pub fn has_chunk(&self, lx: usize, lz: usize) -> bool {
         self.file.is_some() && self.location(lx, lz).0 != 0
     }
