@@ -18,6 +18,7 @@ struct State {
     pending: VecDeque<RenderTask>,
     current: Option<Running>,
     stopped: bool,
+    paused: bool,
 }
 
 struct Running {
@@ -88,6 +89,59 @@ impl RenderQueue {
         self.lock().stopped
     }
 
+    /// `RenderManager.stop()` of a plugin (`/bluemap stop`, player render limit): the running task is cancelled
+    /// and queued again in front, and nothing is taken until [`RenderQueue::resume`]. Finished regions stay done.
+    pub fn pause(&self) {
+        let mut s = self.lock();
+        if s.paused {
+            return;
+        }
+        s.paused = true;
+        if let Some(running) = &s.current {
+            running.cancel.store(true, Ordering::Relaxed);
+            let task = running.task.clone();
+            if !s.pending.iter().any(|t| t.contains(&task)) {
+                s.pending.push_front(task);
+            }
+        }
+        self.changed.notify_all();
+    }
+
+    pub fn resume(&self) {
+        self.lock().paused = false;
+        self.changed.notify_all();
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.lock().paused
+    }
+
+    /// The queued tasks (without the running one), in order.
+    pub fn pending_tasks(&self) -> Vec<RenderTask> {
+        self.lock().pending.iter().cloned().collect()
+    }
+
+    /// The running task, if any.
+    pub fn current_task(&self) -> Option<RenderTask> {
+        self.lock().current.as_ref().map(|r| r.task.clone())
+    }
+
+    /// Drops queued tasks matching `filter` and cancels a matching running one; returns how many were affected.
+    pub fn remove_where(&self, filter: impl Fn(&RenderTask) -> bool) -> usize {
+        let mut s = self.lock();
+        let before = s.pending.len();
+        s.pending.retain(|t| !filter(t));
+        let mut removed = before - s.pending.len();
+        if let Some(running) = &s.current
+            && filter(&running.task)
+        {
+            running.cancel.store(true, Ordering::Relaxed);
+            removed += 1;
+        }
+        self.changed.notify_all();
+        removed
+    }
+
     /// The running task's description and estimated progress (0..1).
     pub fn current(&self) -> Option<(String, f64)> {
         self.lock().current.as_ref().map(|r| (r.task.description(), r.progress))
@@ -113,7 +167,9 @@ impl RenderQueue {
             if s.stopped {
                 return None;
             }
-            if let Some(mut task) = s.pending.pop_front() {
+            if !s.paused
+                && let Some(mut task) = s.pending.pop_front()
+            {
                 if matches!(task.regions, Regions::Only(_)) {
                     s.pending.retain(|t| !task.absorb(t));
                 }
@@ -166,6 +222,27 @@ mod tests {
         assert_eq!(q.take(true).unwrap().task, RenderTask::region("n", (0, 0)));
         assert!(q.take(true).is_none());
         assert!(q.is_idle());
+    }
+
+    #[test]
+    fn pause_requeues_running_task_and_blocks_takes() {
+        let q = Arc::new(RenderQueue::new());
+        q.schedule(RenderTask::region("w", (0, 0)));
+        q.schedule(RenderTask::region("n", (0, 0)));
+        let running = q.take(false).unwrap();
+        q.pause();
+        assert!(running.cancel.load(Ordering::Relaxed));
+        assert_eq!(q.pending_tasks(), vec![RenderTask::region("w", (0, 0)), RenderTask::region("n", (0, 0))]);
+        let waiter = {
+            let q = q.clone();
+            std::thread::spawn(move || q.take(false).map(|t| t.task))
+        };
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(!waiter.is_finished());
+        q.resume();
+        assert_eq!(waiter.join().unwrap(), Some(RenderTask::region("w", (0, 0))));
+        assert_eq!(q.remove_where(|t| t.map == "n"), 1);
+        assert!(q.pending_tasks().is_empty());
     }
 
     #[test]

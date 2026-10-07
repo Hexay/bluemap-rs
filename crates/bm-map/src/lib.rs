@@ -5,5 +5,6 @@ mod gson;
 pub mod lowres;
 pub mod markers;
 pub mod mask;
+pub mod players;
 pub mod renderstate;
 pub mod settings;
