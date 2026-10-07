@@ -107,7 +107,7 @@ Cumulative: 77.3 → 55.0 s CPU (**−29%**), 8.1 → ~6.3 s wall.
 
 Web (item 7, merge `1a2a3cb`): `static_cache.rs` keeps static files in memory, re-checks disk metadata at most
 once a second, and gzips text types once. Gzipped replies use the Java ETag plus `-gzip`. `transcode.rs` caches
-converted map data, with a per-core cap. Map-data ETags are not done yet. Measured CPU per request:
+converted map data, with a per-core cap. Map-data ETags: see the end of this section. Measured CPU per request:
 
 | request | before → after |
 |---|---|
@@ -116,6 +116,16 @@ converted map data, with a per-core cap. Map-data ETags are not done yet. Measur
 | `textures.json` to a client without gzip | 18.6 → 2.7 ms; peak memory 132 → 89 MB |
 
 Java conformance: 110 of 110 identical.
+
+Map-data validators (`bm-web/src/validators.rs`, `map_data.rs`; `MapStorage::{grid,item}_version`): strong
+quoted ETag = storage `Version` + body coding (`-gzip` etc. per representation); `If-None-Match` → 304 from metadata
+only. Version: compat files mtime + length + file id (NTFS file index / inode; ids change on every rename-over, mtime
+alone repeated within ~1 ms); optimized hires bundle generation + record offset; SQL none (Java's schema has no
+change column). Sending `ETag` is opt-in (`webserver.conf` hidden `map-etags: true`), because the conformance suite
+compares every header with Java's; 304s are answered either way. `structures` reload (`web_bench.py --only
+reload_hires,reload_map_data --server-arg=--etags`): 70 KB → 0 B body per hires tile, ~4.3 MB → ~60 KB headers per
+view, CPU per hires revalidation 0.60–0.68 → 0.36–0.40 ms; full replies unchanged within noise (one handle gives
+bytes and version).
 
 Disk (merge `16568e8`):
 - **Lowres PNG**, zlib 9 with no filter: 1.176× → 0.869× Java's bytes (−26%), pixels identical, encode only −13%.

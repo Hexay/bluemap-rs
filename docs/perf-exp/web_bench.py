@@ -1,4 +1,5 @@
 """usage: web_bench.py <webroot> [--secs 8] [--conns 32] [--only name,…] [--log file] [--sse N] [--attach]
+                    [--server-arg ARG]…
 
 Starts examples/serve_bench on <webroot>, runs examples/load_bench scenarios against it, and prints one table row
 per scenario: throughput, latency percentiles, server CPU ms/request, allocations/request, working set.
@@ -66,13 +67,16 @@ def scenarios(webroot: Path):
         ("static_small", small, [BROWSER_AE]),
         ("static_304", small, [BROWSER_AE, ims]),
         ("page_view_mix", page, [BROWSER_AE]),
+        # a reload: every map-data URL of the view revalidated with the ETag it was served with (if any)
+        ("reload_map_data", page[6:], [BROWSER_AE], ["--revalidate"]),
+        ("reload_hires", vh, [BROWSER_AE], ["--revalidate"]),
         ("live_players", [f"maps/{m.name}/live/players.json"], [BROWSER_AE]),
     ]
 
 
 class Server:
-    def __init__(self, webroot, port, log):
-        cmd = [str(EXE / "serve_bench.exe"), str(webroot), "--port", str(port), "--live"]
+    def __init__(self, webroot, port, log, extra):
+        cmd = [str(EXE / "serve_bench.exe"), str(webroot), "--port", str(port), "--live"] + extra
         if log:
             cmd += ["--log", log]
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
@@ -144,24 +148,26 @@ def main():
     ap.add_argument("--log", default="")
     ap.add_argument("--sse", type=int, default=1000)
     ap.add_argument("--attach", action="store_true", help="drive an already running server on --port")
+    ap.add_argument("--server-arg", action="append", default=[], help="extra serve_bench argument, e.g. --etags")
     a = ap.parse_args()
     webroot = Path(a.webroot)
     map_id, scen = scenarios(webroot)
     only = set(filter(None, a.only.split(",")))
-    srv = Attached() if a.attach else Server(webroot, a.port, a.log)
+    srv = Attached() if a.attach else Server(webroot, a.port, a.log, a.server_arg)
     addr = f"127.0.0.1:{a.port}"
     tmp = Path(tempfile.mkdtemp())
     print(f"server pid {srv.ps.pid}; idle wset {srv.mem()[0] / 1e6:.1f} MB; conns {a.conns}; {a.secs}s each")
     hdr = "| scenario | req/s | MB/s | p50 µs | p99 µs | max µs | CPU ms/req | allocs/req | KB alloc/req | wset MB | peak wset MB | 2xx/3xx/4xx/5xx/err |"
     print(hdr)
     print("|" + "---|" * (hdr.count("|") - 1))
-    for name, urls, headers in scen:
+    for name, urls, headers, *extra in scen:
         if only and name not in only:
             continue
         f = tmp / f"{name}.txt"
         random.Random(1).shuffle(urls)
         f.write_text("\n".join(urls))
         cmd = [str(EXE / "load_bench.exe"), addr, str(f), "--conns", str(a.conns), "--secs", str(a.secs)]
+        cmd += extra[0] if extra else []
         for h in headers:
             cmd += ["--header", h]
         srv.stats()

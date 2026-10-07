@@ -1,8 +1,9 @@
 //! Closed-loop HTTP/1.1 keep-alive load generator for `serve_bench`; prints one JSON summary line.
 //!
-//! `load_bench <addr> <urls-file> [--conns 32] [--secs 10] [--header "Name: value"]… [--sse N]`
+//! `load_bench <addr> <urls-file> [--conns 32] [--secs 10] [--header "Name: value"]… [--sse N] [--revalidate]`
 //!
-//! Each connection walks the URL list from its own offset. `--sse N` instead holds N `live/sse` streams open (the
+//! Each connection walks the URL list from its own offset. `--revalidate` sends each URL's `ETag` (learned in one
+//! untimed pass) as `If-None-Match`, like a browser reload. `--sse N` instead holds N `live/sse` streams open (the
 //! first URL) for `--secs` and counts received bytes.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -19,11 +20,17 @@ struct ConnStats {
     errors: u64,
 }
 
-fn read_response(r: &mut BufReader<TcpStream>, line: &mut String) -> std::io::Result<(u16, u64)> {
+struct Head {
+    status: u16,
+    body: u64,
+    etag: Option<String>,
+}
+
+fn read_response(r: &mut BufReader<TcpStream>, line: &mut String) -> std::io::Result<Head> {
     line.clear();
     r.read_line(line)?;
     let status: u16 = line.split(' ').nth(1).and_then(|s| s.parse().ok()).ok_or(std::io::ErrorKind::InvalidData)?;
-    let (mut len, mut chunked) = (None, false);
+    let (mut len, mut chunked, mut etag) = (None, false, None);
     loop {
         line.clear();
         if r.read_line(line)? == 0 {
@@ -39,6 +46,8 @@ fn read_response(r: &mut BufReader<TcpStream>, line: &mut String) -> std::io::Re
                 len = v.parse::<u64>().ok();
             } else if k.eq_ignore_ascii_case("transfer-encoding") && v.eq_ignore_ascii_case("chunked") {
                 chunked = true;
+            } else if k.eq_ignore_ascii_case("etag") {
+                etag = Some(v.to_owned());
             }
         }
     }
@@ -58,7 +67,7 @@ fn read_response(r: &mut BufReader<TcpStream>, line: &mut String) -> std::io::Re
     } else if let Some(n) = len {
         body = std::io::copy(&mut r.by_ref().take(n), &mut std::io::sink())?;
     }
-    Ok((status, body))
+    Ok(Head { status, body, etag })
 }
 
 fn connect(addr: &str) -> std::io::Result<(TcpStream, BufReader<TcpStream>)> {
@@ -68,7 +77,15 @@ fn connect(addr: &str) -> std::io::Result<(TcpStream, BufReader<TcpStream>)> {
     Ok((s, r))
 }
 
-fn worker(addr: &str, urls: &[String], offset: usize, headers: &str, stop: &AtomicBool) -> ConnStats {
+/// `etags`: per URL the last `ETag` seen, sent back as `If-None-Match` (a browser reload); filled before timing.
+fn worker(
+    addr: &str,
+    urls: &[String],
+    offset: usize,
+    headers: &str,
+    etags: Option<&[Option<String>]>,
+    stop: &AtomicBool,
+) -> ConnStats {
     let mut st = ConnStats::default();
     let Ok((mut w, mut r)) = connect(addr) else {
         st.errors += 1;
@@ -77,16 +94,21 @@ fn worker(addr: &str, urls: &[String], offset: usize, headers: &str, stop: &Atom
     let mut line = String::new();
     let mut i = offset;
     while !stop.load(Relaxed) {
-        let url = &urls[i % urls.len()];
+        let k = i % urls.len();
+        let url = &urls[k];
         i += 1;
-        let req = format!("GET /{url} HTTP/1.1\r\nHost: {addr}\r\n{headers}\r\n");
+        let inm = match etags.and_then(|e| e[k].as_deref()) {
+            Some(tag) => format!("If-None-Match: {tag}\r\n"),
+            None => String::new(),
+        };
+        let req = format!("GET /{url} HTTP/1.1\r\nHost: {addr}\r\n{headers}{inm}\r\n");
         let t = Instant::now();
         let res = w.write_all(req.as_bytes()).and_then(|()| read_response(&mut r, &mut line));
         match res {
-            Ok((status, body)) => {
+            Ok(head) => {
                 st.lat_us.push(t.elapsed().as_micros().min(u32::MAX as u128) as u32);
-                st.bytes += body;
-                st.status[(status / 100) as usize % 6] += 1;
+                st.bytes += head.body;
+                st.status[(head.status / 100) as usize % 6] += 1;
             }
             Err(_) => {
                 st.errors += 1;
@@ -98,6 +120,18 @@ fn worker(addr: &str, urls: &[String], offset: usize, headers: &str, stop: &Atom
         }
     }
     st
+}
+
+/// One untimed pass over `urls` collecting each `ETag`.
+fn learn_etags(addr: &str, urls: &[String], headers: &str) -> Vec<Option<String>> {
+    let (mut w, mut r) = connect(addr).expect("connect");
+    let mut line = String::new();
+    urls.iter()
+        .map(|url| {
+            write!(w, "GET /{url} HTTP/1.1\r\nHost: {addr}\r\n{headers}\r\n").expect("send");
+            read_response(&mut r, &mut line).expect("response").etag
+        })
+        .collect()
 }
 
 fn sse(addr: &str, url: &str, n: usize, secs: u64) {
@@ -138,27 +172,30 @@ fn main() {
         .filter(|l| !l.is_empty())
         .map(|l| l.trim_start_matches('/').to_owned())
         .collect();
-    let (mut conns, mut secs, mut headers, mut sse_n) = (32usize, 10u64, String::new(), 0usize);
+    let (mut conns, mut secs, mut headers, mut sse_n, mut revalidate) = (32usize, 10u64, String::new(), 0usize, false);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--conns" => conns = args.next().unwrap().parse().unwrap(),
             "--secs" => secs = args.next().unwrap().parse().unwrap(),
             "--header" => headers.push_str(&format!("{}\r\n", args.next().unwrap())),
             "--sse" => sse_n = args.next().unwrap().parse().unwrap(),
+            "--revalidate" => revalidate = true,
             other => panic!("unknown arg {other}"),
         }
     }
     if sse_n > 0 {
         return sse(&addr, &urls[0], sse_n, secs);
     }
+    let etags = revalidate.then(|| Arc::new(learn_etags(&addr, &urls, &headers)));
     let urls = Arc::new(urls);
     let stop = Arc::new(AtomicBool::new(false));
     let started = Instant::now();
     let handles: Vec<_> = (0..conns)
         .map(|c| {
             let (addr, urls, headers, stop) = (addr.clone(), urls.clone(), headers.clone(), stop.clone());
+            let etags = etags.clone();
             let offset = c * urls.len() / conns.max(1);
-            std::thread::spawn(move || worker(&addr, &urls, offset, &headers, &stop))
+            std::thread::spawn(move || worker(&addr, &urls, offset, &headers, etags.as_deref().map(|e| &e[..]), &stop))
         })
         .collect();
     std::thread::sleep(Duration::from_secs(secs));

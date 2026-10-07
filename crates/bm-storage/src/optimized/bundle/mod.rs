@@ -39,6 +39,7 @@ use bm_format::grid::Tile;
 
 use self::log::{Index, Local, SHIFT};
 use super::HiresStore;
+use crate::api::Version;
 use crate::error::{Error, IoContext, Result};
 use crate::file::fsops;
 use crate::locks::KeyLocks;
@@ -72,6 +73,12 @@ fn split((x, z): Tile) -> (Tile, Local) {
 
 fn join((bx, bz): Tile, (lx, lz): Local) -> Tile {
     ((bx << SHIFT) | i32::from(lx), (bz << SHIFT) | i32::from(lz))
+}
+
+/// A record never moves within a file version and every put appends a new one, so (generation, offset) names
+/// exactly one blob; compaction changes the generation.
+fn record_version(ix: &Index, offset: u64, len: u32) -> Version {
+    Version([ix.generation, offset, u64::from(len)])
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -151,13 +158,20 @@ impl BundleStore {
 
 impl HiresStore for BundleStore {
     fn read(&self, tile: Tile) -> Result<Option<Vec<u8>>> {
+        Ok(self.read_versioned(tile)?.map(|(data, _)| data))
+    }
+
+    fn read_versioned(&self, tile: Tile) -> Result<Option<(Vec<u8>, Option<Version>)>> {
         let found = self.with_index(tile, |f, ix, local| match ix.entries.get(&local) {
-            Some(&(offset, len)) => log::read_record(f, offset, local, len).map(|r| Some(r.ok_or(()))),
+            Some(&(offset, len)) => {
+                let version = record_version(ix, offset, len);
+                log::read_record(f, offset, local, len).map(|r| Some(r.map(|d| (d, Some(version))).ok_or(())))
+            }
             None => Ok(None),
         })?;
         match found.flatten() {
             None => Ok(None),
-            Some(Ok(data)) => Ok(Some(data)),
+            Some(Ok(read)) => Ok(Some(read)),
             Some(Err(())) => Err(Error::CorruptBundle {
                 path: self.path(split(tile).0),
                 reason: "record does not match its index entry",
@@ -175,6 +189,13 @@ impl HiresStore for BundleStore {
 
     fn exists(&self, tile: Tile) -> Result<bool> {
         Ok(self.with_index(tile, |_, ix, local| Ok(ix.entries.contains_key(&local)))?.unwrap_or(false))
+    }
+
+    fn version(&self, tile: Tile) -> Result<Option<Version>> {
+        let found = self.with_index(tile, |_, ix, local| {
+            Ok(ix.entries.get(&local).map(|&(offset, len)| record_version(ix, offset, len)))
+        })?;
+        Ok(found.flatten())
     }
 
     fn list(&self) -> Result<Vec<Tile>> {
