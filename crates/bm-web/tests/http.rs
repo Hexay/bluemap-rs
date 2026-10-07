@@ -86,6 +86,31 @@ fn static_files_disk_wins_over_embedded() {
 }
 
 #[test]
+fn static_files_gzip_and_disk_changes() {
+    let f = fixture();
+    let a = f.served.addr;
+    let identity = get(a, "/index.html", &[]);
+    assert_eq!((identity.header("content-encoding"), identity.header("vary")), (None, None));
+    let gz = get(a, "/index.html", &[("Accept-Encoding", "br, gzip;q=0.8")]);
+    assert_eq!((gz.header("content-encoding"), gz.header("vary")), (Some("gzip"), Some("Accept-Encoding")));
+    assert_eq!(gunzip(&gz.body), identity.body);
+    let tag = gz.header("etag").unwrap();
+    assert_eq!(tag, format!("{}-gzip", identity.header("etag").unwrap()));
+    assert_eq!(get(a, "/index.html", &[("If-None-Match", tag)]).status, 304);
+    assert_eq!(get(a, "/index.html", &[("Accept-Encoding", "gzip;q=0")]).header("content-encoding"), None);
+    assert_eq!(get(a, "/assets/logo.png", &[("Accept-Encoding", "gzip")]).header("content-encoding"), None);
+
+    let web = f._dir.path().join("web");
+    assert_eq!(get(a, "/settings.json", &[]).body, b"{\"maps\":[\"world\"]}");
+    assert_eq!(get(a, "/new.txt", &[]).status, 404);
+    std::fs::write(web.join("settings.json"), b"{\"maps\":[]}").unwrap();
+    std::fs::write(web.join("new.txt"), b"new").unwrap();
+    std::thread::sleep(Duration::from_millis(1100));
+    assert_eq!(get(a, "/settings.json", &[]).body, b"{\"maps\":[]}");
+    assert_eq!(get(a, "/new.txt", &[]).body, b"new");
+}
+
+#[test]
 fn map_data_encoding_negotiation() {
     let f = fixture();
     let a = f.served.addr;

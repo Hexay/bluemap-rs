@@ -5,10 +5,10 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::net::IpAddr;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::mpsc::{self, Sender};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use chrono::Local;
+use chrono::{Local, TimeZone};
 
 use crate::WebError;
 use crate::javafmt::{Arg, JavaFormat};
@@ -34,12 +34,13 @@ pub trait LogSink: Send + Sync {
 
 /// What the log line needs from a request, captured before routing rewrites anything.
 #[derive(Debug, Clone)]
-pub struct RequestInfo {
+pub struct RequestInfo<'a> {
     pub source: IpAddr,
-    pub forwarded_for: Option<String>,
-    pub method: String,
-    /// Java logs `path + "?" + rawQuery` even for an empty query, hence `/index.html?`.
-    pub address: String,
+    pub forwarded_for: Option<&'a str>,
+    pub method: &'a str,
+    /// Logged as `path + "?" + query` even for an empty query, like Java (`/index.html?`).
+    pub path: &'a str,
+    pub query: &'a str,
     pub version: &'static str,
 }
 
@@ -61,20 +62,24 @@ impl AccessLog {
         Self { format: JavaFormat::compile("").expect("empty pattern"), sinks: Vec::new() }
     }
 
-    pub fn log(&self, req: &RequestInfo, status: u16, reason: &str) {
+    pub fn is_enabled(&self) -> bool {
+        !self.sinks.is_empty()
+    }
+
+    pub fn log(&self, req: &RequestInfo<'_>, status: u16, reason: &str) {
         if self.sinks.is_empty() {
             return;
         }
         let source = java_host_address(req.source);
-        let xff = req.forwarded_for.clone().unwrap_or_else(|| source.clone());
+        let xff = req.forwarded_for.unwrap_or(&source);
         let line = self.format.format(&[
-            Arg::Str(source),
-            Arg::Str(xff),
-            Arg::Str(req.method.clone()),
-            Arg::Str(req.address.clone()),
-            Arg::Str(req.version.to_owned()),
+            Arg::Str(source.as_str().into()),
+            Arg::Str(xff.into()),
+            Arg::Str(req.method.into()),
+            Arg::Str(format!("{}?{}", req.path, req.query).into()),
+            Arg::Str(req.version.into()),
             Arg::Int(status.into()),
-            Arg::Str(reason.to_owned()),
+            Arg::Str(reason.into()),
         ]);
         let level = if status < 500 { Level::Info } else { Level::Warning };
         self.sinks.iter().for_each(|s| s.log(level, &line));
@@ -93,9 +98,15 @@ pub fn java_host_address(ip: IpAddr) -> String {
 }
 
 /// `Logger.file` with BlueMap's `LogFormatter`: `[yyyy-MM-dd HH:mm:ss][LEVEL] msg`. Writes on a background thread
-/// so requests never wait on disk; flushes whenever the queue runs dry.
+/// so requests never wait on disk (the timestamp is formatted there too); flushes whenever the queue runs dry.
 pub struct FileSink {
-    tx: Mutex<Sender<String>>,
+    tx: Sender<Line>,
+}
+
+struct Line {
+    at: SystemTime,
+    level: Level,
+    message: String,
 }
 
 impl FileSink {
@@ -109,20 +120,30 @@ impl FileSink {
         }
         let file =
             OpenOptions::new().create(true).write(true).append(append).truncate(!append).open(&path).map_err(io_err)?;
-        let (tx, rx) = mpsc::channel::<String>();
+        let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
             .name("bm-web-log".into())
             .spawn(move || write_loop(BufWriter::new(file), rx))
             .map_err(io_err)?;
-        Ok(Self { tx: Mutex::new(tx) })
+        Ok(Self { tx })
     }
 }
 
-fn write_loop(mut out: BufWriter<File>, rx: mpsc::Receiver<String>) {
+fn write_loop(mut out: BufWriter<File>, rx: mpsc::Receiver<Line>) {
+    // local-time conversion is slow on Windows: once per second of log time
+    let mut stamp = (u64::MAX, String::new());
+    let mut write = |out: &mut BufWriter<File>, line: Line| {
+        let secs = line.at.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        if secs != stamp.0 {
+            let local = i64::try_from(secs).ok().and_then(|s| Local.timestamp_opt(s, 0).single());
+            stamp = (secs, local.map_or_else(String::new, |t| t.format("%Y-%m-%d %H:%M:%S").to_string()));
+        }
+        let _ = write!(out, "[{}][{}] {}{LINE_SEP}", stamp.1, line.level.name(), line.message);
+    };
     while let Ok(line) = rx.recv() {
-        let _ = out.write_all(line.as_bytes());
+        write(&mut out, line);
         while let Ok(more) = rx.try_recv() {
-            let _ = out.write_all(more.as_bytes());
+            write(&mut out, more);
         }
         let _ = out.flush();
     }
@@ -132,10 +153,7 @@ const LINE_SEP: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
 impl LogSink for FileSink {
     fn log(&self, level: Level, message: &str) {
-        let line = format!("[{}][{}] {message}{LINE_SEP}", Local::now().format("%Y-%m-%d %H:%M:%S"), level.name());
-        if let Ok(tx) = self.tx.lock() {
-            let _ = tx.send(line);
-        }
+        let _ = self.tx.send(Line { at: SystemTime::now(), level, message: message.to_owned() });
     }
 }
 

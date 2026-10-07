@@ -64,6 +64,7 @@ impl WebServer {
             tracing::info!("WebServer bound to: /{addr}");
         }
         let token = app.shutdown_token();
+        let peer_addr = app.wants_peer_addr();
         let router = app.into_router();
         let mut http = hyper::server::conn::http1::Builder::new();
         http.timer(TokioTimer::new())
@@ -91,7 +92,9 @@ impl WebServer {
             };
             let _ = stream.set_nodelay(true);
             let svc = router.clone().map_request(move |mut req: http::Request<Incoming>| {
-                req.extensions_mut().insert(PeerAddr(peer));
+                if peer_addr {
+                    req.extensions_mut().insert(PeerAddr(peer));
+                }
                 req
             });
             let conn = graceful.watch(http.serve_connection(TokioIo::new(stream), TowerToHyperService::new(svc)));
