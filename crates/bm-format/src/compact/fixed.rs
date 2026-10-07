@@ -14,6 +14,16 @@ fn grid_value(q: i16, g: u8) -> f32 {
 
 /// Nearest grid value (saturated to i16) and whether it reproduces `bits` exactly (-0.0 and NaN never do).
 fn quantize(bits: u32, g: u8) -> (i16, bool) {
+    // scaling by 2^g is exact in f32, so a value on the grid (the common case) is an integer in range here
+    let x = f32::from_bits(bits) * (1u32 << g) as f32;
+    if (-32768.0..=32767.0).contains(&x) && f32::from(x as i16) == x && bits != (-0.0f32).to_bits() {
+        debug_assert_eq!((x as i16, true), quantize_rounded(bits, g));
+        return (x as i16, true);
+    }
+    quantize_rounded(bits, g)
+}
+
+fn quantize_rounded(bits: u32, g: u8) -> (i16, bool) {
     let v = f32::from_bits(bits);
     let scaled = f64::from(v) * f64::from(1u32 << g);
     let q = if v.is_finite() { round_half_away(scaled.clamp(-32768.0, 32767.0)) } else { 0 };
