@@ -1,17 +1,19 @@
 """Acceptance: render fixtures with our `bluemap` CLI from Java BlueMap's own config folder and compare the webroot
 with Java's golden one; then check incremental updates and drop-in over Java's render state.
 
-Usage: py -3 tools/accept.py [fixture ...] [--incremental vanilla ...] [--no-build]
+Usage: py -3 tools/accept.py [fixture ...] [--incremental vanilla ...] [--optimized vanilla ...] [--no-build]
 Needs: work/bluemap/<fx>/{config,data,web} from tools/render_golden.py (Java BlueMap 5.28, MC 26.3).
 Output: work/accept/<fx>/ (fresh each run). Exit 1 if any check fails.
 """
 import argparse
+import gzip
 import re
 import shutil
 import struct
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -141,10 +143,59 @@ def incremental(fixture: str, failures: list[str]) -> None:
     check(compare(WORK / "bluemap" / fixture / "web", out / "web"), f"{fixture}: incremental output still equals Java's", failures)
 
 
+def served_tiles_equal(golden: Path, cwd: Path, port: int) -> bool:
+    """Starts our webserver on the optimized storage; every hires tile Java rendered must come back (gzip
+    transcoded on the fly) as Java's PRBM."""
+    set_conf(cwd / "config" / "webserver.conf", "port", str(port))
+    server = subprocess.Popen([str(EXE), "-c", "config", "-v", MC, "-w"], cwd=cwd, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1).read()
+                break
+            except OSError:
+                time.sleep(0.1)
+        tiles = sorted((golden / "maps").glob("*/tiles/0/**/*.prbm.gz"))
+        for tile in tiles:
+            url = f"http://127.0.0.1:{port}/" + tile.relative_to(golden).as_posix().removesuffix(".gz")
+            req = urllib.request.Request(url, headers={"Accept-Encoding": "gzip"})
+            with urllib.request.urlopen(req, timeout=30) as res:
+                body = res.read()
+                if res.headers.get("Content-Encoding") == "gzip":
+                    body = gzip.decompress(body)
+            if body != gzip.decompress(tile.read_bytes()):
+                print(f"    served tile differs: {url}")
+                return False
+        print(f"    {len(tiles)} hires tiles served identically", flush=True)
+        return bool(tiles)
+    finally:
+        server.terminate()
+        server.wait()
+
+
+def optimized(fixture: str, failures: list[str]) -> None:
+    """Renders into an optimized storage, then checks re-render, serving and conversion back against Java."""
+    print(f"optimized {fixture}", flush=True)
+    out = prepare(fixture, f"{fixture}-optimized")
+    set_conf(out / "config" / "storages" / "file.conf", "format", "optimized")
+    bluemap(out, "-r")
+    maps = out / "web" / "maps"
+    check((maps / "bluemap-rs-format.txt").is_file() and not any(maps.glob("*/tiles/0")),
+          f"{fixture}: optimized layout (marker, no tiles/0)", failures)
+    again = bluemap(out, "-r")
+    check(all(r == 0 for r, _ in again.values()), f"{fixture}: optimized second run renders nothing", failures)
+    golden = WORK / "bluemap" / fixture / "web"
+    check(served_tiles_equal(golden, out, 18100 + len(failures)), f"{fixture}: served tiles equal Java's", failures)
+    bluemap(out, "--convert-storage", "file", "--to", "compat")
+    check(compare(golden, out / "web"), f"{fixture}: optimized -> compat equals Java's webroot", failures)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("fixtures", nargs="*", default=DEFAULT_FIXTURES)
     ap.add_argument("--incremental", nargs="*", default=["vanilla", "structures"])
+    ap.add_argument("--optimized", nargs="*", default=["vanilla", "nether"])
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--only-incremental", action="store_true")
     args = ap.parse_args()
@@ -161,6 +212,8 @@ def main() -> None:
         check(all(r == 0 for r, _ in maps.values()), f"{fx}: -r over Java's webroot renders nothing (drop-in)", failures)
     for fx in args.incremental:
         incremental(fx, failures)
+    for fx in [] if args.only_incremental else args.optimized:
+        optimized(fx, failures)
     print(f"\n{len(failures)} failed" + "".join(f"\n  {f}" for f in failures))
     sys.exit(1 if failures else 0)
 
