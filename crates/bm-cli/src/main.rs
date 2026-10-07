@@ -144,7 +144,10 @@ fn update_markers(service: &Service, maps: Option<&str>) {
     let selected: Option<Vec<&str>> = maps.map(|m| m.split(',').collect());
     for id in service.map_ids(|id| selected.as_ref().is_none_or(|s| s.contains(&id))) {
         match service.write_config_markers(&id) {
-            Ok(()) => log::info(&format!("Updated markers for map '{id}'")),
+            Ok(warnings) => {
+                warnings.iter().for_each(|w| log::warn(w));
+                log::info(&format!("Updated markers for map '{id}'"));
+            }
             Err(e) => log::error(&format!("Failed to save markers for map '{id}'! {e}")),
         }
     }
