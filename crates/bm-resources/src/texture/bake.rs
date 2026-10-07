@@ -5,17 +5,18 @@ use std::collections::HashMap;
 use bm_math::Color;
 
 use super::atlas::Source;
-use super::image::RgbaImage;
+use super::image::{DecodedPng, RgbaImage};
 use super::load::TexturePool;
 use super::{AnimationMeta, Texture};
 use crate::key::ResourcePath;
 
-type Images = HashMap<ResourcePath, RgbaImage>;
+type Images = HashMap<ResourcePath, DecodedPng>;
 
 pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images, used: &dyn Fn(&ResourcePath) -> bool) {
     match source {
         Source::Unstitch { resource: Some(resource), divisor_x, divisor_y, regions: Some(regions) } => {
-            let Some((image, animation)) = input(resource, pool, images) else { return };
+            let Some((decoded, animation)) = input(resource, pool, images) else { return };
+            let image = &decoded.image;
             let dx = if *divisor_x <= 0.0 { image.width as f64 } else { *divisor_x };
             let dy = if *divisor_y <= 0.0 { image.height as f64 } else { *divisor_y };
             let (fx, fy) = (image.width as f64 / dx, image.height as f64 / dy);
@@ -26,7 +27,8 @@ pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images,
                 }
                 let (x, y) = ((region.x * fx) as i32, (region.y * fy) as i32);
                 let (w, h) = ((region.width * fx) as i32, (region.height * fy) as i32);
-                if let Some(sub) = image.sub_image(x, y, w, h) {
+                // getSubimage keeps the source's colour model
+                if let Some(sub) = decoded.sub_image(x, y, w, h) {
                     put(sprite.clone(), sub, animation.clone(), pool, images);
                 }
             }
@@ -44,7 +46,7 @@ pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images,
                     continue;
                 }
                 let Some((values, _)) = input(value_key, pool, images) else { return };
-                if let Some(palette) = PaletteMap::new(&key_palette, &values) {
+                if let Some(palette) = PaletteMap::new(&key_palette.image, &values.image) {
                     palettes.push((suffix, palette));
                 }
             }
@@ -60,7 +62,8 @@ pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images,
                     if pool.contains_key(&sprite) || !used(&sprite) {
                         continue;
                     }
-                    put(sprite, palette.apply_to(&image), animation.clone(), pool, images);
+                    let recoloured = DecodedPng::from_rgba(palette.apply_to(&image.image));
+                    put(sprite, recoloured, animation.clone(), pool, images);
                 }
             }
         }
@@ -68,27 +71,25 @@ pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images,
     }
 }
 
-/// A pool texture's pixels and animation; `None` when absent or its image can't be decoded.
-fn input(key: &ResourcePath, pool: &TexturePool, images: &Images) -> Option<(RgbaImage, Option<AnimationMeta>)> {
+/// A pool texture's image and animation; `None` when absent or its image can't be decoded.
+fn input(key: &ResourcePath, pool: &TexturePool, images: &Images) -> Option<(DecodedPng, Option<AnimationMeta>)> {
     let texture = pool.get(key)?;
     let image = match images.get(key) {
         Some(image) => image.clone(),
-        None => texture.decode_image().ok()?,
+        None => texture.decode().ok()?,
     };
     Some((image, texture.animation.clone()))
 }
 
 fn put(
     sprite: ResourcePath,
-    image: RgbaImage,
+    image: DecodedPng,
     animation: Option<AnimationMeta>,
     pool: &mut TexturePool,
     images: &mut Images,
 ) {
-    if let Ok(texture) = Texture::from_image(sprite.clone(), &image, animation, None) {
-        pool.insert(sprite.clone(), texture);
-        images.insert(sprite, image);
-    }
+    pool.insert(sprite.clone(), Texture::from_image(sprite.clone(), &image, animation));
+    images.insert(sprite, image);
 }
 
 struct PaletteMap(HashMap<i32, i32>);

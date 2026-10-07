@@ -9,7 +9,7 @@ description = "Resource and data pack loading: blockstates, models, textures, co
 
 [dependencies]
 base64.workspace = true
-bm-java.workspace = true
+bm-java = { workspace = true, features = ["png"] }
 bm-math.workspace = true
 bm-world.workspace = true
 png.workspace = true

@@ -51,7 +51,11 @@ impl Pack {
 
     /// This pack re-rooted at a subfolder (overlays, nested datapacks).
     pub fn sub(&self, dir: &str) -> Self {
-        Self { source: self.source.clone(), prefix: format!("{}{}/", self.prefix, dir.trim_matches('/')), origin: self.origin.clone() }
+        Self {
+            source: self.source.clone(),
+            prefix: format!("{}{}/", self.prefix, dir.trim_matches('/')),
+            origin: self.origin.clone(),
+        }
     }
 
     /// The subfolder this pack is rooted at inside its source, `""` or ending in `/`.

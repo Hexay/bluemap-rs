@@ -14,7 +14,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 
 - `bm-compress` — storage + region chunk compressions (gzip/deflate/zstd/lz4-java)
 - `bm-format` — tile grid and digit-split paths (more formats land here)
-- `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`)
+- `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`,
+  ImageIO PNG read/write behind feature `png` — madler zlib via `libz-sys`, since zlib-rs output differs)
 - `bm-map` — map layer: `lowres` (LODs, seams, single-writer flush via `LowresStore`), `renderstate` (rstate `.dat`
   cells, TileState machine), `mask`, map/webroot `settings.json` writers (Gson 2.8.9 byte-identical); oracles
   `cargo test -p bm-map -- --ignored`

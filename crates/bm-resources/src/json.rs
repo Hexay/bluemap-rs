@@ -223,7 +223,8 @@ impl Parser<'_> {
         if (0xD800..0xDC00).contains(&hi) && self.s.get(self.pos..self.pos + 2) == Some(b"\\u") {
             self.pos += 2;
             let lo = self.hex4()?;
-            return Ok(char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo.wrapping_sub(0xDC00) & 0x3FF)).unwrap_or('\u{fffd}'));
+            return Ok(char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo.wrapping_sub(0xDC00) & 0x3FF))
+                .unwrap_or('\u{fffd}'));
         }
         Ok(char::from_u32(hi).unwrap_or('\u{fffd}'))
     }
@@ -232,7 +233,24 @@ impl Parser<'_> {
     fn unquoted(&mut self) -> &str {
         let start = self.pos;
         while let Some(c) = self.peek() {
-            if matches!(c, b'/' | b'\\' | b';' | b'#' | b'=' | b'{' | b'}' | b'[' | b']' | b':' | b',' | b' ' | b'\t' | b'\x0c' | b'\r' | b'\n') {
+            if matches!(
+                c,
+                b'/' | b'\\'
+                    | b';'
+                    | b'#'
+                    | b'='
+                    | b'{'
+                    | b'}'
+                    | b'['
+                    | b']'
+                    | b':'
+                    | b','
+                    | b' '
+                    | b'\t'
+                    | b'\x0c'
+                    | b'\r'
+                    | b'\n'
+            ) {
                 break;
             }
             self.pos += 1;
