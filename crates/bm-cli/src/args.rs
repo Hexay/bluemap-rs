@@ -46,6 +46,12 @@ pub struct Args {
     pub convert_storage: Option<String>,
     #[arg(long = "to", value_name = "format", requires = "convert_storage")]
     pub to: Option<String>,
+    /// bluemap-rs only, hidden: run as the core of a server plugin, spoken to over stdin/stdout (`bm-ipc`).
+    #[arg(long = "plugin-ipc", hide = true)]
+    pub plugin_ipc: bool,
+    /// With `--plugin-ipc`: stop when this process (the server JVM) exits.
+    #[arg(long = "parent-pid", hide = true, requires = "plugin_ipc")]
+    pub parent_pid: Option<u32>,
 }
 
 impl Args {

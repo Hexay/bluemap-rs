@@ -3,7 +3,7 @@
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::Stream;
@@ -18,6 +18,7 @@ pub struct LiveMap {
     sse: Option<broadcast::Sender<Bytes>>,
     players: Option<LiveJson>,
     markers: Option<LiveJson>,
+    markers_read: Mutex<Option<Instant>>,
 }
 
 #[derive(Default)]
@@ -43,7 +44,12 @@ impl LiveMap {
     /// `sse`: serve `live/sse` (webserver.conf `sse-enabled`). Live JSON routes exist only once enabled with
     /// [`LiveMap::with_players`]/[`LiveMap::with_markers`]; otherwise those URLs fall through to map storage.
     pub fn new(sse: bool) -> Self {
-        Self { sse: sse.then(|| broadcast::channel(SSE_QUEUE).0), players: None, markers: None }
+        Self {
+            sse: sse.then(|| broadcast::channel(SSE_QUEUE).0),
+            players: None,
+            markers: None,
+            markers_read: Mutex::new(None),
+        }
     }
 
     pub fn with_players(mut self) -> Self {
@@ -76,6 +82,11 @@ impl LiveMap {
         self.sse.as_ref().map_or(0, broadcast::Sender::receiver_count)
     }
 
+    /// Whether `live/markers.json` was served within `window` (marker demand of the plugin core).
+    pub fn markers_read_within(&self, window: Duration) -> bool {
+        self.markers_read.lock().unwrap_or_else(|e| e.into_inner()).is_some_and(|t| t.elapsed() < window)
+    }
+
     fn update(slot: Option<&LiveJson>, json: String, on_change: impl FnOnce(&str)) {
         if let Some(slot) = slot
             && slot.replace(Bytes::from(json.clone()))
@@ -102,7 +113,9 @@ impl LiveMap {
     }
 
     pub(crate) fn markers(&self) -> Option<Option<Bytes>> {
-        self.markers.as_ref().map(LiveJson::get)
+        let markers = self.markers.as_ref()?;
+        *self.markers_read.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        Some(markers.get())
     }
 
     /// The event stream for one client; ends when it lags [`SSE_QUEUE`] events behind or on `shutdown`.

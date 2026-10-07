@@ -199,12 +199,19 @@ dependencies = [
  "bm-config",
  "bm-engine",
  "bm-golden",
+ "bm-ipc",
+ "bm-java",
+ "bm-map",
  "bm-storage",
  "bm-web",
  "chrono",
  "clap",
  "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
+ "zip",
 ]
 
 [[package]]
@@ -277,6 +284,17 @@ dependencies = [
  "png",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "bm-ipc"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

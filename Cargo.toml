@@ -74,6 +74,7 @@ bm-compress = { path = "crates/bm-compress" }
 bm-config = { path = "crates/bm-config" }
 bm-engine = { path = "crates/bm-engine" }
 bm-format = { path = "crates/bm-format" }
+bm-ipc = { path = "crates/bm-ipc" }
 bm-java = { path = "crates/bm-java" }
 bm-map = { path = "crates/bm-map" }
 bm-math = { path = "crates/bm-math" }

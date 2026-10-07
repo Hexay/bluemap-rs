@@ -28,7 +28,15 @@ impl Service {
 
     /// `createOrUpdateWebApp` without the webapp files: (re)writes the webroot `settings.json`.
     pub fn write_webapp_settings(&self) -> Result<()> {
-        let webapp = convert::webapp_settings(&self.config.webapp);
+        self.write_webapp_settings_with(&[], &[])
+    }
+
+    /// [`Service::write_webapp_settings`] plus scripts/styles registered through the API (`WebFilesManager`).
+    pub fn write_webapp_settings_with(&self, scripts: &[String], styles: &[String]) -> Result<()> {
+        let mut webapp = convert::webapp_settings(&self.config.webapp);
+        for (list, extra) in [(&mut webapp.scripts, scripts), (&mut webapp.styles, styles)] {
+            list.extend(extra.iter().filter(|s| !list.contains(s)).cloned().collect::<Vec<_>>());
+        }
         let file = webapp.webroot.join("settings.json");
         let existing = match webapp.update_settings_file {
             true => None,

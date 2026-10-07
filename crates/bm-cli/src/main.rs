@@ -4,6 +4,7 @@
 mod args;
 mod convert;
 mod log;
+mod plugin;
 mod render;
 mod shutdown;
 mod watch;
@@ -28,6 +29,9 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    if args.plugin_ipc {
+        return plugin::run(args.parent_pid);
+    }
     match run(&args) {
         Ok(code) => code,
         Err(e) if is_missing_resources(&e) => {
@@ -136,10 +140,7 @@ fn run(args: &Args) -> Result<ExitCode> {
     if args.renders() || args.webserver || args.generate_webapp || args.generate_websettings || args.markers {
         return Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) });
     }
-    log::info(&format!(
-        "Generated default config files for you, here: {}\n",
-        absolute(&config_folder).display()
-    ));
+    log::info(&format!("Generated default config files for you, here: {}\n", absolute(&config_folder).display()));
     print!("{HELP}");
     Ok(ExitCode::from(1))
 }

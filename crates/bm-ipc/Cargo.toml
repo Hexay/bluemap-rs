@@ -1,0 +1,20 @@
+[package]
+name = "bm-ipc"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+# File::try_lock
+rust-version = "1.89"
+publish.workspace = true
+description = "Wire protocol between the server-plugin shim (JVM) and the bluemap core process"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_ProcessStatus", "Win32_System_Threading"] }

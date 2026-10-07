@@ -4,17 +4,21 @@
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use bm_web::{Arg, JavaFormat};
 use chrono::Local;
 
 static FILES: Mutex<Vec<File>> = Mutex::new(Vec::new());
 
+/// Replaces the console in plugin mode (log lines become IPC frames).
+type Sink = Box<dyn Fn(Level, &str) + Send + Sync>;
+static SINK: OnceLock<Sink> = OnceLock::new();
+
 const LINE_SEP: &str = if cfg!(windows) { "\r\n" } else { "\n" };
 
-#[derive(Clone, Copy)]
-enum Level {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Level {
     Info,
     Warning,
     Error,
@@ -91,12 +95,22 @@ fn home_dir() -> PathBuf {
         .map_or_else(|| PathBuf::from("."), PathBuf::from)
 }
 
+/// Sends console output to `sink` instead; files keep being written. Only the first call takes effect.
+pub fn set_sink(sink: impl Fn(Level, &str) + Send + Sync + 'static) {
+    let _ = SINK.set(Box::new(sink));
+}
+
+/// Closes every log file (plugin unload removes core.conf's file logger).
+pub fn close_files() {
+    FILES.lock().unwrap_or_else(PoisonError::into_inner).clear();
+}
+
 fn log(level: Level, msg: &str) {
-    let line = format!("[{} {}] {msg}", Local::now().format("%H:%M:%S"), level.console());
-    if matches!(level, Level::Error) {
-        eprintln!("{line}")
+    if let Some(sink) = SINK.get() {
+        sink(level, msg);
     } else {
-        println!("{line}")
+        let line = format!("[{} {}] {msg}", Local::now().format("%H:%M:%S"), level.console());
+        if matches!(level, Level::Error) { eprintln!("{line}") } else { println!("{line}") }
     }
     let mut files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
     if files.is_empty() {

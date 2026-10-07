@@ -321,3 +321,46 @@ bStats id; demand-driven live markers; auto-respawn with backoff; armv7-musl if 
     first* (Folia: no `SaveWorld`, per-entity scheduler snapshots as upstream). Spigot later via the same shim core.
 11. **Memory budget key**: add a hidden `core.conf` key that caps the core's RSS (`#565`, `#271`)? → *Yes, later*.
     Document that container limits now cover JVM + core.
+
+## 8. Implementation status (2026-10-07)
+
+Vertical slice done end to end on Windows: `crates/bm-ipc` (protocol, crate docs = spec), `bluemap --plugin-ipc`
+(`crates/bm-cli/src/plugin/`), the Java shim (`platforms/paper/`) and `tools/e2e_paper.py`.
+
+**Verified** by `py -3 tools/e2e_paper.py` on Paper 26.3 build 159 (Java 25) with BlueBorder 1.1.2 (marker addon)
+and BetterStresstestbots (server-side fake players), 31/31 checks:
+- core spawn → `Ready` 2–3 s with a warm data folder, 4–18 s on a first start (config generation + resource load;
+  this box was heavily loaded); core RSS ~40–48 MiB after rendering a 3-map spawn-area world; plugin jar 5.5 MiB
+  (windows-x64; core exe 13.3 MiB uncompressed).
+- webapp, lowres and hires tiles served from `webserver.conf`; `/bluemap`, `maps`, `force-update`, `reload` from
+  the console; a bot appears in `live/players.json`; BlueBorder's set reaches `live/markers.json` and comes back
+  after reload and after a killed core is respawned; server stop leaves no core process.
+- Against upstream BlueMap 5.28 Paper on a copy of the same world: `live/markers.json` and the empty
+  `live/players.json` are byte-identical; all generated configs identical except the deliberate `format: optimized`
+  block appended to `storages/*.conf`.
+- Rust tests: framing edge cases (`bm-ipc`), players JSON vs `JsonWriter` (`bm-map`), command spec/parser,
+  pluginState, scripted-shim lifecycle (`crates/bm-cli/tests/plugin_ipc.rs`: handshake, `NotReady`, command
+  round trip, lock exit 4, protocol mismatch exit 3, `Shutdown`/EOF → `Bye`).
+
+**Deviations from the design**
+- `Hello` carries `maxMemoryMib` (render-thread suggestion in a new `core.conf`); `Unloading` was added so the shim
+  runs the API `onDisable` cycle for reloads it didn't start; `Suggest` is not implemented (the shim suggests from
+  `commands.json` + mirrored ids).
+- Command tree: one shared `crates/bm-cli/src/plugin/commands.json` (no `--dump-command-tree`); the shim registers
+  `bluemap` + a greedy argument and sends the sender's permission nodes, the core gates per usage.
+- Shim compiles against paper-api 1.21.11 for Java 21 (26.x API jars are Java 25 class files) and recompiles
+  BlueMapAPI 2.8.1 from its sources jar for the same reason. 1.21.x servers should work too (untested).
+- The core logs one line per finished render task (`Map 'x': N regions, M tiles rendered, …`); upstream is silent.
+- Command output follows upstream's wording and palette but is not component-identical.
+- `reload light` reloads resources too; the rayon pool keeps the first load's thread count until restart; the
+  `RenderStart{threads}` count is ignored.
+- Marker demand: viewers (SSE or `markers.json` read within 30 s), the first 30 s after a load and 30 s before a
+  storage write.
+
+**Left**
+- linux/macOS/arm targets (CI with cargo-zigbuild, musl + mimalloc, rustls), Folia run (no Folia 26.3 build yet;
+  scheduler code paths are in place but untested), skin updater (`AssetWrite` of player heads), `tasks.dat`,
+  `troubleshoot`/`debug`/`storages <s>` commands, hourly watcher restart (our watchers self-heal), persisting
+  `lastFullUpdate` on watcher-driven full updates, bStats id.
+- A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
+  `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.
