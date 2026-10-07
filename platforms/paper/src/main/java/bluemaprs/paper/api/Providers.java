@@ -11,7 +11,6 @@ import java.util.Objects;
 /** JVM-side callbacks of {@code BlueMapAPI.getPlugin()}; they outlive API generations like upstream's. */
 public final class Providers {
 
-    // TODO: skin updater (join → SkinProvider → PlayerIconFactory → AssetWrite playerheads/<uuid>.png per map)
     private volatile SkinProvider skinProvider = new MojangSkinProvider();
     private volatile PlayerIconFactory iconFactory = new DefaultPlayerIconFactory();
     private volatile PlayerDisplayNameProvider displayNameProvider;

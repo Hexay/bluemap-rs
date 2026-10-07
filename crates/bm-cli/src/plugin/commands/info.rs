@@ -1,4 +1,4 @@
-//! Read-only commands: status, version, help, maps, tasks, storages.
+//! Read-only commands: status, version, help, maps, tasks.
 
 use std::sync::PoisonError;
 
@@ -114,11 +114,5 @@ pub fn tasks(s: &Session, say: Say) -> i32 {
         body.push(text::format("... % more scheduled tasks ...", &[&(pending.len() - 10).to_string()]));
     }
     say(text::paragraph("Tasks", body));
-    1
-}
-
-pub fn storages(s: &Session, say: Say) -> i32 {
-    let body = s.service.config.storages.keys().map(|id| vec![text::span(id.clone(), HIGHLIGHT)]).collect();
-    say(text::paragraph("Storages", body));
     1
 }

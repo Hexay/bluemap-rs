@@ -45,6 +45,8 @@ tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["catch-panic", "limit", "timeout"] }
 tracing = "0.1"
+# global allocator of the static musl cores only (bm-cli); see docs/13 §5
+mimalloc = { version = "0.1", default-features = false }
 clap = { version = "4", features = ["derive"] }
 # zlib-rs: pure-Rust backend, faster than miniz_oxide
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
