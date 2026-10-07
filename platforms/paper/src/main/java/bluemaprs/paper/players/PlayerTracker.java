@@ -26,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -42,6 +43,7 @@ public final class PlayerTracker implements Listener {
     private final Logger log;
     /** Iteration order of this map is upstream's live-players JSON order. */
     private final Map<UUID, Tracked> online = new ConcurrentHashMap<>();
+    private volatile Consumer<UUID> joinListener = uuid -> {};
     private final ScheduledExecutorService sender = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "BlueMap-Players");
         thread.setDaemon(true);
@@ -90,6 +92,11 @@ public final class PlayerTracker implements Listener {
     public void onPlayerJoin(PlayerJoinEvent event) {
         track(event.getPlayer());
         sendUuid("PlayerJoin", event.getPlayer().getUniqueId());
+        joinListener.accept(event.getPlayer().getUniqueId());
+    }
+
+    public void setJoinListener(Consumer<UUID> listener) {
+        this.joinListener = listener;
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
