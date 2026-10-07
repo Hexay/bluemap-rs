@@ -37,6 +37,8 @@ mod view;
 
 use std::io::Cursor;
 
+use zstd::zstd_safe::CParameter;
+
 pub const MAGIC: &[u8; 4] = b"BMQ2";
 const HEADER: usize = 9;
 const MODE_QUADS: u8 = 0;
@@ -45,6 +47,8 @@ const MODE_RAW: u8 = 1;
 const MAX_BODY: usize = 1 << 30;
 /// zstd level for new blobs; see docs/09 for the size/speed trade-off.
 pub const DEFAULT_LEVEL: i32 = 9;
+const WINDOW_LOG: u32 = 20;
+const TABLE_LOG: u32 = 18;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompactError {
@@ -78,9 +82,14 @@ pub fn is_compact(data: &[u8]) -> bool {
 
 impl CompactCodec {
     pub fn new(level: i32) -> Self {
+        let mut cctx = zstd::bulk::Compressor::new(level).expect("zstd compression context");
+        // level 9 alone sizes its tables for multi-MB inputs (~28 MB per thread); bodies are ~0.1–1 MB
+        for p in [CParameter::WindowLog(WINDOW_LOG), CParameter::HashLog(TABLE_LOG), CParameter::ChainLog(TABLE_LOG)] {
+            cctx.set_parameter(p).expect("valid zstd parameter");
+        }
         Self {
             level,
-            cctx: zstd::bulk::Compressor::new(level).expect("zstd compression context"),
+            cctx,
             dctx: zstd::bulk::Decompressor::new().expect("zstd decompression context"),
             body: Vec::new(),
             check: Vec::new(),
