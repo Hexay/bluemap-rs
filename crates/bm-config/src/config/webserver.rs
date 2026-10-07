@@ -41,7 +41,7 @@ impl Default for WebserverConfig {
             sse_enabled: true,
             log: WebserverLogConfig::default(),
             additional_headers: Vec::new(),
-            map_etags: false,
+            map_etags: true,
         }
     }
 }

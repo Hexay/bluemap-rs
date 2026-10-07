@@ -39,8 +39,8 @@ pub struct WebOptions {
     /// Serve the bundled webapp for files missing from `webroot`.
     pub serve_embedded_webapp: bool,
     pub access_log: AccessLog,
-    /// Send `ETag` (and `Vary`) on map data. Off by default: Java sends neither, and the conformance suite holds
-    /// us to its headers. A matching `If-None-Match` gets a 304 either way.
+    /// Send `ETag` (and `Vary`) on map data so reloads revalidate with 304s; Java sends neither. A matching
+    /// `If-None-Match` gets a 304 either way.
     pub map_etags: bool,
 }
 
@@ -52,7 +52,7 @@ impl WebOptions {
             server_name: format!("BlueMap/{WEBAPP_VERSION}"),
             serve_embedded_webapp: true,
             access_log: AccessLog::disabled(),
-            map_etags: false,
+            map_etags: true,
         }
     }
 

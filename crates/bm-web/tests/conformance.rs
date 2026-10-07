@@ -8,6 +8,8 @@
 //! - framing: Java always sends `Transfer-Encoding: chunked` (or `Content-Length: 0` without a body); we send the
 //!   real `Content-Length` (download progress in the webapp) and none on 204/304, as HTTP requires.
 //! - `Accept-Encoding` q-values: Java ignores `gzip;q=1.0` (exact token match), we honour it.
+//! - `ETag`/`Vary` on map data, where Java sends neither (no revalidation, docs/11): ours are only compared where
+//!   Java sends the header too, e.g. its static-file ETag.
 //! - requests Java can't parse (it drops the connection) get a 400 from hyper.
 
 mod common;
@@ -22,6 +24,8 @@ use bm_web::{MapRoute, WebApp, WebOptions};
 use common::{Reply, Served, gunzip, request};
 
 const FRAMING: [&str; 3] = ["transfer-encoding", "content-length", "connection"];
+/// Headers we add where Java's reply has none; see the module docs.
+const ADDED: [&str; 2] = ["etag", "vary"];
 const HEADERS: [(&str, &str); 2] =
     [("Cache-Control", "public, max-age=86400, stale-if-error=604800"), ("CDN-Cache-Control", "max-age=60")];
 
@@ -235,7 +239,8 @@ fn matches_java_bluemap_webserver() {
         let target_ours = target.replace(&format!(":{port}/"), &format!(":{}/", ours.addr.port()));
         let (j, o) = (request(java_addr, method, &target, &h), request(ours.addr, method, &target_ours, &h));
         let gz_url = target.split('?').next().unwrap().ends_with(".gz");
-        let (jn, on) = (normalized(&j, gz_url), normalized(&o, gz_url));
+        let (jn, mut on) = (normalized(&j, gz_url), normalized(&o, gz_url));
+        on.1.retain(|(k, _)| !ADDED.contains(&k.as_str()) || jn.1.iter().any(|(jk, _)| jk == k));
         let label = format!("{method} {target} {h:?}");
         if jn == on {
             same += 1;

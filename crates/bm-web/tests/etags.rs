@@ -19,6 +19,12 @@ fn serve(map: Arc<dyn MapStorage>, etags: bool, web: &std::path::Path) -> Served
     Served::start(app)
 }
 
+#[test]
+fn validators_are_on_by_default() {
+    assert!(bm_config::WebserverConfig::default().map_etags, "webserver.conf without the key");
+    assert!(WebOptions::new(".").map_etags);
+}
+
 fn prbm(seed: u8) -> Vec<u8> {
     let mut m = bm_format::prbm::TileModel::default();
     let y = f32::from(seed);

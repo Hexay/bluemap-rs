@@ -121,8 +121,8 @@ Map-data validators (`bm-web/src/validators.rs`, `map_data.rs`; `MapStorage::{gr
 quoted ETag = storage `Version` + body coding (`-gzip` etc. per representation); `If-None-Match` → 304 from metadata
 only. Version: compat files mtime + length + file id (NTFS file index / inode; ids change on every rename-over, mtime
 alone repeated within ~1 ms); optimized hires bundle generation + record offset; SQL none (Java's schema has no
-change column). Sending `ETag` is opt-in (`webserver.conf` hidden `map-etags: true`), because the conformance suite
-compares every header with Java's; 304s are answered either way. `structures` reload (`web_bench.py --only
+change column). `ETag` is on by default (hidden `webserver.conf` key `map-etags: false` turns it off).
+The conformance suite skips our `ETag`/`Vary` only where Java's reply has none. 304s are answered either way. `structures` reload (`web_bench.py --only
 reload_hires,reload_map_data --server-arg=--etags`): 70 KB → 0 B body per hires tile, ~4.3 MB → 0 B body per
 view (header bytes unmeasured), CPU per hires revalidation 0.60–0.68 → 0.36–0.40 ms; full replies unchanged within noise (one handle gives
 bytes and version).
