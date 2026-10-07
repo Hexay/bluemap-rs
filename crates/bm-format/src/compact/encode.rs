@@ -36,7 +36,7 @@ pub(super) fn quads(v: &PrbmView, body: &mut Vec<u8>, s: &mut Scratch) {
     let color = v.attrs[COLOR];
     stream(body, |out| (0..3).for_each(|c| out.extend((0..quads).map(|q| color[18 * q + c]))));
     exceptions(body, quads, 18, |q, row| row.copy_from_slice(&color[18 * q..18 * q + 18]), |q, pred| {
-        pred.chunks_exact_mut(3).for_each(|vert| vert.copy_from_slice(&color[18 * q..18 * q + 3]))
+        pred.as_chunks_mut::<3>().0.iter_mut().for_each(|vert| vert.copy_from_slice(&color[18 * q..18 * q + 3]))
     });
 
     let (block, sun) = (v.attrs[BLOCKLIGHT], v.attrs[SUNLIGHT]);
@@ -68,7 +68,7 @@ fn gather(attr: &[u8], k: usize, out: &mut Vec<u32>) {
     for quad in attr.chunks_exact(6 * stride) {
         for i in QV {
             let vert = &quad[i * stride..(i + 1) * stride];
-            out.extend(vert.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())));
+            out.extend(vert.as_chunks::<4>().0.iter().map(|&b| u32::from_le_bytes(b)));
         }
     }
 }
@@ -79,7 +79,7 @@ pub(super) fn predict_normals(pos: &[u8], pred: &mut [u8]) {
     for t in 0..2 {
         let p: [f32; 9] = std::array::from_fn(|i| f(9 * t + i));
         let n = surface_normal(&p).map(normal_byte);
-        pred[9 * t..9 * t + 9].chunks_exact_mut(3).for_each(|vert| vert.copy_from_slice(&n));
+        pred[9 * t..9 * t + 9].as_chunks_mut::<3>().0.iter_mut().for_each(|vert| *vert = n);
     }
 }
 

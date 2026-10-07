@@ -162,7 +162,7 @@ fn copy_hires(id: &str, src: &dyn MapStorage, dst: &dyn MapStorage, progress: Pr
                         break;
                     }
                     let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                    if n % 256 == 0 || n == tiles.len() {
+                    if n.is_multiple_of(256) || n == tiles.len() {
                         progress(id, n, tiles.len());
                     }
                 }

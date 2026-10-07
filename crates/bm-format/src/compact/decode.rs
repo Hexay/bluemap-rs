@@ -71,7 +71,7 @@ pub(super) fn quads(body: &[u8], out: &mut Vec<u8>, s: &mut Scratch) -> Result<(
     expand(out, &s.uv, quads, 2);
 
     attribute(out, "ao", 0x47);
-    for a in ao.chunks_exact(4) {
+    for a in ao.as_chunks::<4>().0 {
         out.extend(EXPAND.map(|i| a[i]));
     }
 
@@ -124,8 +124,8 @@ fn patch(
     if !exc.is_empty() {
         return Err(CompactError::Corrupt("exception stream"));
     }
-    for (i, row) in index.chunks_exact(4).zip(rows.chunks_exact(size)) {
-        let q = u32::from_le_bytes(i.try_into().unwrap()) as usize;
+    for (i, row) in index.as_chunks::<4>().0.iter().zip(rows.chunks_exact(size)) {
+        let q = u32::from_le_bytes(*i) as usize;
         if q >= quads {
             return Err(CompactError::Corrupt("exception index"));
         }

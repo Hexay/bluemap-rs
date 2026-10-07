@@ -115,7 +115,7 @@ mod tests {
     fn grid_and_escapes_are_exact() {
         assert_eq!(quantize(1.5f32.to_bits(), 4), (24, true));
         assert_eq!(quantize((-0.0f32).to_bits(), 4), (0, false));
-        assert_eq!(quantize(f32::NAN.to_bits(), 4).1, false);
+        assert!(!quantize(f32::NAN.to_bits(), 4).1);
         assert_eq!(quantize(1e9f32.to_bits(), 4), (32767, false));
         let floats = [0.0, 1.0, 1.0, 0.05, 2.0, -0.0, 3.0, f32::INFINITY, 0.5, 1e9, -7.25, 0.1];
         let bits: Vec<u32> = floats.iter().map(|f: &f32| f.to_bits()).collect();

@@ -198,7 +198,10 @@ def main() -> None:
     ap.add_argument("--optimized", nargs="*", default=["vanilla", "nether"])
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--only-incremental", action="store_true")
+    ap.add_argument("--only-optimized", action="store_true")
     args = ap.parse_args()
+    if args.only_optimized:
+        args.fixtures, args.incremental = [], []
     if not args.no_build:
         subprocess.run(["cargo", "build", "--release", "-p", "bm-cli", "-p", "bm-golden"], cwd=ROOT, check=True)
     failures: list[str] = []
