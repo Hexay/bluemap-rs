@@ -1,7 +1,7 @@
 //! Compact JSON exactly as BlueMap's Gson 2.8.9 instances print it: no whitespace, null fields omitted,
 //! HTML-safe string escaping, numbers through Java's `toString`.
 
-pub(super) struct JsonObject {
+pub(crate) struct JsonObject {
     buf: String,
 }
 
@@ -52,11 +52,11 @@ impl JsonObject {
     }
 }
 
-pub(super) fn int_array(values: &[i32]) -> String {
+pub(crate) fn int_array(values: &[i32]) -> String {
     array(values.iter().map(|v| v.to_string()))
 }
 
-pub(super) fn string_array<S: AsRef<str>>(values: &[S]) -> String {
+pub(crate) fn string_array<S: AsRef<str>>(values: &[S]) -> String {
     array(values.iter().map(|v| {
         let mut s = String::new();
         push_string(&mut s, v.as_ref());
@@ -64,9 +64,15 @@ pub(super) fn string_array<S: AsRef<str>>(values: &[S]) -> String {
     }))
 }
 
-pub(super) fn array(items: impl Iterator<Item = String>) -> String {
+pub(crate) fn array(items: impl Iterator<Item = String>) -> String {
     let items: Vec<String> = items.collect();
     format!("[{}]", items.join(","))
+}
+
+pub(crate) fn quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    push_string(&mut out, s);
+    out
 }
 
 /// `JsonWriter.string` with `htmlSafe` (Gson's default).

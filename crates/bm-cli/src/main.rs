@@ -4,6 +4,8 @@
 mod args;
 mod log;
 mod render;
+mod shutdown;
+mod watch;
 mod web;
 
 use std::path::{Path, PathBuf};
@@ -14,6 +16,7 @@ use args::{Args, HELP};
 use bm_config::{BlueMapConfig, ConfigOptions};
 use bm_engine::{ResourceOptions, Service, TileUpdateStrategy};
 use clap::Parser;
+use shutdown::Shutdown;
 
 fn main() -> ExitCode {
     let args = match Args::try_parse() {
@@ -54,7 +57,8 @@ fn absolute(p: &Path) -> PathBuf {
 
 fn run(args: &Args) -> Result<ExitCode> {
     if let Some(file) = &args.log_file {
-        log::add_file(file, args.append).with_context(|| format!("log file {}", file.display()))?;
+        let file = file.to_string_lossy();
+        log::add_file(&file, args.append).with_context(|| format!("log file {file}"))?;
     }
     if args.help {
         print!("{HELP}");
@@ -71,19 +75,12 @@ fn run(args: &Args) -> Result<ExitCode> {
     {
         bail!("Mods folder does not exist: {}", mods.display());
     }
-    let unsupported = args.unsupported();
-    if !unsupported.is_empty() {
-        bail!("not supported by this bluemap-rs build yet: {}", unsupported.join(", "));
-    }
     let packs = config_folder.join("packs");
     std::fs::create_dir_all(&packs).with_context(|| format!("create {}", packs.display()))?;
 
     let config = BlueMapConfig::load(&ConfigOptions::cli(&config_folder))?;
     if let Some(file) = &config.core.log.file {
-        // Java formats this path with String.format(file, now); only plain paths are supported so far
-        if !file.contains('%') {
-            log::add_file(Path::new(file), config.core.log.append).with_context(|| format!("log file {file}"))?;
-        }
+        log::add_formatted_file(file, config.core.log.append).with_context(|| format!("log file {file}"))?;
     }
     let threads = config.core.resolve_render_thread_count(std::thread::available_parallelism().map_or(1, |n| n.get()));
     rayon::ThreadPoolBuilder::new()
@@ -97,10 +94,15 @@ fn run(args: &Args) -> Result<ExitCode> {
         mods_folder: args.mods.clone(),
     };
     let service = Service::new(config, options);
+    let shutdown = Shutdown::install();
 
-    let webserver = args.webserver.then(|| web::start(&service, args.verbose)).transpose()?;
     let mut ok = true;
+    let mut webserver = None;
     if args.renders() {
+        let (mut maps, failed) = render::load_maps(&service, args.maps.as_deref(), args.generate_webapp)?;
+        if args.webserver {
+            webserver = Some(web::start(&service, args.verbose, &mut maps, &shutdown)?);
+        }
         let strategy = if args.force_render {
             TileUpdateStrategy::ForceAll
         } else if args.fix_edges {
@@ -108,17 +110,25 @@ fn run(args: &Args) -> Result<ExitCode> {
         } else {
             TileUpdateStrategy::ForceNone
         };
-        ok = render::render_maps(&service, strategy, args.maps.as_deref(), args.generate_webapp)?;
-    } else if args.generate_webapp || args.generate_websettings {
+        ok = render::run(&service, maps, failed, strategy, args.watch, &shutdown)?;
+    } else {
+        if args.markers {
+            update_markers(&service, args.maps.as_deref());
+        }
         if args.generate_webapp {
             bm_web::install_webapp(&service.config.webapp.webroot, true)?;
+            service.write_webapp_settings()?;
+        } else if args.generate_websettings {
+            service.write_webapp_settings()?;
         }
-        service.write_webapp_settings()?;
+        if args.webserver {
+            webserver = Some(web::start(&service, args.verbose, &mut [], &shutdown)?);
+        }
     }
     if let Some(server) = webserver {
         server.wait()?;
     }
-    if args.renders() || args.webserver || args.generate_webapp || args.generate_websettings {
+    if args.renders() || args.webserver || args.generate_webapp || args.generate_websettings || args.markers {
         return Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) });
     }
     log::info(&format!(
@@ -127,4 +137,18 @@ fn run(args: &Args) -> Result<ExitCode> {
     ));
     print!("{HELP}");
     Ok(ExitCode::from(1))
+}
+
+/// `BlueMapCLI.updateMarkers`; unlike Java, a map outside `-m` doesn't end the loop early.
+fn update_markers(service: &Service, maps: Option<&str>) {
+    let selected: Option<Vec<&str>> = maps.map(|m| m.split(',').collect());
+    for id in service.map_ids(|id| selected.as_ref().is_none_or(|s| s.contains(&id))) {
+        match service.write_config_markers(&id) {
+            Ok(warnings) => {
+                warnings.iter().for_each(|w| log::warn(w));
+                log::info(&format!("Updated markers for map '{id}'"));
+            }
+            Err(e) => log::error(&format!("Failed to save markers for map '{id}'! {e}")),
+        }
+    }
 }

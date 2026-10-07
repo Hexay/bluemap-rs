@@ -3,7 +3,7 @@
 use bm_java::fmt::{double_to_string, float_to_string};
 use bm_math::Color;
 
-use super::gson::{JsonObject, array, int_array};
+use crate::gson::{JsonObject, array, int_array};
 use super::{MapConfig, SettingsError};
 
 /// `BmMap` builds its hires grid as `new Grid(hiresTileSize, 2)`.

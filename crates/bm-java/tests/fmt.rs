@@ -1,4 +1,4 @@
-//! `Double.toString` / `Float.toString` and `HashMap` order against values printed by Java (`tools/javaref/JdkRef.java`).
+//! `Double.toString` / `Float.toString` and `(Concurrent)HashMap` order against values printed by Java (`tools/javaref/JdkRef.java`).
 
 #[rustfmt::skip]
 #[path = "data/fmt.rs"]
@@ -7,6 +7,10 @@ mod data;
 #[rustfmt::skip]
 #[path = "data/hash_map.rs"]
 mod orders;
+
+#[rustfmt::skip]
+#[path = "data/concurrent_hash_map.rs"]
+mod chm_orders;
 
 use bm_java::fmt::{double_to_string, float_to_string};
 
@@ -34,5 +38,12 @@ fn floats_match_java() {
 fn hash_map_order_matches_java() {
     for &(inserted, iterated) in orders::ORDERS {
         assert_eq!(bm_java::hash_map_order(inserted), iterated);
+    }
+}
+
+#[test]
+fn concurrent_hash_map_order_matches_java() {
+    for &(inserted, put_all, iterated) in chm_orders::ORDERS {
+        assert_eq!(bm_java::concurrent_hash_map_order(inserted), iterated, "putAll: {put_all}");
     }
 }

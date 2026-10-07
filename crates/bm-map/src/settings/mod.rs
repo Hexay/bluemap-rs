@@ -2,7 +2,6 @@
 //! per map (`MapSettingsSerializer`, written to map storage) and the webroot one (`WebFilesManager`).
 //! Input structs mirror `MapConfig` / `WebappConfig` with their Java defaults; HOCON parsing lives elsewhere.
 
-mod gson;
 mod map;
 mod webapp;
 
