@@ -2,13 +2,14 @@
 //! (percent-decoded), the query parsed into a `LinkedHashMap` and re-encoded with `URLEncoder`, and webroot path
 //! resolution with `Path.resolve` + `normalize` + `startsWith` semantics, hardened for Windows names.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use percent_encoding::percent_decode_str;
 
 /// `URI.getPath()`: percent-decoded as UTF-8, malformed sequences become U+FFFD.
-pub fn decode_path(raw: &str) -> String {
-    percent_decode_str(raw).decode_utf8_lossy().into_owned()
+pub fn decode_path(raw: &str) -> Cow<'_, str> {
+    percent_decode_str(raw).decode_utf8_lossy()
 }
 
 /// `HttpRequest.setRawQueryString` then `getRawQueryString`: what BlueMap logs and puts into redirects.
