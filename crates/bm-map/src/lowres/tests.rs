@@ -108,6 +108,21 @@ fn flush_saves_each_dirty_tile_once() {
     assert_eq!(s.saves, s.tiles.len());
 }
 
+#[test]
+fn unchanged_tiles_are_not_saved_again() {
+    let mut m = manager(2);
+    m.set_argb(1, 1, WHITE, 3, 0).unwrap();
+    m.flush().unwrap();
+    assert_eq!(m.store().saves, 5, "the lod-1 tile, its lod-2 tile and that one's 3 seam neighbours");
+    m.set_argb(1, 1, WHITE, 3, 0).unwrap();
+    m.flush().unwrap();
+    assert_eq!(m.store().saves, 5, "same pixels: no save at any lod");
+    m.set_argb(1, 1, MAGENTA, 3, 0).unwrap();
+    m.flush().unwrap();
+    assert_eq!(m.store().saves, 10, "every tile changed again");
+    assert_eq!(tile(m.store(), 2, (0, 0)).color(0, 0), 0x3FFF_00FF);
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("disk full")]
 struct DiskFull;

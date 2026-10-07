@@ -4,7 +4,7 @@
 
 use std::io::Cursor;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LowresTile {
     /// Tile size + 1.
     width: usize,
