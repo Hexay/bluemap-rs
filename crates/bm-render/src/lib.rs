@@ -6,6 +6,7 @@ mod block_pass;
 mod context;
 mod liquid;
 mod mesh;
+mod relative;
 mod renderer;
 mod resource;
 mod settings;

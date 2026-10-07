@@ -98,4 +98,9 @@ Deflater, which zlib-rs never had; madler zlib at level 6, as `bm-java` uses for
 | level 6 | 68.8–68.9 s | 7.1–7.4 s | 80.29 MB |
 | level 5 | 62.1–62.2 s (**−9.8%**) | 6.6–6.9 s | 80.72 MB (+0.53%) |
 
-Cumulative: 77.3 → 62.1 s CPU (−19.7%), 8.1 → 6.7 s wall.
+Item 4 then landed (`a01b13a`). Rotated offsets are precomputed per variant (`relative.rs`, 27 entries), and
+neighbour reads within ±1 index the tile volume directly from the block's own index. A lazy 26-neighbour cache
+wasn't built, because what remained after this is spread thin across memory reads. Result: 62.1 → 55.0 s CPU
+(**−11.5%**), 6.7 → 6.0–6.5 s wall, byte-identical.
+
+Cumulative: 77.3 → 55.0 s CPU (**−29%**), 8.1 → ~6.3 s wall.

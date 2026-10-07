@@ -17,6 +17,7 @@ bm-config.workspace = true
 bm-engine.workspace = true
 bm-storage.workspace = true
 bm-web.workspace = true
+chrono.workspace = true
 clap.workspace = true
 rayon.workspace = true
 tokio = { workspace = true, features = ["signal"] }

@@ -86,6 +86,9 @@ impl RegionRender<'_> {
                 if self.ctx.save_hires() {
                     buf.model.write_prbm(prbm)?;
                     self.ctx.storage.write_grid(GridKey::Hires, job.tile, prbm)?;
+                    if let Some(listener) = &self.ctx.tile_listener {
+                        listener(job.tile, 0);
+                    }
                 }
                 let columns = buf.columns.iter().map(|c| {
                     let mut color = c.color;

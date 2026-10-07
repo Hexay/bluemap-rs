@@ -10,6 +10,7 @@ use bm_map::lowres::LowresStore;
 use bm_map::renderstate::{CellIo, CellKind};
 use bm_storage::{GridKey, MapStorage};
 
+use crate::map::TileListener;
 use crate::persist::Msg;
 
 pub(crate) fn grid_key(kind: CellKind) -> GridKey {
@@ -63,6 +64,7 @@ pub(crate) struct StorageLowres {
     pub tile_size: [usize; 2],
     pub png: Vec<u8>,
     pub saves: usize,
+    pub on_save: Option<TileListener>,
 }
 
 impl LowresStore for StorageLowres {
@@ -78,6 +80,9 @@ impl LowresStore for StorageLowres {
         data.encode_png(&mut self.png)?;
         self.storage.write_grid(GridKey::Lowres(lod), tile, &self.png)?;
         self.saves += 1;
+        if let Some(listener) = &self.on_save {
+            listener(tile, lod);
+        }
         Ok(())
     }
 }

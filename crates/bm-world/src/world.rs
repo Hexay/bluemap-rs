@@ -68,6 +68,11 @@ impl World {
         &self.biomes
     }
 
+    /// The folder holding this dimension's `r.<x>.<z>.mca` files (may not exist yet).
+    pub fn region_dir(&self) -> &Path {
+        &self.region_dir
+    }
+
     pub fn regions(&self) -> Result<Vec<(i32, i32)>> {
         list_regions(&self.region_dir)
     }

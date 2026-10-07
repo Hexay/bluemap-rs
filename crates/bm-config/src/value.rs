@@ -119,6 +119,58 @@ impl Value {
             ),
         }
     }
+
+    /// Compact JSON text as Configurate's `GsonConfigurationLoader` saves this node, which is how BlueMap hands
+    /// `marker-sets` to MarkerGson: insertion order, null members dropped, numbers via Java's `toString`.
+    pub fn to_configurate_json(&self) -> String {
+        let mut out = String::new();
+        self.write_configurate_json(&mut out);
+        out
+    }
+
+    fn write_configurate_json(&self, out: &mut String) {
+        let entry = |out: &mut String, first: bool, key: &str, value: &Value| {
+            if !first {
+                out.push(',');
+            }
+            out.push_str(&serde_json::to_string(key).expect("strings serialize"));
+            out.push(':');
+            value.write_configurate_json(out);
+        };
+        match self {
+            Value::Null => out.push_str("null"),
+            Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            Value::Int(i) => out.push_str(&i.to_string()),
+            Value::Float(f) => out.push_str(&bm_java::fmt::double_to_string(*f)),
+            Value::String(s) => out.push_str(&serde_json::to_string(s).expect("strings serialize")),
+            // Configurate drops null list elements and the node turns into a map (BlueMap's marker parser rejects it)
+            Value::List(items) if items.contains(&Value::Null) => {
+                out.push('{');
+                let present = items.iter().enumerate().filter(|(_, v)| **v != Value::Null);
+                for (n, (i, v)) in present.enumerate() {
+                    entry(out, n == 0, &i.to_string(), v);
+                }
+                out.push('}');
+            }
+            Value::List(items) => {
+                out.push('[');
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    v.write_configurate_json(out);
+                }
+                out.push(']');
+            }
+            Value::Object(map) => {
+                out.push('{');
+                for (n, (k, v)) in map.iter().filter(|(_, v)| **v != Value::Null).enumerate() {
+                    entry(out, n == 0, k, v);
+                }
+                out.push('}');
+            }
+        }
+    }
 }
 
 /// Java's `Double.toString` (shortest repr, JDK 19+): plain notation in [1e-3, 1e7), else `d.dddE±n`.
@@ -159,6 +211,17 @@ mod tests {
         ] {
             assert_eq!(java_double_to_string(d), s);
         }
+    }
+
+    #[test]
+    fn configurate_json() {
+        let mut m = Map::new();
+        m.insert("s".into(), Value::String("a\"<é".into()));
+        m.insert("gone".into(), Value::Null);
+        m.insert("n".into(), Value::List(vec![Value::Int(-1), Value::Float(1e-4), Value::Bool(false)]));
+        m.insert("holes".into(), Value::List(vec![Value::Int(1), Value::Null, Value::Int(3)]));
+        let json = Value::Object(m).to_configurate_json();
+        assert_eq!(json, r#"{"s":"a\"<é","n":[-1,1.0E-4,false],"holes":{"0":1,"2":3}}"#);
     }
 
     #[test]

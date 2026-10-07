@@ -97,7 +97,7 @@ impl Renderer<'_, '_, '_> {
 
         // Java tests light and caves first; every test is side-effect free, so the cheapest goes first
         if let Some(cull) = face.cullface {
-            let [cx, cy, cz] = self.relative(cull.to_vector());
+            let [cx, cy, cz] = self.v.relative.get(cull.to_vector());
             let (id, info) = block.neighbor(ctx, cx, cy, cz);
             if info.props.culling || (info.props.culling_identical && id == block.id) {
                 return Ok(());
@@ -111,7 +111,7 @@ impl Renderer<'_, '_, '_> {
             return Ok(());
         }
 
-        let [nx, ny, nz] = self.relative(dir.to_vector());
+        let [nx, ny, nz] = self.v.relative.get(dir.to_vector());
         let (sky, block_light) = block.neighbor_light(ctx, nx, ny, nz);
         let sun = block.sky.max(sky);
         let block_light = block.block_light.max(block_light);

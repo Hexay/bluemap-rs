@@ -53,18 +53,6 @@ impl Args {
     pub fn renders(&self) -> bool {
         self.render || self.force_render || self.watch || self.fix_edges
     }
-
-    /// Options BlueMap has that this build parses but cannot carry out yet.
-    pub fn unsupported(&self) -> Vec<&'static str> {
-        let mut out = Vec::new();
-        if self.watch {
-            out.push("-u/--watch (watching world files for changes)");
-        }
-        if self.markers {
-            out.push("--markers (writing config marker sets)");
-        }
-        out
-    }
 }
 
 pub const HELP: &str = "\

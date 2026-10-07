@@ -1,83 +1,173 @@
-//! `BlueMapCLI.renderMaps` without watching: webapp settings, resources, then every selected map once.
+//! `BlueMapCLI.renderMaps`: webapp settings, resources and maps, then a render queue worked off on this thread,
+//! with BlueMap's progress log every 10 s; with `-u` the file watchers keep feeding it until shutdown.
 
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bm_engine::{Service, TileUpdateStrategy, UpdateEvent, UpdateStats, update_map};
+use bm_engine::{
+    LoadedMaps, MapContext, RenderQueue, RenderTask, Service, TaskEvent, TileUpdateStrategy, UpdateEvent, UpdateStats,
+    run_queue,
+};
 
 use crate::log;
+use crate::shutdown::Shutdown;
+use crate::watch::Watchers;
 
 /// BlueMap's CLI reports progress every 10 s.
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Returns whether every map updated without errors.
-pub fn render_maps(
-    service: &Service,
-    strategy: TileUpdateStrategy,
-    maps: Option<&str>,
-    force_webapp: bool,
-) -> Result<bool> {
+/// `createOrUpdateWebApp`, resources, then every selected map; maps that failed to load are returned by id.
+pub fn load_maps(service: &Service, maps: Option<&str>, force_webapp: bool) -> Result<(Vec<MapContext>, Vec<String>)> {
     if service.config.webapp.enabled {
-        // `createOrUpdateWebApp`: webapp files when forced (-g) or missing, then settings.json
         bm_web::install_webapp(&service.config.webapp.webroot, force_webapp)?;
         service.write_webapp_settings()?;
     }
     service.resources()?;
-
     let selected: Option<Vec<&str>> = maps.map(|m| m.split(',').collect());
-    let ids = service.map_ids(|id| selected.as_ref().is_none_or(|s| s.contains(&id)));
-    let mut loaded = Vec::new();
-    for id in &ids {
-        match service.open_map(id) {
-            Ok(Some(map)) => {
-                log::info(&format!("Loading map '{id}'..."));
-                map.warnings.iter().for_each(|w| log::warn(w));
-                loaded.push(map);
+    let (mut loaded, mut failed) = (Vec::new(), Vec::new());
+    for id in service.map_ids(|id| selected.as_ref().is_none_or(|s| s.contains(&id))) {
+        match open_map(service, &id) {
+            Ok(Some(map)) => loaded.push(map),
+            Ok(None) => {}
+            Err(e) => {
+                log::error(&format!("Failed to load map '{id}': {e}"));
+                failed.push(id);
             }
-            Ok(None) => log::info(&format!(
-                "The map '{id}' has no world configured. The map will be displayed, but it will not be updated by \
-                 this bluemap instance!"
-            )),
-            Err(e) => log::error(&format!("Failed to load map '{id}': {e}")),
         }
     }
+    Ok((loaded, failed))
+}
 
-    log::info(&format!("Start updating {} maps ({} threads) ...", loaded.len(), rayon::current_num_threads()));
+pub fn open_map(service: &Service, id: &str) -> bm_engine::Result<Option<MapContext>> {
+    let map = service.open_map(id)?;
+    match &map {
+        Some(map) => {
+            log::info(&format!("Loading map '{id}'..."));
+            map.warnings.iter().for_each(|w| log::warn(w));
+        }
+        None => log::info(&format!(
+            "The map '{id}' has no world configured. The map will be displayed, but it will not be updated by this \
+             bluemap instance!"
+        )),
+    }
+    Ok(map)
+}
+
+/// Renders `maps` (and with `watch`, keeps updating them until shutdown). Returns whether no tile failed.
+pub fn run(
+    service: &Service,
+    maps: Vec<MapContext>,
+    failed: Vec<String>,
+    strategy: TileUpdateStrategy,
+    watch: bool,
+    shutdown: &Shutdown,
+) -> Result<bool> {
+    let queue = Arc::new(RenderQueue::new());
+    let loaded = LoadedMaps::default();
+    let count = maps.len();
+    for map in maps {
+        let id = map.id.clone();
+        loaded.insert(map);
+        queue.schedule(RenderTask::full(id, strategy));
+    }
+    let watchers = Watchers::new(service, queue.clone());
+    if watch {
+        loaded.all().iter().for_each(|m| watchers.start(m));
+    }
+    {
+        let queue = queue.clone();
+        shutdown.on_trigger(move || {
+            log::info("Stopping...");
+            queue.stop();
+        });
+    }
+    log::info(&format!("Start updating {count} maps ..."));
+
+    let resources = service.resources()?;
+    // dropping the senders stops the helper threads
+    let (progress_stop, progress_rx) = channel::<()>();
+    let (retry_stop, retry_rx) = channel::<()>();
     let start = Instant::now();
-    let mut ok = true;
-    let mut total = UpdateStats::default();
-    for map in &loaded {
-        let mut last = Instant::now();
-        let mut on_event = |event: UpdateEvent| match event {
-            UpdateEvent::Warning(w) => log::warn(&w),
-            UpdateEvent::Progress(s) if last.elapsed() >= PROGRESS_INTERVAL => {
-                last = Instant::now();
-                let pct = (s.regions_done as f64 / s.regions.max(1) as f64 * 100_000.0).round() / 1000.0;
-                log::info(&format!("updating map '{}': {pct}%", map.id));
-            }
-            UpdateEvent::Progress(_) => {}
-        };
-        match update_map(map, service.resources()?, strategy, &mut on_event) {
-            Ok(s) => {
+    let mut report = Report::default();
+    std::thread::scope(|s| {
+        s.spawn(|| progress_log(&queue, progress_rx));
+        if watch && !failed.is_empty() {
+            s.spawn(|| watchers.retry_failed(failed, &loaded, retry_rx));
+        }
+        run_queue(&queue, &loaded, resources, !watch, &mut |event| report.on_event(event, &queue, start));
+        drop((progress_stop, retry_stop));
+    });
+    watchers.close();
+    if !shutdown.is_triggered() {
+        log::info("Stopping...");
+    }
+    log::info("Saving...");
+    log::info("Stopped.");
+    Ok(!report.failed)
+}
+
+#[derive(Default)]
+struct Report {
+    failed: bool,
+    up_to_date: bool,
+    total: UpdateStats,
+}
+
+impl Report {
+    fn on_event(&mut self, event: TaskEvent, queue: &RenderQueue, start: Instant) {
+        let finished = matches!(event, TaskEvent::Finished(..));
+        match event {
+            TaskEvent::Started(_) | TaskEvent::Update(_, UpdateEvent::Progress(_)) => {}
+            TaskEvent::Update(_, UpdateEvent::Warning(w)) => log::warn(&w),
+            TaskEvent::Finished(task, Ok(s)) => {
                 log::info(&format!(
                     "Map '{}': {} regions, {} tiles rendered, {} skipped, {} deleted, {} lowres tiles saved",
-                    map.id, s.regions, s.tiles_rendered, s.tiles_skipped, s.tiles_deleted, s.lowres_saves
+                    task.map, s.regions, s.tiles_rendered, s.tiles_skipped, s.tiles_deleted, s.lowres_saves
                 ));
-                ok &= s.tile_errors == 0;
-                add(&mut total, &s);
+                self.failed |= s.tile_errors > 0;
+                add(&mut self.total, s);
             }
-            Err(e) => {
-                ok = false;
-                log::error(&format!("Failed to update map '{}': {e}", map.id));
+            TaskEvent::Finished(task, Err(e)) => {
+                self.failed = true;
+                log::error(&format!("Failed to update map '{}': {e}", task.map));
+            }
+        }
+        if finished && !self.up_to_date && queue.pending() == 0 && !queue.is_stopped() {
+            self.up_to_date = true;
+            log::info("Your maps are now all up-to-date!");
+            log::info(&format!(
+                "({} tiles rendered in {:.1}s)",
+                self.total.tiles_rendered,
+                start.elapsed().as_secs_f64()
+            ));
+        }
+    }
+}
+
+/// BlueMapCLI's `updateInfoTask`.
+fn progress_log(queue: &RenderQueue, stop: Receiver<()>) {
+    let mut was_idle = false;
+    while let Err(RecvTimeoutError::Timeout) = stop.recv_timeout(PROGRESS_INTERVAL) {
+        match queue.current() {
+            None => {
+                if !was_idle {
+                    log::info("Waiting for changes on the world-files...");
+                }
+                was_idle = true;
+            }
+            Some((description, progress)) => {
+                was_idle = false;
+                log::info(&format!("{description}: {}%", java_double((progress * 100_000.0).round() / 1000.0)));
             }
         }
     }
-    log::info(&format!(
-        "Your maps are now all up-to-date! ({} tiles rendered in {:.1}s)",
-        total.tiles_rendered,
-        start.elapsed().as_secs_f64()
-    ));
-    Ok(ok)
+}
+
+/// `Double.toString` for the plain-notation range progress values live in.
+fn java_double(v: f64) -> String {
+    if v.fract() == 0.0 { format!("{v:.1}") } else { v.to_string() }
 }
 
 fn add(total: &mut UpdateStats, s: &UpdateStats) {
@@ -87,4 +177,14 @@ fn add(total: &mut UpdateStats, s: &UpdateStats) {
     total.tiles_deleted += s.tiles_deleted;
     total.tile_errors += s.tile_errors;
     total.lowres_saves += s.lowres_saves;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn progress_prints_like_java() {
+        assert_eq!(super::java_double(0.0), "0.0");
+        assert_eq!(super::java_double(12.345), "12.345");
+        assert_eq!(super::java_double(100.0), "100.0");
+    }
 }

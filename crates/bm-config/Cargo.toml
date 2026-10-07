@@ -8,6 +8,7 @@ publish.workspace = true
 description = "BlueMap's HOCON configuration: parser, typed configs with upstream defaults, first-start templates"
 
 [dependencies]
+bm-java.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

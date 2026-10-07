@@ -85,7 +85,7 @@ fn every_generated_config_loads() {
             assert_eq!(map.edge_light_strength, 8);
             assert_eq!(map.storage, "file");
             assert_eq!(map.start_pos, [0, 0]);
-            assert_eq!(map.marker_sets_json(), serde_json::json!({}));
+            assert_eq!(map.marker_sets_json(), "{}");
             // the template's `{ #min-x ... }` entry is a box without bounds
             let full = MaskShape::Box { min: [i32::MIN; 3], max: [i32::MAX; 3] };
             assert_eq!(map.render_mask[0].shape, full);

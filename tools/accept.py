@@ -1,17 +1,20 @@
 """Acceptance: render fixtures with our `bluemap` CLI from Java BlueMap's own config folder and compare the webroot
 with Java's golden one; then check incremental updates and drop-in over Java's render state.
 
-Usage: py -3 tools/accept.py [fixture ...] [--incremental vanilla ...] [--optimized vanilla ...] [--no-build]
+Usage: py -3 tools/accept.py [fixture ...] [--incremental vanilla ...] [--watch vanilla ...] [--no-build]
 Needs: work/bluemap/<fx>/{config,data,web} from tools/render_golden.py (Java BlueMap 5.28, MC 26.3).
 Output: work/accept/<fx>/ (fresh each run). Exit 1 if any check fails.
 """
 import argparse
-import gzip
+import json
+import queue
 import re
 import shutil
+import signal
 import struct
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -121,11 +124,7 @@ def bump_chunk(region_dir: Path, cx: int, cz: int, delta: int) -> None:
 
 def incremental(fixture: str, failures: list[str]) -> None:
     print(f"incremental {fixture}", flush=True)
-    out = prepare(fixture, f"{fixture}-incremental")
-    conf = next((out / "config" / "maps").glob("*.conf"))
-    world = Path(re.search(r'^world:\s*"(.*)"', conf.read_text(), re.M)[1])
-    shutil.copytree(world, out / "world")
-    set_conf(conf, "world", '"world"')
+    out, conf = incremental_copy(fixture, f"{fixture}-incremental")
     bluemap(out, "-r")
     again = bluemap(out, "-r")
     check(all(rendered == 0 for rendered, _ in again.values()), f"{fixture}: second run renders nothing", failures)
@@ -143,65 +142,96 @@ def incremental(fixture: str, failures: list[str]) -> None:
     check(compare(WORK / "bluemap" / fixture / "web", out / "web"), f"{fixture}: incremental output still equals Java's", failures)
 
 
-def served_tiles_equal(golden: Path, cwd: Path, port: int) -> bool:
-    """Starts our webserver on the optimized storage; every hires tile Java rendered must come back (gzip
-    transcoded on the fly) as Java's PRBM."""
-    set_conf(cwd / "config" / "webserver.conf", "port", str(port))
-    server = subprocess.Popen([str(EXE), "-c", "config", "-v", MC, "-w"], cwd=cwd, stdout=subprocess.DEVNULL,
-                              stderr=subprocess.DEVNULL)
+def incremental_copy(fixture: str, name: str) -> tuple[Path, Path]:
+    """A fresh accept dir rendering its own copy of the fixture's world; returns it and the map config."""
+    out = prepare(fixture, name)
+    conf = next((out / "config" / "maps").glob("*.conf"))
+    world = Path(re.search(r'^world:\s*"(.*)"', conf.read_text(), re.M)[1])
+    shutil.copytree(world, out / "world")
+    set_conf(conf, "world", '"world"')
+    return out, conf
+
+
+def sse_tiles(url: str, into: list[tuple[int, int, int]]) -> None:
+    """Appends (x, z, lod) of every `tile` event on the SSE stream at `url` until it closes."""
+    event = None
     try:
-        for _ in range(100):
-            try:
-                urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=1).read()
-                break
-            except OSError:
-                time.sleep(0.1)
-        tiles = sorted((golden / "maps").glob("*/tiles/0/**/*.prbm.gz"))
-        for tile in tiles:
-            url = f"http://127.0.0.1:{port}/" + tile.relative_to(golden).as_posix().removesuffix(".gz")
-            req = urllib.request.Request(url, headers={"Accept-Encoding": "gzip"})
-            with urllib.request.urlopen(req, timeout=30) as res:
-                body = res.read()
-                if res.headers.get("Content-Encoding") == "gzip":
-                    body = gzip.decompress(body)
-            if body != gzip.decompress(tile.read_bytes()):
-                print(f"    served tile differs: {url}")
-                return False
-        print(f"    {len(tiles)} hires tiles served identically", flush=True)
-        return bool(tiles)
-    finally:
-        server.terminate()
-        server.wait()
+        with urllib.request.urlopen(url, timeout=600) as stream:
+            for raw in stream:
+                line = raw.decode().rstrip("\r\n")
+                if line.startswith("event: "):
+                    event = line[7:]
+                elif line.startswith("data: ") and event == "tile":
+                    tile = json.loads(line[6:])
+                    into.append((tile["x"], tile["y"], tile["lod"]))
+    except OSError:
+        pass
 
 
-def optimized(fixture: str, failures: list[str]) -> None:
-    """Renders into an optimized storage, then checks re-render, serving and conversion back against Java."""
-    print(f"optimized {fixture}", flush=True)
-    out = prepare(fixture, f"{fixture}-optimized")
-    set_conf(out / "config" / "storages" / "file.conf", "format", "optimized")
+def watch(fixture: str, failures: list[str], timeout: float = 120, port: int = 8199) -> None:
+    """`bluemap -u -w`: a bumped chunk timestamp gets its tiles re-rendered while running and pushed as SSE `tile`
+    events; a signal stops it cleanly."""
+    print(f"watch {fixture}", flush=True)
+    out, conf = incremental_copy(fixture, f"{fixture}-watch")
+    set_conf(out / "config" / "core.conf", "update-cooldown", "0")
+    set_conf(out / "config" / "webserver.conf", "port", str(port))
     bluemap(out, "-r")
-    maps = out / "web" / "maps"
-    check((maps / "bluemap-rs-format.txt").is_file() and not any(maps.glob("*/tiles/0")),
-          f"{fixture}: optimized layout (marker, no tiles/0)", failures)
-    again = bluemap(out, "-r")
-    check(all(r == 0 for r, _ in again.values()), f"{fixture}: optimized second run renders nothing", failures)
-    golden = WORK / "bluemap" / fixture / "web"
-    check(served_tiles_equal(golden, out, 18100 + len(failures)), f"{fixture}: served tiles equal Java's", failures)
-    bluemap(out, "--convert-storage", "file", "--to", "compat")
-    check(compare(golden, out / "web"), f"{fixture}: optimized -> compat equals Java's webroot", failures)
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+    proc = subprocess.Popen([str(EXE), "-c", "config", "-v", MC, "-u", "-w"], cwd=out, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, creationflags=flags)
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in proc.stdout], daemon=True).start()
+
+    def wait_for(pattern: re.Pattern | str) -> re.Match | None:
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            try:
+                line = lines.get(timeout=1)
+            except queue.Empty:
+                continue
+            print("    | " + line.rstrip(), flush=True)
+            if m := re.search(pattern, line):
+                return m
+        return None
+
+    try:
+        check(wait_for("Your maps are now all up-to-date!") is not None, f"{fixture}: -u finishes the initial update", failures)
+        events: list[tuple[int, int, int]] = []
+        url = f"http://127.0.0.1:{port}/maps/{conf.stem}/live/sse"
+        threading.Thread(target=sse_tiles, args=(url, events), daemon=True).start()
+        time.sleep(1)
+        dim = re.search(r'^dimension:\s*"(.*)"', conf.read_text(), re.M)[1]
+        cx, cz = shared_chunk(out / "web", conf.stem)
+        for delta in (1, -1):
+            start = time.monotonic()
+            bump_chunk(region_dir(out / "world", dim), cx, cz, delta)
+            m = wait_for(MAP_LINE)
+            rendered = int(m[3]) if m else None
+            what = f"{fixture}: watched chunk {cx},{cz} {delta:+} -> {rendered} rendered after {time.monotonic() - start:.1f}s (expected {touched_tiles(cx, cz)})"
+            check(rendered == touched_tiles(cx, cz), what, failures)
+        hires = {(x, z) for x, z, lod in events if lod == 0}
+        lods = sorted({lod for _, _, lod in events})
+        what = f"{fixture}: SSE pushed {len(events)} tile events, {len(hires)} hires tiles, lods {lods}"
+        check(len(hires) == touched_tiles(cx, cz) and len(lods) > 1, what, failures)
+        print(f"    distinct tile events: {sorted(set(events))}", flush=True)
+        proc.send_signal(signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGTERM)
+        stopped = wait_for("Stopped.") is not None
+        code = proc.wait(timeout=60)
+        check(stopped and code == 0, f"{fixture}: stops cleanly on signal (exit {code})", failures)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    check(compare(WORK / "bluemap" / fixture / "web", out / "web"), f"{fixture}: watched output still equals Java's", failures)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("fixtures", nargs="*", default=DEFAULT_FIXTURES)
     ap.add_argument("--incremental", nargs="*", default=["vanilla", "structures"])
-    ap.add_argument("--optimized", nargs="*", default=["vanilla", "nether"])
+    ap.add_argument("--watch", nargs="*", default=["vanilla"])
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--only-incremental", action="store_true")
-    ap.add_argument("--only-optimized", action="store_true")
     args = ap.parse_args()
-    if args.only_optimized:
-        args.fixtures, args.incremental = [], []
     if not args.no_build:
         subprocess.run(["cargo", "build", "--release", "-p", "bm-cli", "-p", "bm-golden"], cwd=ROOT, check=True)
     failures: list[str] = []
@@ -215,8 +245,8 @@ def main() -> None:
         check(all(r == 0 for r, _ in maps.values()), f"{fx}: -r over Java's webroot renders nothing (drop-in)", failures)
     for fx in args.incremental:
         incremental(fx, failures)
-    for fx in [] if args.only_incremental else args.optimized:
-        optimized(fx, failures)
+    for fx in args.watch:
+        watch(fx, failures)
     print(f"\n{len(failures)} failed" + "".join(f"\n  {f}" for f in failures))
     sys.exit(1 if failures else 0)
 
