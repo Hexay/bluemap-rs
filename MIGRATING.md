@@ -12,7 +12,7 @@ setup.
 | nginx/apache in front of the file tree, `sql.php` | Same paths, file suffixes and SQL schema, as long as the storage stays `compat` (below) |
 | A customised `web/` folder | Left alone. The same webapp version is embedded and used only for files you don't have |
 | CLI scripts and systemd units | Same flags and exit codes (1: config error, 2: missing resources) |
-| Marker plugins (BlueMapAPI) and `depend: BlueMap` | The plugin is named `BlueMap` and ships the real API classes |
+| Marker plugins (BlueMapAPI) and `depend: BlueMap` | The plugin is named `BlueMap` (Fabric: mod id `bluemap`, version `5.28+rs.…`) and ships the real API classes |
 | `/bluemap …` commands and permissions | Same command tree and permission nodes |
 
 You can switch back to Java BlueMap later; see "Switching back" below.
@@ -36,7 +36,18 @@ for, then its own version.
 Requires Java 21 or newer. Built against the Paper 1.21.11 API and verified on Paper 26.3; older 1.21.x servers
 should work but are untested. Folia is wired up but not yet tested.
 
-### Memory and thread limits (Pterodactyl, Pelican and other panels)
+## Fabric mod
+
+1. Stop the server and remove upstream's BlueMap jar from `mods/`. Both are mod `bluemap`, so Fabric would load only
+   one of them, and bluemap-rs stays inactive if it sees upstream's jar.
+2. Put the bluemap-rs Fabric jar in `mods/` (Fabric API required, as upstream). Config stays in `config/bluemap/`,
+   the core binary goes to `config/bluemap/bin/<platform>/`.
+
+Dedicated servers only, Minecraft 26.1–26.3, Java 25. In singleplayer or on a LAN world the mod does nothing (it logs
+one line), so a modpack can keep it on the client side too. Fabric addons that `depend` on `bluemap` keep working.
+Permission nodes go through fabric-permissions-api (LuckPerms etc.); without one, `/bluemap` needs operator status (the "moderators" level, as upstream).
+
+## Memory and thread limits (Pterodactyl, Pelican and other panels)
 
 The core runs outside the Java heap, so the container's memory limit now covers **the JVM plus the core**. The
 stock Paper egg starts Java with `-XX:MaxRAMPercentage=95.0`, which leaves the core almost nothing; the host may

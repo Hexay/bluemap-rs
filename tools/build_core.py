@@ -1,12 +1,12 @@
-"""Builds the core binary per plugin target and stages it in platforms/paper/natives/<target>/ (docs/13 §5).
+"""Builds the core binary per plugin target and stages it in platforms/natives/<target>/ (docs/13 §5).
 Shared by CI (.github/workflows/*.yml) and local builds.
 
     py -3 tools/build_core.py [target…] [--jobs N] [--jars] [--list]
 
 Targets: windows-x64 (native MSVC), linux-x64 / linux-arm64 / linux-armv7 (static musl via cargo-zigbuild, from any
 host), macos-x64 / macos-arm64 (native cargo, macOS hosts only). No target = the host's own, unless --jars is given alone.
---jars then runs Gradle `allJars`: one jar per staged target plus the universal jar (platforms/paper/build/libs);
-Gradle needs Java 21+ (JAVA_HOME, or work/downloads/jdk21 when present).
+--jars then runs Gradle `allJars`: per shim (Paper, Fabric) one jar per staged target plus the universal jar
+(platforms/<shim>/build/libs); Gradle needs Java 25 (JAVA_HOME, or work/downloads/jdk25 when present).
 cargo-zigbuild and zig come from PATH or `pip install cargo-zigbuild ziglang` (pinned in CI).
 """
 import argparse
@@ -20,8 +20,9 @@ from pathlib import Path
 
 from paths import ROOT, WINDOWS, jdk_dir
 
-PAPER = ROOT / "platforms" / "paper"
-NATIVES = PAPER / "natives"
+PLATFORMS = ROOT / "platforms"
+NATIVES = PLATFORMS / "natives"
+SHIMS = ("paper", "fabric")
 
 # plugin target -> (rust triple, builder)
 TARGETS = {
@@ -87,14 +88,35 @@ def build(target: str, jobs: int | None) -> Path:
     return dest
 
 
-def build_jars() -> list[Path]:
-    gradlew = PAPER / ("gradlew.bat" if WINDOWS else "gradlew")
-    cmd = [str(gradlew), "allJars", "--no-daemon", "--console=plain", "-q", "-Dorg.gradle.jvmargs=-Xmx1g"]
+def build_jars(shims: tuple[str, ...] = SHIMS) -> list[Path]:
+    gradlew = PLATFORMS / ("gradlew.bat" if WINDOWS else "gradlew")
+    cmd = [str(gradlew), *(f":{s}:allJars" for s in shims), "--no-daemon", "--console=plain", "-q", "--max-workers=2"]
     env = dict(os.environ)
-    if jdk_dir(21).is_dir():
-        env["JAVA_HOME"] = str(jdk_dir(21))
-    subprocess.run(cmd, cwd=PAPER, check=True, env=env)
-    return sorted((PAPER / "build" / "libs").glob("bluemap-rs-paper-*.jar"))
+    if jdk_dir(25).is_dir():
+        env["JAVA_HOME"] = str(jdk_dir(25))
+    subprocess.run(cmd, cwd=PLATFORMS, check=True, env=env)
+    return sorted(j for s in shims for j in (PLATFORMS / s / "build" / "libs").glob(f"bluemap-rs-{s}-*.jar"))
+
+
+def stage_host_core(core: Path | None, jobs: int | None) -> None:
+    """Stages the host target's core for the e2e tests: a prebuilt `core`, else one built here."""
+    target = host_target()
+    if not core:
+        build(target, jobs)
+        return
+    native = NATIVES / target / binary_name(target)
+    native.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(core, native)
+    native.chmod(0o755)
+
+
+def host_jar(shim: str) -> Path:
+    """The host target's jar of `shim` from the last `build_jars`."""
+    libs = PLATFORMS / shim / "build" / "libs"
+    jars = sorted(libs.glob(f"*-{host_target()}.jar"))
+    if not jars:
+        sys.exit(f"no {host_target()} jar in {libs}; run without --skip-build")
+    return jars[-1]
 
 
 def mib(path: Path) -> str:

@@ -98,7 +98,8 @@ Drop-in caveat: replicating *visual* quirks for no seams (see 00 "Product goal")
 
 - Memory budget config key + RSS reporting in `/bluemap status` (#565, #271).
 - CPU budget: tiles/s cap, low-priority threads, pause on TPS/MSPT/player count (#215, #176, #246).
-- Lowres-only mode / skip hires below `min-inhabited-time` (#500, #288, #140) — the second already exists, the first doesn't.
+- Lowres-only mode / skip hires below `min-inhabited-time` (#500, #288, #140) — both exist (`enable-hires: false`,
+  `min-inhabited-time`), but lowres-only still meshes every tile; a top-surface-only path is the win.
 - Packed/SQLite storage to kill file-count pain (#701, #217) — the format must still be servable by sql.php.
 - Resumable force-render (#695); viewer-only mode with no world (#660).
 - Cache-Control/ETag on tiles (#17); optional TLS via rustls (#266, #132).

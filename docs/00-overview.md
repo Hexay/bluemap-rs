@@ -1,6 +1,7 @@
 # BlueMap → Rust: overview & plan
 
-Reference source: BlueMap @ `84ee993` (2026-10-05), BlueMapAPI v2.8.1, latest release v5.28 (MC 1.13.2 – 26.3, Java 25).
+Reference source: BlueMap @ `84ee993` (master, 2026-10-05), BlueMapAPI v2.8.1, latest release v5.28 (tag = `0f3a9fb`;
+MC 1.13.2 – 26.3, Java 25).
 Subsystem deep-dives:
 
 | # | File | Covers |

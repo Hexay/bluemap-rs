@@ -8,7 +8,9 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, DateTime, ZipWriter};
 
 fn main() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/resourceExtensions");
+    // runtime var, not env!(): a build-script binary shared through one target dir would bake in another checkout's path
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR");
+    let src = Path::new(&manifest).join("../../assets/resourceExtensions");
     println!("cargo:rerun-if-changed={}", src.display());
     let mut files = Vec::new();
     walk(&src, &src, &mut files);

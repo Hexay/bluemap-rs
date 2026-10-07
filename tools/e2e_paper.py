@@ -17,41 +17,22 @@ import shutil
 import sys
 from pathlib import Path
 
-from build_core import binary_name, build_jars, host_target
-from build_core import build as build_core
-from paper_server import E2E, Paper, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, rss_mib
-from paths import ROOT
+from build_core import build_jars, host_jar, stage_host_core
+from e2e_server import (E2E, Paper, check, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, report,
+                        rss_mib)
 
-PLATFORM = ROOT / "platforms" / "paper"
-TARGET = host_target()
 OUT = E2E / "out"
-RESULTS: list[tuple[str, bool, str]] = []
-
-
-def check(name: str, ok, detail: str = "") -> bool:
-    RESULTS.append((name, bool(ok), detail))
-    print(f"[{'PASS' if ok else 'FAIL'}] {name} {detail}", flush=True)
-    return bool(ok)
 
 
 def build(core: Path | None, jobs: int | None) -> Path:
     """Stages the core (built here via tools/build_core.py, or a prebuilt `core`) and builds the plugin jars."""
-    if core:
-        native = PLATFORM / "natives" / TARGET / binary_name(TARGET)
-        native.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(core, native)
-        native.chmod(0o755)
-    else:
-        build_core(TARGET, jobs)
-    build_jars()
+    stage_host_core(core, jobs)
+    build_jars(("paper",))
     return plugin_jar()
 
 
 def plugin_jar() -> Path:
-    jars = sorted((PLATFORM / "build" / "libs").glob(f"*-{TARGET}.jar"))
-    if not jars:
-        sys.exit(f"no {TARGET} plugin jar in {PLATFORM / 'build' / 'libs'}; run without --skip-build")
-    return jars[-1]
+    return host_jar("paper")
 
 
 def clock(m) -> int:
@@ -246,10 +227,7 @@ def main() -> None:
     run_jvm_kill(folder)
     if not args.no_upstream:
         run_upstream(folder / "world")
-    failed = [r for r in RESULTS if not r[1]]
-    print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
-    (OUT / "results.json").write_text(json.dumps(RESULTS, indent=1))
-    sys.exit(1 if failed else 0)
+    sys.exit(report(OUT))
 
 
 if __name__ == "__main__":
