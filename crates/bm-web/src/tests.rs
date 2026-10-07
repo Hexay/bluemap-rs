@@ -100,14 +100,18 @@ fn encoding_negotiation_follows_map_storage_request_handler() {
     let gunzip = |e: Encoded| Compression::Gzip.decompress(&e.body, 1 << 20).unwrap();
 
     let pass = encode(stored(&gz, Compression::Gzip), false, false, &accepted("gzip")).unwrap();
-    assert_eq!((pass.body.clone(), pass.content_encoding), (gz.clone(), Some("gzip")));
+    assert_eq!((pass.body.to_vec(), pass.content_encoding), (gz.clone(), Some("gzip")));
     let identity = encode(stored(&gz, Compression::Gzip), false, false, &Accepted::default()).unwrap();
-    assert_eq!((identity.body, identity.content_encoding), (raw.clone(), None));
+    assert_eq!((identity.body.to_vec(), identity.content_encoding), (raw.clone(), None));
+    let again = encode(stored(&gz, Compression::Gzip), false, false, &Accepted::default()).unwrap();
+    assert_eq!(again.body, raw, "served from the transcode cache");
+    let other = Compression::Gzip.compress(b"{\"a\":2}").unwrap();
+    assert_eq!(encode(stored(&other, Compression::Gzip), false, false, &Accepted::default()).unwrap().body, b"{\"a\":2}".as_slice());
     let regz = encode(stored(&raw, Compression::None), false, false, &accepted("gzip")).unwrap();
     assert_eq!(regz.content_encoding, Some("gzip"));
     assert_eq!(gunzip(regz), raw);
     let png = encode(stored(&raw, Compression::None), true, false, &accepted("gzip")).unwrap();
-    assert_eq!((png.body, png.content_encoding), (raw.clone(), None));
+    assert_eq!((png.body.to_vec(), png.content_encoding), (raw.clone(), None));
     let gz_url = encode(stored(&raw, Compression::None), true, true, &Accepted::default()).unwrap();
     assert_eq!(gz_url.content_encoding, None);
     assert_eq!(gunzip(gz_url), raw);

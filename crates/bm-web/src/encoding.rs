@@ -1,9 +1,12 @@
 //! `MapStorageRequestHandler.writeToResponse`: pass stored bytes through when the client accepts their coding,
 //! else transcode to gzip or decode to identity; `.gz` URLs always get gzip bytes without `Content-Encoding`.
 
-use bm_storage::{Compression, MAX_DECODED, Stored};
+use bm_storage::{Compression, Stored};
+use bytes::Bytes;
 use http::HeaderMap;
 use http::header::ACCEPT_ENCODING;
+
+use crate::transcode;
 
 /// The codings named in `Accept-Encoding`. Java matches whole comma-separated tokens case-insensitively, so
 /// `gzip;q=1.0` never matched there; here parameters are stripped and `q=0` means refused.
@@ -40,30 +43,24 @@ fn is_zero_q(q: &str) -> bool {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Encoded {
-    pub body: Vec<u8>,
+    pub body: Bytes,
     pub content_encoding: Option<&'static str>,
 }
 
-/// Picks the response bytes for stored map data. CPU-bound when transcoding: call from a blocking context.
+/// Picks the response bytes for stored map data. Transcoding blocks (CPU, and a bounded number of concurrent
+/// transcodes): call from a blocking context.
 pub fn encode(stored: Stored, is_png: bool, gz_url: bool, accepted: &Accepted) -> Result<Encoded, bm_compress::Error> {
     let c = stored.compression;
     if gz_url {
-        let body = if c == Compression::Gzip { stored.data } else { to_gzip(&stored)? };
+        let body = if c == Compression::Gzip { stored.data.into() } else { transcode::to_gzip(&stored)? };
         return Ok(Encoded { body, content_encoding: None });
     }
     if c != Compression::None && accepted.accepts(c.id()) {
-        return Ok(Encoded { body: stored.data, content_encoding: Some(c.id()) });
+        return Ok(Encoded { body: stored.data.into(), content_encoding: Some(c.id()) });
     }
     if c != Compression::Gzip && !is_png && accepted.accepts(Compression::Gzip.id()) {
-        return Ok(Encoded { body: to_gzip(&stored)?, content_encoding: Some(Compression::Gzip.id()) });
+        return Ok(Encoded { body: transcode::to_gzip(&stored)?, content_encoding: Some(Compression::Gzip.id()) });
     }
-    let body = if c == Compression::None { stored.data } else { c.decompress(&stored.data, MAX_DECODED)? };
+    let body = if c == Compression::None { stored.data.into() } else { transcode::decode(&stored)? };
     Ok(Encoded { body, content_encoding: None })
-}
-
-fn to_gzip(stored: &Stored) -> Result<Vec<u8>, bm_compress::Error> {
-    match stored.compression {
-        Compression::None => Compression::Gzip.compress(&stored.data),
-        c => Compression::Gzip.compress(&c.decompress(&stored.data, MAX_DECODED)?),
-    }
 }

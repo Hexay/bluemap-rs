@@ -143,7 +143,10 @@ impl Compression {
         match self {
             Self::None => read_capped(data, limit, out, self),
             // Java's GZIPInputStream reads concatenated members; flate2's GzDecoder stops after the first
-            Self::Gzip => read_capped(MultiGzDecoder::new(data), limit, out, self),
+            Self::Gzip => {
+                out.reserve(gzip_size_hint(data, limit));
+                read_capped(MultiGzDecoder::new(data), limit, out, self)
+            }
             Self::Deflate => read_capped(ZlibDecoder::new(data), limit, out, self),
             Self::Zstd => {
                 let decoder = zstd::stream::read::Decoder::new(data).map_err(|e| Error::Corrupt(self, e))?;
@@ -159,6 +162,14 @@ pub fn gzip_with_level(data: &[u8], level: u32) -> Vec<u8> {
     let mut encoder = GzEncoder::new(Vec::with_capacity(data.len() / 3), flate2::Compression::new(level));
     encoder.write_all(data).expect("writing to a Vec cannot fail");
     encoder.finish().expect("writing to a Vec cannot fail")
+}
+
+/// The last member's ISIZE trailer (size mod 2^32), capped by `limit` and deflate's maximum ratio (~1032:1).
+fn gzip_size_hint(data: &[u8], limit: usize) -> usize {
+    data.last_chunk::<4>()
+        .map_or(0, |t| u32::from_le_bytes(*t) as usize)
+        .min(limit.saturating_add(1))
+        .min(data.len().saturating_mul(1032))
 }
 
 fn read_capped(reader: impl Read, limit: usize, out: &mut Vec<u8>, c: Compression) -> Result<()> {

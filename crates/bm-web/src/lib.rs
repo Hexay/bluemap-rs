@@ -28,6 +28,7 @@ mod response;
 mod server;
 mod static_cache;
 mod static_files;
+mod transcode;
 mod webapp;
 
 pub use access_log::{AccessLog, FileSink, Level, LogSink, RequestInfo, StdoutSink, java_host_address};
