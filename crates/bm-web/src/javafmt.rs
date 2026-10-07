@@ -2,11 +2,13 @@
 //! `s S d % n` and the `t`/`T` date-time conversions. Anything else is rejected when the pattern is compiled,
 //! where Java would throw on every log call instead.
 
+use std::borrow::Cow;
+
 use chrono::{DateTime, Local};
 
 #[derive(Debug, Clone)]
-pub enum Arg {
-    Str(String),
+pub enum Arg<'a> {
+    Str(Cow<'a, str>),
     Int(i64),
     Time(DateTime<Local>),
 }
@@ -100,26 +102,26 @@ impl JavaFormat {
 
     /// Formats `args`. Where Java would throw (missing argument, `%d` of a string) this renders `null`/the value;
     /// callers check [`JavaFormat::max_arg`] up front.
-    pub fn format(&self, args: &[Arg]) -> String {
-        let mut out = String::new();
+    pub fn format(&self, args: &[Arg<'_>]) -> String {
+        let mut out = String::with_capacity(128);
         for piece in &self.pieces {
             match piece {
                 Piece::Lit(s) => out.push_str(s),
                 Piece::Spec { arg, left, width, prec, upper, conv } => {
-                    let mut s = match (args.get(arg - 1), conv) {
-                        (None, _) => "null".to_owned(),
-                        (Some(Arg::Time(t)), Conv::Time(c)) => format_time(t, *c),
-                        (Some(Arg::Str(s)), _) => s.clone(),
-                        (Some(Arg::Int(i)), _) => i.to_string(),
-                        (Some(Arg::Time(t)), _) => t.to_rfc3339(),
+                    let mut s: Cow<str> = match (args.get(arg - 1), conv) {
+                        (None, _) => "null".into(),
+                        (Some(Arg::Time(t)), Conv::Time(c)) => format_time(t, *c).into(),
+                        (Some(Arg::Str(s)), _) => Cow::Borrowed(s.as_ref()),
+                        (Some(Arg::Int(i)), _) => i.to_string().into(),
+                        (Some(Arg::Time(t)), _) => t.to_rfc3339().into(),
                     };
                     if let Some(p) = prec {
-                        s = s.chars().take(*p).collect();
+                        s = s.chars().take(*p).collect::<String>().into();
                     }
                     if *upper {
-                        s = s.to_uppercase();
+                        s = s.to_uppercase().into();
                     }
-                    let pad = width.saturating_sub(s.chars().count());
+                    let pad = if *width == 0 { 0 } else { width.saturating_sub(s.chars().count()) };
                     if *left {
                         out.push_str(&s);
                         out.extend(std::iter::repeat_n(' ', pad));

@@ -199,6 +199,7 @@ dependencies = [
  "bm-config",
  "bm-engine",
  "bm-golden",
+ "bm-storage",
  "bm-web",
  "chrono",
  "clap",
@@ -255,8 +256,11 @@ dependencies = [
 name = "bm-format"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "png",
+ "rayon",
  "thiserror",
+ "zstd",
 ]
 
 [[package]]
@@ -361,6 +365,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "twox-hash",
 ]
 
 [[package]]
@@ -370,6 +375,7 @@ dependencies = [
  "axum",
  "bm-compress",
  "bm-config",
+ "bm-format",
  "bm-map",
  "bm-storage",
  "bytes",

@@ -27,24 +27,102 @@ impl SqlMapStorage {
         Self { shared, id: id.to_owned(), locks: KeyLocks::default() }
     }
 
-    async fn ids(&self, table: KeyTable, key: &str, compression: Compression, create: bool) -> Result<Ids> {
+    async fn ids(&self, table: KeyTable, key: &str, compression: &str, create: bool) -> Result<Ids> {
         let s = &self.shared;
         let Some(map) = s.key_id(KeyTable::Map, &self.id, create).await? else { return Ok(None) };
         let Some(storage) = s.key_id(table, key, create).await? else { return Ok(None) };
-        let Some(comp) = s.key_id(KeyTable::Compression, compression.key(), create).await? else { return Ok(None) };
+        let Some(comp) = s.key_id(KeyTable::Compression, compression, create).await? else { return Ok(None) };
         Ok(Some((map, storage, comp)))
     }
 
-    async fn grid_ids(&self, grid: GridKey, create: bool) -> Result<Ids> {
-        self.ids(KeyTable::GridStorage, &grid.sql_key(), self.grid_compression(grid), create).await
-    }
-
     async fn item_ids(&self, item: &ItemKey, create: bool) -> Result<Ids> {
-        self.ids(KeyTable::ItemStorage, &item.sql_key(), self.item_compression(item), create).await
+        self.ids(KeyTable::ItemStorage, &item.sql_key(), self.item_compression(item).key(), create).await
     }
 
     fn map_id_num(&self) -> Result<Option<i64>> {
         self.shared.run(self.shared.key_id(KeyTable::Map, &self.id, false))
+    }
+
+    /// A grid cell by raw storage and compression keys (`GridKey` cells use `sql_key()` and the compression key).
+    pub(crate) fn read_cell(&self, key: &str, compression: &str, tile: Tile) -> Result<Option<Vec<u8>>> {
+        let s = &self.shared;
+        s.run(async {
+            let Some((m, g, c)) = self.ids(KeyTable::GridStorage, key, compression, false).await? else {
+                return Ok(None);
+            };
+            let [x, z] = cell(tile);
+            s.pool.fetch_blob(&s.sql.grid_read, &[Arg::Int(m), Arg::Int(g), x, z, Arg::Int(c)]).await
+        })
+    }
+
+    pub(crate) fn write_cell(&self, key: &str, compression: &str, tile: Tile, data: &[u8]) -> Result<()> {
+        let s = &self.shared;
+        s.check_writable(data.len())?;
+        s.run(async {
+            let ids = self.ids(KeyTable::GridStorage, key, compression, true).await?;
+            let (m, g, c) = ids.ok_or(Error::Protocol("key not created"))?;
+            let [x, z] = cell(tile);
+            let args = [Arg::Int(m), Arg::Int(g), x, z, Arg::Int(c), Arg::Blob(data)];
+            s.pool.execute(&s.sql.grid_write, &args).await.map(drop)
+        })
+    }
+
+    /// Deletes the cell whatever its compression.
+    pub(crate) fn delete_cell(&self, key: &str, tile: Tile) -> Result<()> {
+        let s = &self.shared;
+        s.check_writable(0)?;
+        s.run(async {
+            let Some(m) = s.key_id(KeyTable::Map, &self.id, false).await? else { return Ok(()) };
+            let Some(g) = s.key_id(KeyTable::GridStorage, key, false).await? else { return Ok(()) };
+            let [x, z] = cell(tile);
+            s.pool.execute(&s.sql.grid_delete, &[Arg::Int(m), Arg::Int(g), x, z]).await.map(drop)
+        })
+    }
+
+    pub(crate) fn has_cell(&self, key: &str, compression: &str, tile: Tile) -> Result<bool> {
+        let s = &self.shared;
+        s.run(async {
+            let Some((m, g, c)) = self.ids(KeyTable::GridStorage, key, compression, false).await? else {
+                return Ok(false);
+            };
+            let [x, z] = cell(tile);
+            let n = s.pool.fetch_int(&s.sql.grid_has, &[Arg::Int(m), Arg::Int(g), x, z, Arg::Int(c)]).await?;
+            Ok(n.unwrap_or(0) != 0)
+        })
+    }
+
+    pub(crate) fn list_cells(&self, key: &str, compression: &str) -> Result<Vec<Tile>> {
+        let s = &self.shared;
+        s.run(async {
+            let Some((m, g, c)) = self.ids(KeyTable::GridStorage, key, compression, false).await? else {
+                return Ok(Vec::new());
+            };
+            let mut tiles = Vec::new();
+            for page in 0.. {
+                let args = [Arg::Int(m), Arg::Int(g), Arg::Int(c), Arg::Int(PAGE), Arg::Int(page * PAGE)];
+                let batch = s.pool.fetch_int_pairs(&s.sql.grid_list, &args).await?;
+                let done = (batch.len() as i64) < PAGE;
+                for (x, z) in batch {
+                    let coord = |v: i64| i32::try_from(v).map_err(|_| Error::Protocol("cell coordinate out of range"));
+                    tiles.push((coord(x)?, coord(z)?));
+                }
+                if done {
+                    break;
+                }
+            }
+            Ok(tiles)
+        })
+    }
+
+    /// Deletes every cell of storage `key` of this map, in any compression.
+    pub(crate) fn delete_cells(&self, key: &str) -> Result<()> {
+        let s = &self.shared;
+        s.check_writable(0)?;
+        s.run(async {
+            let Some(m) = s.key_id(KeyTable::Map, &self.id, false).await? else { return Ok(()) };
+            let Some(g) = s.key_id(KeyTable::GridStorage, key, false).await? else { return Ok(()) };
+            s.pool.execute(&s.sql.grid_purge_storage, &[Arg::Int(m), Arg::Int(g)]).await.map(drop)
+        })
     }
 }
 
@@ -62,66 +140,25 @@ impl MapStorage for SqlMapStorage {
     }
 
     fn read_grid(&self, grid: GridKey, tile: Tile) -> Result<Option<Stored>> {
-        let s = &self.shared;
         let compression = self.grid_compression(grid);
-        s.run(async {
-            let Some((m, g, c)) = self.grid_ids(grid, false).await? else { return Ok(None) };
-            let [x, z] = cell(tile);
-            let data = s.pool.fetch_blob(&s.sql.grid_read, &[Arg::Int(m), Arg::Int(g), x, z, Arg::Int(c)]).await?;
-            Ok(data.map(|data| Stored { data, compression }))
-        })
+        let data = self.read_cell(&grid.sql_key(), compression.key(), tile)?;
+        Ok(data.map(|data| Stored { data, compression }))
     }
 
     fn write_grid_encoded(&self, grid: GridKey, tile: Tile, encoded: &[u8]) -> Result<()> {
-        let s = &self.shared;
-        s.check_writable(encoded.len())?;
-        s.run(async {
-            let (m, g, c) = self.grid_ids(grid, true).await?.ok_or(Error::Protocol("key not created"))?;
-            let [x, z] = cell(tile);
-            let args = [Arg::Int(m), Arg::Int(g), x, z, Arg::Int(c), Arg::Blob(encoded)];
-            s.pool.execute(&s.sql.grid_write, &args).await.map(drop)
-        })
+        self.write_cell(&grid.sql_key(), self.grid_compression(grid).key(), tile, encoded)
     }
 
     fn delete_grid(&self, grid: GridKey, tile: Tile) -> Result<()> {
-        let s = &self.shared;
-        s.check_writable(0)?;
-        s.run(async {
-            let Some((m, g, _)) = self.grid_ids(grid, false).await? else { return Ok(()) };
-            let [x, z] = cell(tile);
-            s.pool.execute(&s.sql.grid_delete, &[Arg::Int(m), Arg::Int(g), x, z]).await.map(drop)
-        })
+        self.delete_cell(&grid.sql_key(), tile)
     }
 
     fn grid_exists(&self, grid: GridKey, tile: Tile) -> Result<bool> {
-        let s = &self.shared;
-        s.run(async {
-            let Some((m, g, c)) = self.grid_ids(grid, false).await? else { return Ok(false) };
-            let [x, z] = cell(tile);
-            let n = s.pool.fetch_int(&s.sql.grid_has, &[Arg::Int(m), Arg::Int(g), x, z, Arg::Int(c)]).await?;
-            Ok(n.unwrap_or(0) != 0)
-        })
+        self.has_cell(&grid.sql_key(), self.grid_compression(grid).key(), tile)
     }
 
     fn list_grid(&self, grid: GridKey) -> Result<Vec<Tile>> {
-        let s = &self.shared;
-        s.run(async {
-            let Some((m, g, c)) = self.grid_ids(grid, false).await? else { return Ok(Vec::new()) };
-            let mut tiles = Vec::new();
-            for page in 0.. {
-                let args = [Arg::Int(m), Arg::Int(g), Arg::Int(c), Arg::Int(PAGE), Arg::Int(page * PAGE)];
-                let batch = s.pool.fetch_int_pairs(&s.sql.grid_list, &args).await?;
-                let done = (batch.len() as i64) < PAGE;
-                for (x, z) in batch {
-                    let coord = |v: i64| i32::try_from(v).map_err(|_| Error::Protocol("cell coordinate out of range"));
-                    tiles.push((coord(x)?, coord(z)?));
-                }
-                if done {
-                    break;
-                }
-            }
-            Ok(tiles)
-        })
+        self.list_cells(&grid.sql_key(), self.grid_compression(grid).key())
     }
 
     fn grids(&self) -> Result<Vec<GridKey>> {

@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use bm_storage::{Compression, GridKey, ItemKey, Storage};
+use bm_storage::{GridKey, ItemKey, Storage};
 
 pub const GRIDS: [GridKey; 6] = [
     GridKey::Hires,
@@ -41,7 +41,8 @@ pub fn conformance(storage: &dyn Storage) {
     grids.retain(|g| !map.list_grid(*g).unwrap().is_empty());
     assert_eq!(grids, GRIDS.to_vec());
 
-    map.write_grid_encoded(GridKey::Hires, (1, 1), &Compression::Gzip.compress(b"pre").unwrap()).unwrap();
+    let pre = map.grid_compression(GridKey::Hires).compress(b"pre").unwrap();
+    map.write_grid_encoded(GridKey::Hires, (1, 1), &pre).unwrap();
     assert_eq!(map.read_grid(GridKey::Hires, (1, 1)).unwrap().unwrap().decompress().unwrap(), b"pre");
     map.delete_grid(GridKey::Hires, (1, 1)).unwrap();
     map.delete_grid(GridKey::Hires, (1, 1)).unwrap();
@@ -99,6 +100,18 @@ pub fn tree(root: &Path) -> BTreeMap<String, Vec<u8>> {
         }
     }
     out
+}
+
+/// Same file set and bytes, except hires `.prbm.gz` cells, which compare decompressed (gzip output depends on
+/// the encoder, e.g. Java's zlib vs ours).
+pub fn assert_same_tree_maps(a: &BTreeMap<String, Vec<u8>>, b: &BTreeMap<String, Vec<u8>>) {
+    let names = |t: &BTreeMap<String, Vec<u8>>| t.keys().cloned().collect::<Vec<_>>();
+    assert_eq!(names(a), names(b), "file sets differ");
+    let gunzip = |d: &[u8]| bm_storage::Compression::Gzip.decompress(d, bm_storage::MAX_DECODED).unwrap();
+    for (name, bytes) in a {
+        let same = if name.ends_with(".prbm.gz") { gunzip(bytes) == gunzip(&b[name]) } else { bytes == &b[name] };
+        assert!(same, "{name} differs");
+    }
 }
 
 pub fn assert_same_tree(a: &Path, b: &Path) {

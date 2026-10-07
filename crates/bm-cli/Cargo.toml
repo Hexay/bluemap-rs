@@ -15,6 +15,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 bm-config.workspace = true
 bm-engine.workspace = true
+bm-storage.workspace = true
 bm-web.workspace = true
 chrono.workspace = true
 clap.workspace = true

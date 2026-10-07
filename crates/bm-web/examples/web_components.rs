@@ -52,7 +52,7 @@ fn main() {
 
     bench("std::fs::read hires tile", 5000, || drop(black_box(std::fs::read(&tile).unwrap())));
     bench("std::fs::read missing (NotFound)", 5000, || { black_box(std::fs::read(&missing).is_err()); });
-    bench("std::fs::metadata existing", 5000, || drop(black_box(std::fs::metadata(&tile).unwrap())));
+    bench("std::fs::metadata existing", 5000, || { black_box(std::fs::metadata(&tile).unwrap()); });
     bench("std::fs::metadata missing", 5000, || { black_box(std::fs::metadata(&missing).is_err()); });
     bench("std::fs::File::open existing", 5000, || drop(black_box(std::fs::File::open(&tile).unwrap())));
     bench("MapStorage::read_grid hires (path+read)", 5000, || {

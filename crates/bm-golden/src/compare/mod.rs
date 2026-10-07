@@ -112,7 +112,8 @@ fn same_bytes(section: &mut Section, golden: &Path, candidate: &Path, rel: &str)
 
 /// Every file of the webroot (map data, settings and webapp files), as `/`-separated paths.
 fn data_files(webroot: &Path) -> Result<BTreeSet<String>> {
-    walk(webroot)
+    // bm-web deliberately omits the webapp's devtools-only source map (crates/bm-web/NOTICE)
+    Ok(walk(webroot)?.into_iter().filter(|p| !p.ends_with(".js.map")).collect())
 }
 
 /// Files under `dir`, relative and `/`-separated; empty when `dir` doesn't exist.

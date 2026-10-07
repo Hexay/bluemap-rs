@@ -113,6 +113,11 @@ impl WebApp {
         self.shutdown.clone()
     }
 
+    /// Whether requests need a [`PeerAddr`] (only the access log reads it).
+    pub(crate) fn wants_peer_addr(&self) -> bool {
+        self.log.is_enabled()
+    }
+
     pub fn into_router(self) -> Router {
         Router::new()
             .fallback(dispatch)
@@ -148,13 +153,14 @@ async fn dispatch(State(app): State<Arc<WebApp>>, req: Request) -> Response<Body
     let route_path = if route_path.is_empty() { "/" } else { route_path };
     let mut res = app.route(&req, route_path, &query).await;
     finish(&mut res, &app.server, &app.extra);
-    let info = request_info(&req, format!("{path}?{query}"));
-    let status = res.status();
-    app.log.log(&info, status.as_u16(), status.canonical_reason().unwrap_or(""));
+    if app.log.is_enabled() {
+        let status = res.status();
+        app.log.log(&request_info(&req, &path, &query), status.as_u16(), status.canonical_reason().unwrap_or(""));
+    }
     res
 }
 
-fn request_info(req: &Parts, address: String) -> RequestInfo {
+fn request_info<'a>(req: &'a Parts, path: &'a str, query: &'a str) -> RequestInfo<'a> {
     let source = req.extensions.get::<PeerAddr>().map_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED), |p| p.0.ip());
     // Java keeps only the last header of a name and logs its first comma-separated value
     let forwarded_for = req
@@ -165,13 +171,12 @@ fn request_info(req: &Parts, address: String) -> RequestInfo {
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next())
         .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned);
+        .filter(|v| !v.is_empty());
     let version = match req.version {
         Version::HTTP_09 => "HTTP/0.9",
         Version::HTTP_10 => "HTTP/1.0",
         Version::HTTP_2 => "HTTP/2.0",
         _ => "HTTP/1.1",
     };
-    RequestInfo { source, forwarded_for, method: req.method.to_string(), address, version }
+    RequestInfo { source, forwarded_for, method: req.method.as_str(), path, query, version }
 }

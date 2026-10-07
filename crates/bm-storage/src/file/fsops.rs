@@ -27,7 +27,7 @@ fn is_transient(e: &io::Error) -> bool {
     cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
 }
 
-fn retry<T>(path: &Path, mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+pub(crate) fn retry<T>(path: &Path, mut op: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     let mut cleared_readonly = false;
     for delay in BACKOFF_MS {
         match op() {

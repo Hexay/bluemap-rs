@@ -3,6 +3,7 @@
 //! threads (render workers, `spawn_blocking`), never from inside an async task; the runtime must be multi-thread.
 
 mod db;
+mod hires;
 mod keys;
 mod map;
 mod schema;
@@ -15,11 +16,14 @@ use bm_compress::Compression;
 use tokio::runtime::Handle;
 
 use self::db::{Arg, Pool};
+use self::hires::SqlHires;
 use self::keys::{KeyCache, KeyTable};
 pub use self::map::SqlMapStorage;
 use self::statements::Statements;
 use crate::api::{MapStorage, Storage};
 use crate::error::{Error, Result};
+use crate::format::{self, Format, SQL_MARKER};
+use crate::optimized::OptimizedMapStorage;
 
 const PAGE: i64 = 1000;
 /// Statement bytes around the blob in one write packet (SQL text, ids, framing).
@@ -59,6 +63,7 @@ pub struct SqlConfig {
     /// Never creates tables or keys and refuses writes (webserver-only setups, #749).
     pub read_only: bool,
     pub max_connections: u32,
+    pub format: Format,
 }
 
 impl SqlConfig {
@@ -69,6 +74,7 @@ impl SqlConfig {
             compression: Compression::Gzip,
             read_only: false,
             max_connections: 8,
+            format: Format::Compat,
         }
     }
 }
@@ -106,12 +112,75 @@ impl Shared {
 
 pub struct SqlStorage {
     shared: Arc<Shared>,
+    format: Format,
     maps: Mutex<HashMap<String, Arc<SqlMapStorage>>>,
+    optimized: Mutex<HashMap<String, Arc<OptimizedMapStorage>>>,
 }
 
 impl SqlStorage {
-    /// Connects and makes sure the six tables exist (creating them unless read-only).
+    /// Connects, makes sure the six tables exist (creating them unless read-only) and checks the stored format
+    /// against `config.format` ([`crate::format`]).
     pub fn connect(config: &SqlConfig, runtime: Handle) -> Result<Self> {
+        let storage = Self::connect_unchecked(config, runtime)?;
+        let found = match storage.detect_format() {
+            Ok(found) => found,
+            Err(e) => {
+                storage.close();
+                return Err(e);
+            }
+        };
+        let checked = format::check(&format!("{} (tables {}*)", redact(&config.url), config.table_prefix), config.format, found)
+            .and_then(|()| match (config.format, found) {
+                (Format::Optimized, None) if !config.read_only => storage.set_marker(true),
+                _ => Ok(()),
+            });
+        if let Err(e) = checked {
+            storage.close();
+            return Err(e);
+        }
+        Ok(storage)
+    }
+
+    pub fn format(&self) -> Format {
+        self.format
+    }
+
+    /// `Some(Optimized)` with the marker row, `Some(Compat)` with any map, `None` when empty.
+    pub(crate) fn detect_format(&self) -> Result<Option<Format>> {
+        let s = &self.shared;
+        s.run(async {
+            if s.key_id(KeyTable::GridStorage, SQL_MARKER, false).await?.is_some() {
+                return Ok(Some(Format::Optimized));
+            }
+            let any = s.pool.fetch_texts(&s.sql.list_map_ids, &[Arg::Int(1), Arg::Int(0)]).await?;
+            Ok((!any.is_empty()).then_some(Format::Compat))
+        })
+    }
+
+    pub(crate) fn set_marker(&self, optimized: bool) -> Result<()> {
+        let s = &self.shared;
+        s.check_writable(0)?;
+        s.run(async {
+            if optimized {
+                s.key_id(KeyTable::GridStorage, SQL_MARKER, true).await?;
+            } else {
+                s.pool.execute(&s.sql.delete_grid_storage, &[Arg::Str(SQL_MARKER)]).await?;
+                s.keys.invalidate(KeyTable::GridStorage, SQL_MARKER);
+            }
+            Ok(())
+        })
+    }
+
+    /// The map as an optimized map storage over these tables, whatever this storage's format (for conversion).
+    pub(crate) fn optimized_map(&self, map_id: &str) -> Arc<OptimizedMapStorage> {
+        let inner = self.sql_map(map_id);
+        let mut maps = self.optimized.lock().unwrap_or_else(PoisonError::into_inner);
+        maps.entry(map_id.to_owned())
+            .or_insert_with(|| Arc::new(OptimizedMapStorage::new(inner.clone(), Box::new(SqlHires(inner)))))
+            .clone()
+    }
+
+    pub(crate) fn connect_unchecked(config: &SqlConfig, runtime: Handle) -> Result<Self> {
         if !valid_prefix(&config.table_prefix) {
             return Err(Error::InvalidTablePrefix(config.table_prefix.clone()));
         }
@@ -144,7 +213,7 @@ impl SqlStorage {
             read_only: config.read_only,
             max_packet,
         };
-        Ok(Self { shared: Arc::new(shared), maps: Mutex::default() })
+        Ok(Self { shared: Arc::new(shared), format: config.format, maps: Mutex::default(), optimized: Mutex::default() })
     }
 
     pub fn sql_map(&self, map_id: &str) -> Arc<SqlMapStorage> {
@@ -161,7 +230,10 @@ impl SqlStorage {
 
 impl Storage for SqlStorage {
     fn map(&self, map_id: &str) -> Result<Arc<dyn MapStorage>> {
-        Ok(self.sql_map(map_id))
+        match self.format {
+            Format::Compat => Ok(self.sql_map(map_id)),
+            Format::Optimized => Ok(self.optimized_map(map_id)),
+        }
     }
 
     fn map_ids(&self) -> Result<Vec<String>> {
@@ -178,6 +250,14 @@ impl Storage for SqlStorage {
             }
             Ok(ids)
         })
+    }
+}
+
+/// The URL without `user:password@`, for messages.
+fn redact(url: &str) -> String {
+    match (url.find("://"), url.rfind('@')) {
+        (Some(s), Some(at)) if at > s => format!("{}***{}", &url[..s + 3], &url[at..]),
+        _ => url.to_owned(),
     }
 }
 
