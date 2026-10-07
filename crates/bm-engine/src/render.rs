@@ -3,6 +3,7 @@
 
 use std::sync::mpsc::SyncSender;
 
+use bm_compress::Compression;
 use bm_format::grid::Tile;
 use bm_map::renderstate::{Action, TileState};
 use bm_render::{HiresRenderer, StateCache, TileBuffers};
@@ -107,13 +108,17 @@ impl RegionRender<'_> {
 
     /// Whether storage already holds exactly `prbm` in the configured compression, so a rewrite can be skipped:
     /// re-reading costs ~1.5 ms, a rewrite ~17 ms (compress + atomic write). Unreadable or differently compressed
-    /// tiles count as changed.
+    /// tiles count as changed. Optimized storage reads return the decoded PRBM uncompressed.
     fn stored_hires_equals(&self, tile: Tile, prbm: &[u8], scratch: &mut Vec<u8>) -> bool {
         let storage = &self.ctx.storage;
         let Ok(Some(stored)) = storage.read_grid(GridKey::Hires, tile) else { return false };
-        stored.compression == storage.grid_compression(GridKey::Hires)
-            && stored.compression.decompress_into(&stored.data, prbm.len(), scratch).is_ok()
-            && scratch[..] == prbm[..]
+        if stored.compression != storage.grid_compression(GridKey::Hires) {
+            return false;
+        }
+        if stored.compression == Compression::None {
+            return stored.data == prbm;
+        }
+        stored.compression.decompress_into(&stored.data, prbm.len(), scratch).is_ok() && scratch[..] == prbm[..]
     }
 
     /// `HiresModelManager.unrender`: delete the hires tile, clear its lowres columns.
