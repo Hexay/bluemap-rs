@@ -41,7 +41,7 @@ public final class CoreBinary {
         this.log = log;
     }
 
-    /** {@code windows-x64|linux-x64|linux-arm64|macos-x64|macos-arm64}, or null if unsupported. */
+    /** {@code windows-x64|linux-x64|linux-arm64|linux-armv7|macos-x64|macos-arm64}, or null if unsupported. */
     public static String targetId() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
@@ -50,10 +50,16 @@ public final class CoreBinary {
         String a = switch (arch) {
             case "amd64", "x86_64" -> "x64";
             case "aarch64", "arm64" -> "arm64";
+            // 32-bit ARM JVMs report "arm"; the armv7 musl core runs on any ARMv7+ hard-float Linux
+            case "arm", "armv7l", "armhf" -> "armv7";
             default -> null;
         };
-        if (o == null || a == null || (o.equals("windows") && a.equals("arm64"))) return null;
-        return o + "-" + a;
+        if (o == null || a == null) return null;
+        String target = o + "-" + a;
+        return switch (target) {
+            case "windows-arm64", "windows-armv7", "macos-armv7" -> null;
+            default -> target;
+        };
     }
 
     /** The executable to spawn; extracts or repairs the bundled one as needed. */

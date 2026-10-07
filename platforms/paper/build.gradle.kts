@@ -89,11 +89,12 @@ tasks.shadowJar {
     exclude("META-INF/maven/**")
 }
 
-// TODO: CI builds the other targets (cargo-zigbuild musl, macOS)
+// natives/<target>/ is filled by tools/build_core.py (locally and in CI); missing targets are skipped
 val knownTargets = linkedMapOf(
     "windows-x64" to "bluemap-core.exe",
     "linux-x64" to "bluemap-core",
     "linux-arm64" to "bluemap-core",
+    "linux-armv7" to "bluemap-core",
     "macos-x64" to "bluemap-core",
     "macos-arm64" to "bluemap-core",
 )

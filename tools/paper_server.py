@@ -150,6 +150,12 @@ class Paper:
         self.send(command)
         return self.wait_for(pattern, timeout)
 
+    def kill(self) -> None:
+        """Hard-kills the JVM (SIGKILL / TerminateProcess): no shutdown hooks, the core only sees stdin EOF."""
+        self.proc.kill()
+        self.proc.wait(30)
+        self.log.close()
+
     def stop(self, timeout: float = 180) -> int:
         if self.proc.poll() is None:
             self.send("stop")
@@ -184,7 +190,11 @@ def pid_alive(pid: int) -> bool:
         out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH", "/FO", "CSV"],
                              capture_output=True, text=True).stdout
         return f'"{pid}"' in out
-    return Path(f"/proc/{pid}").exists()
+    try:
+        # a zombie keeps its /proc entry until reaped: field 3 of stat is the state
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (OSError, IndexError):
+        return False
 
 
 def rss_mib(pid: int) -> float | None:

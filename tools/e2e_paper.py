@@ -1,28 +1,29 @@
 """End-to-end test of the Paper plugin (docs/13) on a real Paper 26.3 server, plus an optional comparison run with
 upstream BlueMap 5.28 on a copy of the same world.
 
-    py -3 tools/e2e_paper.py [--skip-build] [--keep] [--no-upstream]
+    py -3 tools/e2e_paper.py [--skip-build | --core BIN | --jar JAR] [--keep] [--no-upstream]
 
-Builds the core (release) and the plugin jars, starts Paper with our jar + BlueBorder (marker addon) + server-side
+Windows or Linux (host target from tools/build_core.py; on Linux the static musl core). Builds the core and the
+plugin jars (or stages a prebuilt `--core`, or tests a given `--jar`), starts Paper with our jar + BlueBorder (marker addon) + server-side
 bots, then checks: the core becomes ready, `/bluemap` commands answer on the console, the webserver serves the
 webapp and a rendered tile, `live/players.json` lists a bot, BlueBorder's markers reach `live/markers.json`,
-`/bluemap reload` works, a killed core is respawned, and stopping the server leaves no core process. Results and
+`/bluemap reload` works, a killed core is respawned, stopping the server leaves no core process, and neither does
+SIGKILLing the JVM (stdin EOF). Results and
 captured files go to work/e2e-paper/out/.
 """
 import argparse
 import json
-import os
 import shutil
-import subprocess
 import sys
-import time
 from pathlib import Path
 
+from build_core import binary_name, build_jars, host_target
+from build_core import build as build_core
 from paper_server import E2E, Paper, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, rss_mib
-from paths import EXE, ROOT, WINDOWS, jdk_dir
+from paths import ROOT
 
 PLATFORM = ROOT / "platforms" / "paper"
-TARGET = "windows-x64" if WINDOWS else "linux-x64"
+TARGET = host_target()
 OUT = E2E / "out"
 RESULTS: list[tuple[str, bool, str]] = []
 
@@ -33,15 +34,16 @@ def check(name: str, ok, detail: str = "") -> bool:
     return bool(ok)
 
 
-def build() -> Path:
-    subprocess.run(["cargo", "build", "--release", "-p", "bm-cli"], cwd=ROOT, check=True)
-    native = PLATFORM / "natives" / TARGET / f"bluemap-core{EXE}"
-    native.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "target" / "release" / f"bluemap{EXE}", native)
-    gradlew = PLATFORM / ("gradlew.bat" if WINDOWS else "gradlew")
-    env = {**os.environ, "JAVA_HOME": str(jdk_dir(21))}
-    subprocess.run([str(gradlew), "build", "--no-daemon", "--console=plain", "-q", "-Dorg.gradle.jvmargs=-Xmx1g"],
-                   cwd=PLATFORM, check=True, env=env)
+def build(core: Path | None, jobs: int | None) -> Path:
+    """Stages the core (built here via tools/build_core.py, or a prebuilt `core`) and builds the plugin jars."""
+    if core:
+        native = PLATFORM / "natives" / TARGET / binary_name(TARGET)
+        native.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(core, native)
+        native.chmod(0o755)
+    else:
+        build_core(TARGET, jobs)
+    build_jars()
     return plugin_jar()
 
 
@@ -147,6 +149,17 @@ def run_ours(jar: Path, fresh: bool) -> Path:
     return folder
 
 
+def run_jvm_kill(folder: Path) -> None:
+    """Restart on the same folder, SIGKILL the JVM: the core must exit by itself (stdin EOF / parent watchdog)."""
+    server = Paper(folder)
+    try:
+        server.wait_for(r"\[BlueMap\] Loaded!", 600, since_start=True)
+        pid = poll(lambda: (p := core_pid(folder)) and pid_alive(p) and p, 30)
+    finally:
+        server.kill()
+    check("core exits after JVM SIGKILL", pid and poll(lambda: not pid_alive(pid), 30), f"pid {pid}")
+
+
 def run_upstream(world: Path) -> None:
     folder = E2E / "upstream"
     prepare(folder, [fetch("upstream"), fetch("blueborder")], True, world_from=world)
@@ -187,11 +200,15 @@ def main() -> None:
     ap.add_argument("--skip-build", action="store_true")
     ap.add_argument("--keep", action="store_true", help="reuse the server folder (world, configs) of the last run")
     ap.add_argument("--no-upstream", action="store_true")
+    ap.add_argument("--core", type=Path, help="stage this prebuilt core binary instead of building one")
+    ap.add_argument("--jar", type=Path, help="test this plugin jar (no build)")
+    ap.add_argument("--jobs", "-j", type=int, help="cargo jobs")
     args = ap.parse_args()
-    jar = plugin_jar() if args.skip_build else build()
+    jar = args.jar or (plugin_jar() if args.skip_build else build(args.core, args.jobs))
     if OUT.exists():
         shutil.rmtree(OUT)
     folder = run_ours(jar, fresh=not args.keep)
+    run_jvm_kill(folder)
     if not args.no_upstream:
         run_upstream(folder / "world")
     failed = [r for r in RESULTS if not r[1]]
