@@ -3,8 +3,7 @@
 //!
 //! # Blob
 //! `"BMQ2"`, `u8 mode`, `u32 body_len`, then one zstd frame holding `body_len` bytes of body. Little-endian.
-//! - mode 1 (raw): the body is the input verbatim. Used for anything that is not a quad-shaped PRBM, and as the
-//!   fallback whenever a quad encoding fails to reproduce its input (the encoder always decodes and compares).
+//! - mode 1 (raw): the body is the input verbatim. Used for anything that is not a quad-shaped PRBM.
 //! - mode 0 (quads): every PRBM triangle pair `(v0,v1,v2),(v0,v2,v3)` is one quad, i.e. PRBM vertices
 //!   `6q + {0,1,2,5}` (pos, uv and ao of `6q+3`/`6q+4` repeat `6q`/`6q+2`), and the material groups cover the
 //!   vertices contiguously in whole quads. The PRBM header, attribute names and padding are canonical
@@ -28,6 +27,14 @@
 //! 11. groups: `(i32 material, u32 quads)` per group; starts are cumulative.
 //!
 //! The decoder bounds-checks everything and fails with [`CompactError`] on corrupt input, never panics.
+//!
+//! # Exactness
+//! Quad mode reproduces its input by construction, so the encoder does not decode to check (debug builds still
+//! do): `view::parse` admits only input whose every byte outside attribute payloads and groups is PRBMWriter's
+//! (header, names, types, zero padding, terminator); `is_quad_shaped` pins vertices `6q+3`/`6q+4` and the group
+//! starts and counts; positions and uvs escape every value whose grid value differs in any bit; normal, color and
+//! light rows that differ from their prediction are stored verbatim, and both sides predict normals from the same
+//! position bytes with the same code. Everything the decoder bounds-checks is within what the encoder writes.
 
 mod bytes;
 mod decode;
@@ -49,6 +56,14 @@ const MAX_BODY: usize = 1 << 30;
 pub const DEFAULT_LEVEL: i32 = 9;
 const WINDOW_LOG: u32 = 20;
 const TABLE_LOG: u32 = 18;
+/// Scratch above this many bytes is freed after each tile, so a thread does not pin its largest tile's buffers.
+const SCRATCH_KEEP: usize = 1 << 20;
+
+fn trim<T>(v: &mut Vec<T>) {
+    if v.capacity() * size_of::<T>() > SCRATCH_KEEP {
+        *v = Vec::new();
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CompactError {
@@ -64,8 +79,6 @@ pub struct CompactCodec {
     cctx: zstd::bulk::Compressor<'static>,
     dctx: zstd::bulk::Decompressor<'static>,
     body: Vec<u8>,
-    check: Vec<u8>,
-    enc: encode::Scratch,
     dec: decode::Scratch,
 }
 
@@ -92,8 +105,6 @@ impl CompactCodec {
             cctx,
             dctx: zstd::bulk::Decompressor::new().expect("zstd decompression context"),
             body: Vec::new(),
-            check: Vec::new(),
-            enc: encode::Scratch::default(),
             dec: decode::Scratch::default(),
         }
     }
@@ -108,14 +119,18 @@ impl CompactCodec {
         let Some(v) = quads else { return self.pack(MODE_RAW, prbm, out) };
         let mut body = std::mem::take(&mut self.body);
         body.clear();
-        encode::quads(&v, &mut body, &mut self.enc);
+        encode::quads(&v, &mut body);
         let packed = self.pack(MODE_QUADS, &body, out);
+        trim(&mut body);
         self.body = body;
         packed?;
-        let mut check = std::mem::take(&mut self.check);
-        let same = self.decode_into(out, &mut check).is_ok() && check == prbm;
-        self.check = check;
-        if same { Ok(()) } else { self.pack(MODE_RAW, prbm, out) }
+        debug_assert!(self.reproduces(out, prbm), "lossy BMQ2 quad encoding");
+        Ok(())
+    }
+
+    fn reproduces(&mut self, blob: &[u8], prbm: &[u8]) -> bool {
+        let mut check = Vec::new();
+        self.decode_into(blob, &mut check).is_ok() && check == prbm
     }
 
     /// Decodes a blob from [`CompactCodec::encode_into`] into `out` (replacing its contents).
@@ -137,9 +152,11 @@ impl CompactCodec {
         match mode {
             MODE_RAW => Ok(()),
             MODE_QUADS => {
-                let body = std::mem::take(&mut self.body);
+                let mut body = std::mem::take(&mut self.body);
                 let decoded = decode::quads(&body, out, &mut self.dec);
+                trim(&mut body);
                 self.body = body;
+                self.dec.trim();
                 decoded
             }
             _ => Err(CompactError::Corrupt("unknown mode")),
@@ -154,7 +171,17 @@ impl CompactCodec {
         if body.is_empty() {
             return Ok(());
         }
-        out.reserve(zstd::zstd_safe::compress_bound(body.len()));
+        // quad bodies compress ~40×: try a small buffer before reserving zstd's worst case
+        let first = body.len() / 4 + 4096;
+        if self.compress_into(body, out, first).is_ok() {
+            return Ok(());
+        }
+        self.compress_into(body, out, zstd::zstd_safe::compress_bound(body.len()))
+    }
+
+    fn compress_into(&mut self, body: &[u8], out: &mut Vec<u8>, capacity: usize) -> Result<(), CompactError> {
+        out.truncate(HEADER);
+        out.reserve(capacity);
         let mut cursor = Cursor::new(&mut *out);
         cursor.set_position(HEADER as u64);
         self.cctx.compress_to_buffer(body, &mut cursor)?;

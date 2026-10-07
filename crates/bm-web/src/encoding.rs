@@ -52,20 +52,41 @@ pub struct Encoded {
     pub content_encoding: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Op {
+    Stored,
+    ToGzip,
+    Decode,
+}
+
+/// What [`encode`] does with data stored in `c`, and the `Content-Encoding` it labels the reply with.
+fn plan(c: Compression, is_png: bool, gz_url: bool, accepted: &Accepted) -> (Op, Option<&'static str>) {
+    let gzip = Compression::Gzip;
+    if gz_url {
+        return (if c == gzip { Op::Stored } else { Op::ToGzip }, None);
+    }
+    if c != Compression::None && accepted.accepts(c.id()) {
+        return (Op::Stored, Some(c.id()));
+    }
+    if c != gzip && !is_png && accepted.accepts(gzip.id()) {
+        return (Op::ToGzip, Some(gzip.id()));
+    }
+    (if c == Compression::None { Op::Stored } else { Op::Decode }, None)
+}
+
+/// The coding of the bytes [`encode`] sends (`.gz` URLs get gzip bytes unlabelled), known before reading them.
+pub fn body_coding(c: Compression, is_png: bool, gz_url: bool, accepted: &Accepted) -> Option<&'static str> {
+    if gz_url { Some(Compression::Gzip.id()) } else { plan(c, is_png, gz_url, accepted).1 }
+}
+
 /// Picks the response bytes for stored map data. Transcoding blocks (CPU, and a bounded number of concurrent
 /// transcodes): call from a blocking context.
 pub fn encode(stored: Stored, is_png: bool, gz_url: bool, accepted: &Accepted) -> Result<Encoded, bm_compress::Error> {
-    let c = stored.compression;
-    if gz_url {
-        let body = if c == Compression::Gzip { stored.data.into() } else { transcode::to_gzip(&stored)? };
-        return Ok(Encoded { body, content_encoding: None });
-    }
-    if c != Compression::None && accepted.accepts(c.id()) {
-        return Ok(Encoded { body: stored.data.into(), content_encoding: Some(c.id()) });
-    }
-    if c != Compression::Gzip && !is_png && accepted.accepts(Compression::Gzip.id()) {
-        return Ok(Encoded { body: transcode::to_gzip(&stored)?, content_encoding: Some(Compression::Gzip.id()) });
-    }
-    let body = if c == Compression::None { stored.data.into() } else { transcode::decode(&stored)? };
-    Ok(Encoded { body, content_encoding: None })
+    let (op, content_encoding) = plan(stored.compression, is_png, gz_url, accepted);
+    let body = match op {
+        Op::Stored => stored.data.into(),
+        Op::ToGzip => transcode::to_gzip(&stored)?,
+        Op::Decode => transcode::decode(&stored)?,
+    };
+    Ok(Encoded { body, content_encoding })
 }

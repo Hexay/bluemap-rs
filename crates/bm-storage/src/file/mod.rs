@@ -3,6 +3,7 @@
 pub(crate) mod fsops;
 pub(crate) mod layout;
 mod marker;
+mod version;
 
 use std::collections::HashMap;
 use std::fs;
@@ -14,7 +15,7 @@ use bm_compress::Compression;
 use bm_format::grid::Tile;
 
 pub(crate) use self::marker::{detect_format, set_marker};
-use crate::api::{MapStorage, Storage, Stored};
+use crate::api::{MapStorage, Storage, Stored, Version};
 use crate::error::{Error, IoContext, Result};
 use crate::format::{self, Format};
 use crate::key::{GridKey, ItemKey};
@@ -86,7 +87,7 @@ impl FileStorage {
     }
 
     pub fn file_map(&self, map_id: &str) -> Result<Arc<FileMapStorage>> {
-        validate_map_id(map_id)?;
+        layout::validate_map_id(map_id)?;
         let mut maps = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
         let map = maps.entry(map_id.to_owned()).or_insert_with(|| {
             Arc::new(FileMapStorage {
@@ -99,12 +100,6 @@ impl FileStorage {
         });
         Ok(map.clone())
     }
-}
-
-/// Map ids become directory names; refuse anything that could leave the storage root.
-fn validate_map_id(id: &str) -> Result<()> {
-    let bad = id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\', ':', '\0']);
-    if bad { Err(Error::InvalidMapId(id.to_owned())) } else { Ok(()) }
 }
 
 impl Storage for FileStorage {
@@ -280,5 +275,21 @@ impl MapStorage for FileMapStorage {
 
     fn key_locks(&self) -> &KeyLocks {
         &self.locks
+    }
+
+    fn grid_version(&self, grid: GridKey, tile: Tile) -> Result<Option<Version>> {
+        version::file_version(&self.grid_cell_path(grid, tile))
+    }
+
+    fn item_version(&self, item: &ItemKey) -> Result<Option<Version>> {
+        version::file_version(&self.item_path(item))
+    }
+
+    fn read_grid_versioned(&self, grid: GridKey, tile: Tile) -> Result<Option<(Stored, Option<Version>)>> {
+        version::read_stored(&self.grid_cell_path(grid, tile), self.grid_compression(grid))
+    }
+
+    fn read_item_versioned(&self, item: &ItemKey) -> Result<Option<(Stored, Option<Version>)>> {
+        version::read_stored(&self.item_path(item), self.item_compression(item))
     }
 }

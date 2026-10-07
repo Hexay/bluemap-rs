@@ -18,6 +18,8 @@ pub struct WebserverConfig {
     /// In file order. Java default is empty; the template writes two cache headers.
     #[serde(deserialize_with = "fields::string_map")]
     pub additional_headers: Vec<(String, String)>,
+    /// Hidden bluemap-rs key: `ETag` on map data so reloads revalidate with 304s (Java sends none).
+    pub map_etags: bool,
 }
 
 /// `log { file, append, format }`; `file` and `format` are Java `String.format` patterns, passed through verbatim.
@@ -39,6 +41,7 @@ impl Default for WebserverConfig {
             sse_enabled: true,
             log: WebserverLogConfig::default(),
             additional_headers: Vec::new(),
+            map_etags: false,
         }
     }
 }

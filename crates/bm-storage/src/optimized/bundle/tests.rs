@@ -62,6 +62,29 @@ fn another_reader_sees_appends_and_compactions() {
 }
 
 #[test]
+fn versions_follow_each_tiles_record() {
+    let (dir, s) = store();
+    let other = BundleStore::new(dir.path().join("hires"), true);
+    assert_eq!(s.version((1, 1)).unwrap(), None);
+    s.write((1, 1), b"tile").unwrap();
+    let v1 = s.version((1, 1)).unwrap().unwrap();
+    assert_eq!(other.version((1, 1)).unwrap(), Some(v1));
+    assert_eq!(other.read_versioned((1, 1)).unwrap(), Some((b"tile".to_vec(), Some(v1))));
+    s.write((2, 2), b"neighbour").unwrap();
+    assert_eq!(other.version((1, 1)).unwrap(), Some(v1), "a neighbour's write keeps this tile's version");
+    s.write((1, 1), b"tile").unwrap();
+    let v2 = other.version((1, 1)).unwrap().unwrap();
+    assert_ne!(v1, v2, "a rewrite of equal bytes is a new version");
+    for i in 0..4u8 {
+        s.write((2, 2), &vec![i; 600 << 10]).unwrap();
+    }
+    assert_ne!(other.version((1, 1)).unwrap(), Some(v2), "compaction moved the record");
+    assert_eq!(other.read((1, 1)).unwrap().unwrap(), b"tile");
+    s.delete((1, 1)).unwrap();
+    assert_eq!(other.version((1, 1)).unwrap(), None);
+}
+
+#[test]
 fn torn_tail_is_ignored_then_truncated() {
     let (_dir, s) = store();
     s.write((2, 2), b"good").unwrap();
