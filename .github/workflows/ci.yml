@@ -44,8 +44,8 @@ jobs:
       - run: python tools/build_core.py linux-x64
       - name: static binary runs
         run: |
-          file platforms/paper/natives/linux-x64/bluemap-core | grep -q "statically linked"
-          platforms/paper/natives/linux-x64/bluemap-core --version
+          file platforms/natives/linux-x64/bluemap-core | grep -q "statically linked"
+          platforms/natives/linux-x64/bluemap-core --version
 
   shim:
     runs-on: ubuntu-latest
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
       - uses: gradle/actions/setup-gradle@v4
-      - working-directory: platforms/paper
-        run: ./gradlew test --no-daemon --console=plain
+      - working-directory: platforms
+        run: ./gradlew test assemble --no-daemon --console=plain

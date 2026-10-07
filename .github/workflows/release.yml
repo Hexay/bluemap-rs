@@ -54,17 +54,17 @@ jobs:
       - if: matrix.target == 'linux-x64'
         name: static binary runs
         run: |
-          file platforms/paper/natives/linux-x64/bluemap-core | grep -q "statically linked"
-          platforms/paper/natives/linux-x64/bluemap-core --version
+          file platforms/natives/linux-x64/bluemap-core | grep -q "statically linked"
+          platforms/natives/linux-x64/bluemap-core --version
       # arm64 macOS refuses unsigned code; the linker ad-hoc signs, verify nothing stripped the signature
       - if: startsWith(matrix.target, 'macos')
-        run: codesign --verify --verbose platforms/paper/natives/${{ matrix.target }}/bluemap-core
+        run: codesign --verify --verbose platforms/natives/${{ matrix.target }}/bluemap-core
       - if: matrix.target == 'macos-arm64'
-        run: platforms/paper/natives/macos-arm64/bluemap-core --version
+        run: platforms/natives/macos-arm64/bluemap-core --version
       - uses: actions/upload-artifact@v4
         with:
           name: core-${{ matrix.target }}
-          path: platforms/paper/natives/${{ matrix.target }}/
+          path: platforms/natives/${{ matrix.target }}/
           if-no-files-found: error
 
   jars:
@@ -77,7 +77,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: "25"
       - uses: gradle/actions/setup-gradle@v4
       - uses: actions/setup-python@v5
         with:
@@ -90,20 +90,20 @@ jobs:
         run: |
           for dir in dl/core-*; do
             target="${dir#dl/core-}"
-            mkdir -p "platforms/paper/natives/$target"
-            cp "$dir"/* "platforms/paper/natives/$target/"
+            mkdir -p "platforms/natives/$target"
+            cp "$dir"/* "platforms/natives/$target/"
           done
-          ls -lR platforms/paper/natives
-      - working-directory: platforms/paper
+          ls -lR platforms/natives
+      - working-directory: platforms
         run: ./gradlew test --no-daemon --console=plain
       - run: python tools/build_core.py --jars
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-jars
-          path: platforms/paper/build/libs/bluemap-rs-paper-*.jar
+          path: platforms/*/build/libs/bluemap-rs-*.jar
           if-no-files-found: error
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: platforms/paper/build/libs/bluemap-rs-paper-*.jar
+          files: platforms/*/build/libs/bluemap-rs-*.jar
