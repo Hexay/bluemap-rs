@@ -80,9 +80,20 @@ impl LowresStore for StorageLowres {
         data.encode_png(&mut self.png)?;
         self.storage.write_grid(GridKey::Lowres(lod), tile, &self.png)?;
         self.saves += 1;
+        self.notify(lod, tile);
+        Ok(())
+    }
+
+    /// Java's listeners fire for every re-saved tile, changed or not.
+    fn unchanged(&mut self, lod: u32, tile: Tile) {
+        self.notify(lod, tile);
+    }
+}
+
+impl StorageLowres {
+    fn notify(&self, lod: u32, tile: Tile) {
         if let Some(listener) = &self.on_save {
             listener(tile, lod);
         }
-        Ok(())
     }
 }

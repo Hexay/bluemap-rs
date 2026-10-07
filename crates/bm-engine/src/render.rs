@@ -3,6 +3,7 @@
 
 use std::sync::mpsc::SyncSender;
 
+use bm_compress::Compression;
 use bm_format::grid::Tile;
 use bm_map::renderstate::{Action, TileState};
 use bm_render::{HiresRenderer, StateCache, TileBuffers};
@@ -50,8 +51,8 @@ impl RegionRender<'_> {
         };
         jobs.par_iter()
             .map_init(
-                || (TileBuffers::default(), Vec::new()),
-                |(buf, prbm), job| match self.process(&renderer, job, buf, prbm) {
+                || (TileBuffers::default(), Vec::new(), Vec::new()),
+                |(buf, prbm, stored), job| match self.process(&renderer, job, buf, prbm, stored) {
                     Ok((outcome, state)) => TileResult { tile: job.tile, state, outcome, error: None },
                     Err(e) => TileResult {
                         tile: job.tile,
@@ -70,6 +71,7 @@ impl RegionRender<'_> {
         job: &TileJob,
         buf: &mut TileBuffers,
         prbm: &mut Vec<u8>,
+        stored: &mut Vec<u8>,
     ) -> Result<(Outcome, TileState), Box<dyn std::error::Error + Send + Sync>> {
         match job.action.action {
             Action::None => unreachable!("tile jobs never carry Action::None"),
@@ -85,7 +87,10 @@ impl RegionRender<'_> {
                 renderer.render_tile(self.area, &self.resources.states, &self.ctx.hires_grid, job.tile, buf)?;
                 if self.ctx.save_hires() {
                     buf.model.write_prbm(prbm)?;
-                    self.ctx.storage.write_grid(GridKey::Hires, job.tile, prbm)?;
+                    if !self.stored_hires_equals(job.tile, prbm, stored) {
+                        self.ctx.storage.write_grid(GridKey::Hires, job.tile, prbm)?;
+                    }
+                    // Java notifies for every saved tile, so unchanged ones too
                     if let Some(listener) = &self.ctx.tile_listener {
                         listener(job.tile, 0);
                     }
@@ -99,6 +104,21 @@ impl RegionRender<'_> {
                 Ok((Outcome::Rendered, job.action.state))
             }
         }
+    }
+
+    /// Whether storage already holds exactly `prbm` in the configured compression, so a rewrite can be skipped:
+    /// re-reading costs ~1.5 ms, a rewrite ~17 ms (compress + atomic write). Unreadable or differently compressed
+    /// tiles count as changed. Optimized storage reads return the decoded PRBM uncompressed.
+    fn stored_hires_equals(&self, tile: Tile, prbm: &[u8], scratch: &mut Vec<u8>) -> bool {
+        let storage = &self.ctx.storage;
+        let Ok(Some(stored)) = storage.read_grid(GridKey::Hires, tile) else { return false };
+        if stored.compression != storage.grid_compression(GridKey::Hires) {
+            return false;
+        }
+        if stored.compression == Compression::None {
+            return stored.data == prbm;
+        }
+        stored.compression.decompress_into(&stored.data, prbm.len(), scratch).is_ok() && scratch[..] == prbm[..]
     }
 
     /// `HiresModelManager.unrender`: delete the hires tile, clear its lowres columns.

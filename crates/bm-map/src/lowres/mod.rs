@@ -4,6 +4,9 @@
 //! (no #821-style concurrent PNG writes). Java's `MAX_PENDING`/timed saves become explicit flushes: a tile's next-LOD
 //! pixels depend only on its final content, so one flush yields the pixels Java converges to, with one encode per
 //! tile instead of Java's repeated re-saves (docs/10-perf-audit-render.md §2).
+//!
+//! A loaded tile whose pixels end up as they were is not encoded and written again ([`LowresStore::unchanged`]
+//! instead of `save`); it still cascades, so the next LOD converges as Java's would.
 
 mod downsample;
 mod store;
@@ -11,11 +14,13 @@ mod store;
 mod tests;
 
 use std::collections::hash_map::Entry;
+use std::hash::{Hash, Hasher};
 
 use bm_format::grid::{Grid, Tile};
 use bm_format::lowres::LowresTile;
 use bm_math::Color;
 use rustc_hash::FxHashMap;
+use twox_hash::XxHash3_64;
 
 use downsample::downsample;
 pub use store::{LowresStore, MemoryStore};
@@ -34,8 +39,20 @@ pub struct LowresTileManager<S: LowresStore> {
     grid: Grid,
     lod_factor: i32,
     /// Dirty tiles per LOD, index `lod - 1`.
-    layers: Vec<FxHashMap<Tile, LowresTile>>,
+    layers: Vec<FxHashMap<Tile, Dirty>>,
     store: S,
+}
+
+struct Dirty {
+    data: LowresTile,
+    /// Hash of the pixels as loaded; `None` for a tile the store didn't have.
+    loaded: Option<u64>,
+}
+
+fn pixel_hash(tile: &LowresTile) -> u64 {
+    let mut h = XxHash3_64::default();
+    tile.hash(&mut h);
+    h.finish()
 }
 
 impl<S: LowresStore> LowresTileManager<S> {
@@ -110,9 +127,9 @@ impl<S: LowresStore> LowresTileManager<S> {
         let mut tiles: Vec<Tile> = self.dirty_tiles(lod).filter(|&t| select(t)).collect();
         tiles.sort_unstable();
         for tile in tiles {
-            let data = self.layers[lod as usize - 1].remove(&tile).expect("listed as dirty");
-            if let Err(e) = self.save_and_cascade(lod, tile, &data) {
-                self.layers[lod as usize - 1].insert(tile, data);
+            let dirty = self.layers[lod as usize - 1].remove(&tile).expect("listed as dirty");
+            if let Err(e) = self.save_and_cascade(lod, tile, &dirty) {
+                self.layers[lod as usize - 1].insert(tile, dirty);
                 return Err(e);
             }
         }
@@ -124,8 +141,12 @@ impl<S: LowresStore> LowresTileManager<S> {
         self.layers.iter_mut().for_each(FxHashMap::clear);
     }
 
-    fn save_and_cascade(&mut self, lod: u32, tile: Tile, data: &LowresTile) -> Result<(), S> {
-        self.store.save(lod, tile, data).map_err(|source| LowresLayerError::Save { lod, tile, source })?;
+    fn save_and_cascade(&mut self, lod: u32, tile: Tile, Dirty { data, loaded }: &Dirty) -> Result<(), S> {
+        if *loaded == Some(pixel_hash(data)) {
+            self.store.unchanged(lod, tile);
+        } else {
+            self.store.save(lod, tile, data).map_err(|source| LowresLayerError::Save { lod, tile, source })?;
+        }
         if lod == self.lod_count() {
             return Ok(());
         }
@@ -155,15 +176,16 @@ impl<S: LowresStore> LowresTileManager<S> {
 
     #[allow(clippy::too_many_arguments)]
     fn write(&mut self, lod: u32, tile: Tile, px: i32, pz: i32, argb: u32, h: i32, l: u8) -> Result<(), S> {
-        let data = match self.layers[lod as usize - 1].entry(tile) {
+        let dirty = match self.layers[lod as usize - 1].entry(tile) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
                 let stored = self.store.load(lod, tile).map_err(|source| LowresLayerError::Load { lod, tile, source })?;
                 let [sx, sz] = self.grid.size;
-                e.insert(stored.unwrap_or_else(|| LowresTile::new([sx as usize, sz as usize])))
+                let loaded = stored.as_ref().map(pixel_hash);
+                e.insert(Dirty { data: stored.unwrap_or_else(|| LowresTile::new([sx as usize, sz as usize])), loaded })
             }
         };
-        data.set(px as usize, pz as usize, argb, h, l);
+        dirty.data.set(px as usize, pz as usize, argb, h, l);
         Ok(())
     }
 }

@@ -13,6 +13,9 @@ pub trait LowresStore {
 
     /// Persists a finished tile. Called once per dirty tile per flush, never concurrently for one tile.
     fn save(&mut self, lod: u32, tile: Tile, data: &LowresTile) -> Result<(), Self::Error>;
+
+    /// Called instead of [`Self::save`] when a flushed tile's pixels equal the ones loaded from the store.
+    fn unchanged(&mut self, _lod: u32, _tile: Tile) {}
 }
 
 /// In-memory store, for tests and for callers that encode tiles elsewhere.
