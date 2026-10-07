@@ -104,3 +104,25 @@ wasn't built, because what remained after this is spread thin across memory read
 (**−11.5%**), 6.7 → 6.0–6.5 s wall, byte-identical.
 
 Cumulative: 77.3 → 55.0 s CPU (**−29%**), 8.1 → ~6.3 s wall.
+
+Web (item 7, merge `1a2a3cb`): `static_cache.rs` keeps static files in memory, re-checks disk metadata at most
+once a second, and gzips text types once. Gzipped replies use the Java ETag plus `-gzip`. `transcode.rs` caches
+converted map data, with a per-core cap. Map-data ETags are not done yet. Measured CPU per request:
+
+| request | before → after |
+|---|---|
+| 1.2 MB JS | 7.9 → 0.48 ms, sent at 0.31 MB gzipped |
+| static 304 | 1.2 → 0.19 ms |
+| `textures.json` to a client without gzip | 18.6 → 2.7 ms; peak memory 132 → 89 MB |
+
+Java conformance: 110 of 110 identical.
+
+Disk (merge `16568e8`):
+- **Lowres PNG**, zlib 9 with no filter: 1.176× → 0.869× Java's bytes (−26%), pixels identical, encode only −13%.
+  The −65% encode time and the 1.014× baseline in disk-profile.md did not reproduce.
+- **Unchanged hires tiles** are read back and their decoded PRBM compared; on a match the write is skipped.
+  Unchanged lowres tiles are detected with an xxh3 of their pixels. Tile events still fire, as in Java.
+  Re-render over identical output, wall: compat 12.9 → 4.8 s (ext4 flushes data on rename-over),
+  optimized 5.7 → 4.8 s.
+  Cost when every stored tile changed: +4% compat, +9% optimized. Empty storage costs nothing.
+  If forced re-renders after a settings change matter more, gate the read-back on `-f` plus a changed map config.
