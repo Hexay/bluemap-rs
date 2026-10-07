@@ -211,6 +211,11 @@ class Server:
             self.send("stop")
         try:
             return self.proc.wait(timeout)
+        except subprocess.TimeoutExpired:
+            # never leave a server holding the ports for the next run
+            self.proc.kill()
+            self.proc.wait(30)
+            return -1
         finally:
             self.log.close()
 

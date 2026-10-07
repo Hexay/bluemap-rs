@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -76,6 +77,13 @@ public final class PlayerRegistry {
     public void leave(UUID uuid) {
         online.remove(uuid);
         sendUuid("PlayerLeave", uuid);
+    }
+
+    /** Leaves every tracked player missing from {@code online}: some disconnects (fake players) fire no event. */
+    public void retain(Set<UUID> online) {
+        for (UUID uuid : List.copyOf(this.online.keySet())) {
+            if (!online.contains(uuid)) leave(uuid);
+        }
     }
 
     /** Upstream's default {@code PlayerDisplayNameProvider}. */

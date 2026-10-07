@@ -22,7 +22,7 @@ from paths import ROOT, WINDOWS, jdk_dir
 
 PLATFORMS = ROOT / "platforms"
 NATIVES = PLATFORMS / "natives"
-SHIMS = ("paper",)
+SHIMS = ("paper", "fabric")
 
 # plugin target -> (rust triple, builder)
 TARGETS = {
