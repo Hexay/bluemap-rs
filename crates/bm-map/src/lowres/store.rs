@@ -14,6 +14,12 @@ pub trait LowresStore {
     /// Persists a finished tile. Called once per dirty tile per flush, never concurrently for one tile.
     fn save(&mut self, lod: u32, tile: Tile, data: &LowresTile) -> Result<(), Self::Error>;
 
+    /// [`Self::save`] for several distinct tiles of one LOD, results in input order; stores may save them in
+    /// parallel.
+    fn save_all(&mut self, lod: u32, tiles: &[(Tile, &LowresTile)]) -> Vec<Result<(), Self::Error>> {
+        tiles.iter().map(|&(tile, data)| self.save(lod, tile, data)).collect()
+    }
+
     /// Called instead of [`Self::save`] when a flushed tile's pixels equal the ones loaded from the store.
     fn unchanged(&mut self, _lod: u32, _tile: Tile) {}
 }
