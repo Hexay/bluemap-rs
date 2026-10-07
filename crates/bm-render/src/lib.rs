@@ -4,6 +4,7 @@
 
 mod block_pass;
 mod context;
+mod flags;
 mod liquid;
 mod mesh;
 mod relative;

@@ -12,6 +12,7 @@ use bm_resources::resource_pack::ResourcePack;
 use bm_resources::texture::TextureGallery;
 use bm_world::{BlockState, BlockStates, StateId};
 
+use crate::flags::{Flags, Hidden};
 use crate::relative::{Offset, RelativeOffsets};
 
 /// Resolved `BlockProperties` (undefined reads as false).
@@ -91,9 +92,7 @@ pub struct StateInfo<'a> {
     air: bool,
     water: bool,
     renders_water: bool,
-    /// When every face of every variant has a cullface within one block: the [`Offset::slot`]s those test, as bits.
-    /// If all of them cull, the block renders nothing at all (no faces, no colour).
-    pub(crate) cullfaces: Option<u32>,
+    pub(crate) hidden: Hidden,
 }
 
 impl StateInfo<'_> {
@@ -108,44 +107,6 @@ impl StateInfo<'_> {
     /// Rendered with an extra water model.
     pub fn renders_water(&self) -> bool {
         self.renders_water
-    }
-}
-
-/// The [`StateInfo`] bits neighbour tests read, one byte per state so they stay in cache.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Flags(u8);
-
-impl Flags {
-    const AIR: u8 = 1;
-    const CULLING: u8 = 2;
-    const CULLING_IDENTICAL: u8 = 4;
-    const OCCLUDING: u8 = 8;
-
-    fn of(info: &StateInfo) -> Self {
-        let bit = |set: bool, b: u8| if set { b } else { 0 };
-        let p = info.props;
-        Self(
-            bit(info.is_air(), Self::AIR)
-                | bit(p.culling, Self::CULLING)
-                | bit(p.culling_identical, Self::CULLING_IDENTICAL)
-                | bit(p.occluding, Self::OCCLUDING),
-        )
-    }
-
-    pub fn is_air(self) -> bool {
-        self.0 & Self::AIR != 0
-    }
-
-    pub fn culling(self) -> bool {
-        self.0 & Self::CULLING != 0
-    }
-
-    pub fn culling_identical(self) -> bool {
-        self.0 & Self::CULLING_IDENTICAL != 0
-    }
-
-    pub fn occluding(self) -> bool {
-        self.0 & Self::OCCLUDING != 0
     }
 }
 
@@ -171,7 +132,9 @@ impl<'a> StateCache<'a> {
     pub fn update(&mut self, registry: &BlockStates) {
         for id in self.infos.len()..registry.len() {
             let info = self.resolve(registry.get(StateId(id as u32)));
-            self.flags.push(Flags::of(&info));
+            let p = info.props;
+            let watery = info.is_water() || info.renders_water();
+            self.flags.push(Flags::new(info.is_air(), p.culling, p.culling_identical, p.occluding, watery));
             self.infos.push(info);
         }
     }
@@ -213,7 +176,7 @@ impl<'a> StateCache<'a> {
             air: state.is_air,
             water: state.is_water,
             renders_water,
-            cullfaces: if renders_water { None } else { cullfaces(&sets) },
+            hidden: if renders_water { Hidden::Never } else { hidden(&sets, state.is_water) },
             props,
             liquid_level: liquid_level(&state),
             sets,
@@ -263,24 +226,29 @@ impl<'a> StateCache<'a> {
     }
 }
 
-/// [`StateInfo::cullfaces`] of a state's sets: `None` if a liquid variant or a face without an in-range cullface
-/// could render regardless of the neighbours.
-fn cullfaces(sets: &[SetInfo]) -> Option<u32> {
+/// [`Hidden`] for a state not rendered with extra water. A face without an in-range cullface, or a liquid variant
+/// mixed with others or of another liquid, could render whatever the neighbours are.
+fn hidden(sets: &[SetInfo], is_water: bool) -> Hidden {
+    let mut variants = sets.iter().flat_map(|s| &s.variants).peekable();
+    let liquid = |v: &VariantInfo| v.renderer == RendererType::Liquid;
+    if is_water && variants.peek().is_some() && variants.clone().all(liquid) {
+        return Hidden::Water;
+    }
     let mut slots = 0u32;
-    for v in sets.iter().flat_map(|s| &s.variants) {
-        if v.renderer == RendererType::Liquid {
-            return None;
+    for v in variants {
+        if liquid(v) {
+            return Hidden::Never;
         }
-        let faces = v.model.iter().flat_map(|m| &m.elements).flat_map(|e| e.faces.iter().flatten());
-        for face in faces {
-            let slot = v.relative.get(face.cullface?.to_vector()).slot;
+        for face in v.model.iter().flat_map(|m| &m.elements).flat_map(|e| e.faces.iter().flatten()) {
+            let Some(cull) = face.cullface else { return Hidden::Never };
+            let slot = v.relative.get(cull.to_vector()).slot;
             if slot == Offset::FAR {
-                return None;
+                return Hidden::Never;
             }
             slots |= 1 << slot;
         }
     }
-    Some(slots)
+    Hidden::Cullfaces(slots)
 }
 
 /// `level` clamped to 0..=15; absent or unparseable is 0.

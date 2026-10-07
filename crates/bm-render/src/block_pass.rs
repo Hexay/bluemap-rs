@@ -4,9 +4,12 @@
 use bm_format::prbm::TileModel;
 use bm_math::Color;
 use bm_resources::blockstate::RendererType;
+use bm_resources::model::Direction;
 
 use crate::context::{Block, Ctx};
+use crate::flags::Hidden;
 use crate::mesh::{CapacityReached, MeshExt};
+use crate::relative::Offset;
 use crate::states::StateInfo;
 use crate::{ColumnMeta, liquid, resource};
 
@@ -72,18 +75,28 @@ pub(crate) fn render(
     Ok(())
 }
 
-/// Whether the interior block at volume index `i` has only cullfaces, all of them culled ([`StateInfo::cullfaces`]).
+/// Whether the interior block at volume index `i` is [`Hidden`] by its neighbours.
 fn fully_culled(ctx: &Ctx, i: usize) -> bool {
     let id = ctx.view.state_at(i);
-    let Some(mut slots) = ctx.states.get(id).cullfaces else { return false };
-    while slots != 0 {
-        let slot = slots.trailing_zeros() as u8;
-        slots &= slots - 1;
-        if !ctx.states.culls(ctx.view.state_at(ctx.view.step(i, slot)), id) {
-            return false;
+    let neighbor = |slot: u8| ctx.view.state_at(ctx.view.step(i, slot));
+    match ctx.states.get(id).hidden {
+        Hidden::Never => false,
+        Hidden::Cullfaces(mut slots) => {
+            while slots != 0 {
+                let slot = slots.trailing_zeros() as u8;
+                slots &= slots - 1;
+                if !ctx.states.culls(neighbor(slot), id) {
+                    return false;
+                }
+            }
+            true
         }
+        Hidden::Water => Direction::ALL.iter().all(|&dir| {
+            let [x, y, z] = dir.to_vector();
+            let flags = ctx.states.flags(neighbor(Offset::new(x, y, z).slot));
+            flags.watery() || (dir != Direction::Up && flags.culling())
+        }),
     }
-    true
 }
 
 /// The full render of a block [`fully_culled`] skips, for debug builds to check it adds nothing.

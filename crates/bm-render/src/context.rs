@@ -7,7 +7,8 @@ use bm_world::StateId;
 
 use crate::relative::Offset;
 use crate::settings::RenderSettings;
-use crate::states::{Flags, StateCache, StateInfo};
+use crate::flags::Flags;
+use crate::states::{StateCache, StateInfo};
 use crate::view::View;
 
 pub(crate) struct Ctx<'r, 'a> {
