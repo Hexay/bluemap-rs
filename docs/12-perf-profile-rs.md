@@ -123,8 +123,8 @@ only. Version: compat files mtime + length + file id (NTFS file index / inode; i
 alone repeated within ~1 ms); optimized hires bundle generation + record offset; SQL none (Java's schema has no
 change column). Sending `ETag` is opt-in (`webserver.conf` hidden `map-etags: true`), because the conformance suite
 compares every header with Java's; 304s are answered either way. `structures` reload (`web_bench.py --only
-reload_hires,reload_map_data --server-arg=--etags`): 70 KB → 0 B body per hires tile, ~4.3 MB → ~60 KB headers per
-view, CPU per hires revalidation 0.60–0.68 → 0.36–0.40 ms; full replies unchanged within noise (one handle gives
+reload_hires,reload_map_data --server-arg=--etags`): 70 KB → 0 B body per hires tile, ~4.3 MB → 0 B body per
+view (header bytes unmeasured), CPU per hires revalidation 0.60–0.68 → 0.36–0.40 ms; full replies unchanged within noise (one handle gives
 bytes and version).
 
 Disk (merge `16568e8`):
@@ -136,3 +136,23 @@ Disk (merge `16568e8`):
   optimized 5.7 → 4.8 s.
   Cost when every stored tile changed: +4% compat, +9% optimized. Empty storage costs nothing.
   If forced re-renders after a settings change matter more, gate the read-back on `-f` plus a changed map config.
+
+## Round 3 (re-profiled master `4a8654d`)
+
+Starting point on testbox: compat 53.4 s CPU / 5.7 s / ~435 MB / 84 MB disk, optimized 54.3 s / 5.7 s / ~675 MB /
+15 MB. Compat hotspots: gzip 20%, `Block::neighbor` 10.5%, `Block::new` 9.5% (every y, air included), liquids 5.4%,
+`Volume::fill` 5.4%.
+
+| commit | change | effect (structures, testbox, 3 interleaved runs) |
+|---|---|---|
+| `a44b23f` | block pass: interior air only feeds its light to the column | CPU 53.5 → 49.1 s (−8.3%), webroot identical |
+| `7d91907` | gzip/zlib encode via libdeflate 4 (decode stays flate2) | CPU 53.6 → 50.4 s (−6%), bytes 0.987× Java (was 0.997×), RSS +~8 MB |
+| `f9a4bd2` | BMQ2 encoder: no release trial decode, no gathered copies, trimmed scratch | optimized RSS 670 → 472–493 MB, CPU −5%, blobs identical |
+
+- **libdeflate output sizing:** it needs the whole output buffer up front, and sizing it to the bound kept every
+  buffer at input size (+50 MB RSS). The output now starts from a guess (`len/8`), retries at the full bound on
+  `InsufficientSpace`, and is shrunk to fit.
+- **BMQ2 exactness without a trial decode:** the argument is in the `compact/mod.rs` "Exactness" docs. Debug builds
+  (and so the unit tests) still decode and compare every blob, and `oracle_optimized` passes.
+- **Next candidates:** `Block::neighbor` (~10%), liquids (5%), `Volume::fill` (5%), and gzip, still ~13% after
+  libdeflate. Compat-mode gzip can't drop further without a format change, which is what optimized storage is.
