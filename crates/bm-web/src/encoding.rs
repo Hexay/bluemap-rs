@@ -10,31 +10,36 @@ use crate::transcode;
 
 /// The codings named in `Accept-Encoding`. Java matches whole comma-separated tokens case-insensitively, so
 /// `gzip;q=1.0` never matched there; here parameters are stripped and `q=0` means refused.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Accepted(Vec<String>);
+/// Only codings we can produce or pass through are tracked (a bit per [`Compression`]).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Accepted(u8);
 
 impl Accepted {
     pub fn from_headers(headers: &HeaderMap) -> Self {
-        let mut codings = Vec::new();
+        let mut bits = 0;
         for value in headers.get_all(ACCEPT_ENCODING) {
             let Ok(value) = value.to_str() else { continue };
             for item in value.split(',') {
                 let mut parts = item.split(';').map(str::trim);
-                let coding = parts.next().unwrap_or("").to_ascii_lowercase();
+                let Some(bit) = parts.next().and_then(bit) else { continue };
                 let refused = parts.any(|p| {
                     p.split_once('=').is_some_and(|(k, v)| k.trim().eq_ignore_ascii_case("q") && is_zero_q(v.trim()))
                 });
-                if !coding.is_empty() && !refused {
-                    codings.push(coding);
+                if !refused {
+                    bits |= bit;
                 }
             }
         }
-        Self(codings)
+        Self(bits)
     }
 
     pub fn accepts(&self, coding: &str) -> bool {
-        self.0.iter().any(|c| c == coding)
+        bit(coding).is_some_and(|b| self.0 & b != 0)
     }
+}
+
+fn bit(coding: &str) -> Option<u8> {
+    Compression::ALL.iter().position(|c| c.id().eq_ignore_ascii_case(coding)).map(|i| 1 << i)
 }
 
 fn is_zero_q(q: &str) -> bool {
