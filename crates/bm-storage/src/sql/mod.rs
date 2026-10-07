@@ -2,6 +2,7 @@
 //! databases and `sql.php` keep working. Blocking API over sqlx: calls `Handle::block_on`, so call it from plain
 //! threads (render workers, `spawn_blocking`), never from inside an async task; the runtime must be multi-thread.
 
+mod config;
 mod db;
 mod hires;
 mod keys;
@@ -16,6 +17,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bm_compress::Compression;
 use tokio::runtime::Handle;
 
+pub use self::config::{Dialect, STATEMENT_TIMEOUT, SqlConfig, UNBOUNDED_CONNECTIONS};
 use self::db::{Arg, Pool};
 use self::hires::SqlHires;
 use self::keys::{KeyCache, KeyTable};
@@ -29,46 +31,6 @@ use crate::optimized::OptimizedMapStorage;
 const PAGE: i64 = 1000;
 /// Statement bytes around the blob in one write packet (SQL text, ids, framing).
 const PACKET_OVERHEAD: usize = 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Dialect {
-    /// MySQL and MariaDB (`MySQLCommandSet`).
-    MySql,
-    Postgres,
-    Sqlite,
-}
-
-#[derive(Debug, Clone)]
-pub struct SqlConfig {
-    /// sqlx or JDBC URL, credentials in it or in `properties`.
-    pub url: String,
-    /// JDBC `connection-properties`; `user` and `password` are used.
-    pub properties: Vec<(String, String)>,
-    /// Statements run on every new connection; `None`: the dialect's defaults (upstream `Dialect`).
-    pub init_sql: Option<Vec<String>>,
-    /// Must match `[a-z0-9_]{0,32}`; `sql.php` hardcodes the default.
-    pub table_prefix: String,
-    pub compression: Compression,
-    /// Never creates tables or keys and refuses writes (webserver-only setups, #749).
-    pub read_only: bool,
-    pub max_connections: u32,
-    pub format: Format,
-}
-
-impl SqlConfig {
-    pub fn new(url: impl Into<String>) -> Self {
-        Self {
-            url: url.into(),
-            properties: Vec::new(),
-            init_sql: None,
-            table_prefix: "bluemap_".into(),
-            compression: Compression::Gzip,
-            read_only: false,
-            max_connections: 8,
-            format: Format::Compat,
-        }
-    }
-}
 
 pub(crate) struct Shared {
     runtime: Handle,
@@ -176,6 +138,9 @@ impl SqlStorage {
             return Err(Error::InvalidTablePrefix(config.table_prefix.clone()));
         }
         let (dialect, url) = url::connect_url(&config.url, &config.properties)?;
+        if let Some(configured) = config.dialect.filter(|&d| d != dialect) {
+            return Err(Error::DialectMismatch { configured: configured.name(), url: dialect.name() });
+        }
         let prefix = config.table_prefix.as_str();
         let (pool, max_packet) = runtime.block_on(async {
             let pool = Pool::connect(dialect, &url, config).await?;

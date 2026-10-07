@@ -1,5 +1,9 @@
 //! Per-dialect sqlx pools behind one small query surface. Column types differ per dialect (MySQL unsigned ids
 //! and `_bin` VARCHARs, PostgreSQL INT2/BOOL, SQLite INTEGER), so decoding is dialect-aware.
+//!
+//! Nothing waits forever: acquiring a connection gives up after [`ACQUIRE_TIMEOUT`], a statement after
+//! [`SqlConfig::statement_timeout`], closing after [`CLOSE_TIMEOUT`]. A statement that overruns leaves its
+//! connection mid-protocol, so that connection is dropped instead of going back to the pool.
 
 use std::str::FromStr;
 use std::sync::Arc;
@@ -10,10 +14,15 @@ use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use sqlx::sqlite::{
     SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions, SqliteRow, SqliteSynchronous,
 };
-use sqlx::{Executor, Row};
+// statements come from `Statements` and config (`connection-init-sql`), never from map data
+use sqlx::{AssertSqlSafe, Row};
 
 use super::{Dialect, SqlConfig};
 use crate::error::{Error, Result};
+
+/// Java's pool waits as long for a connection.
+const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(30);
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Arg<'a> {
@@ -22,7 +31,12 @@ pub(crate) enum Arg<'a> {
     Blob(&'a [u8]),
 }
 
-pub(crate) enum Pool {
+pub(crate) struct Pool {
+    inner: Inner,
+    statement_timeout: Duration,
+}
+
+enum Inner {
     MySql(MySqlPool),
     Postgres(PgPool),
     Sqlite(SqlitePool),
@@ -42,30 +56,49 @@ macro_rules! bind_args {
     }};
 }
 
-/// Runs `$body` with `$p` bound to the concrete pool and `$row_int`/`$row_text` to its decoders.
-macro_rules! on_pool {
-    ($pool:expr, |$p:ident, $int:ident, $text:ident| $body:expr) => {
-        match $pool {
-            Pool::MySql($p) => {
+/// Runs `$body` with `$c` bound to a connection of the concrete pool and `$int`/`$text` to its decoders, under
+/// the statement timeout.
+macro_rules! on_conn {
+    ($pool:expr, |$c:ident, $int:ident, $text:ident| $body:expr) => {
+        match &$pool.inner {
+            Inner::MySql(p) => {
                 let ($int, $text) = (mysql_int, mysql_text);
-                $body
+                timed!($pool, p, |$c| $body)
             }
-            Pool::Postgres($p) => {
+            Inner::Postgres(p) => {
                 let ($int, $text) = (pg_int, pg_text);
-                $body
+                timed!($pool, p, |$c| $body)
             }
-            Pool::Sqlite($p) => {
+            Inner::Sqlite(p) => {
                 let ($int, $text) = (sqlite_int, sqlite_text);
-                $body
+                timed!($pool, p, |$c| $body)
             }
         }
     };
 }
 
+macro_rules! timed {
+    ($pool:expr, $p:expr, |$c:ident| $body:expr) => {{
+        let mut conn = $p.acquire().await?;
+        let limit = $pool.statement_timeout;
+        let result = tokio::time::timeout(limit, async {
+            let $c = &mut *conn;
+            $body
+        })
+        .await;
+        match result {
+            Ok(result) => result,
+            Err(_) => {
+                drop(conn.detach());
+                Err(Error::Timeout(limit))
+            }
+        }
+    }};
+}
+
 impl Pool {
     pub async fn connect(dialect: Dialect, url: &str, config: &SqlConfig) -> Result<Self> {
         let (max_connections, read_only) = (config.max_connections.max(1), config.read_only);
-        let acquire = Duration::from_secs(30);
         // SQLite's default pragmas are connect options; the server dialects' run as statements
         let init: Arc<[String]> = match (&config.init_sql, dialect) {
             (Some(sql), _) => sql.iter().cloned().collect(),
@@ -75,20 +108,22 @@ impl Pool {
         macro_rules! with_init {
             ($options:expr) => {{
                 let init = init.clone();
-                $options.max_connections(max_connections).acquire_timeout(acquire).after_connect(move |conn, _| {
-                    let init = init.clone();
-                    Box::pin(async move {
-                        for sql in init.iter() {
-                            conn.execute(sql.as_str()).await?;
-                        }
-                        Ok(())
-                    })
-                })
+                $options.max_connections(max_connections).acquire_timeout(ACQUIRE_TIMEOUT).after_connect(
+                    move |conn, _| {
+                        let init = init.clone();
+                        Box::pin(async move {
+                            for sql in init.iter() {
+                                sqlx::raw_sql(AssertSqlSafe(sql.as_str())).execute(&mut *conn).await?;
+                            }
+                            Ok(())
+                        })
+                    },
+                )
             }};
         }
-        Ok(match dialect {
-            Dialect::MySql => Self::MySql(with_init!(MySqlPoolOptions::new()).connect(url).await?),
-            Dialect::Postgres => Self::Postgres(with_init!(PgPoolOptions::new()).connect(url).await?),
+        let inner = match dialect {
+            Dialect::MySql => Inner::MySql(with_init!(MySqlPoolOptions::new()).connect(url).await?),
+            Dialect::Postgres => Inner::Postgres(with_init!(PgPoolOptions::new()).connect(url).await?),
             Dialect::Sqlite => {
                 let mut options = SqliteConnectOptions::from_str(url)?
                     .synchronous(SqliteSynchronous::Normal)
@@ -100,58 +135,69 @@ impl Pool {
                 if !read_only {
                     options = options.journal_mode(SqliteJournalMode::Wal);
                 }
-                Self::Sqlite(with_init!(SqlitePoolOptions::new()).connect_with(options).await?)
+                Inner::Sqlite(with_init!(SqlitePoolOptions::new()).connect_with(options).await?)
             }
-        })
+        };
+        Ok(Self { inner, statement_timeout: config.statement_timeout })
     }
 
     pub async fn execute(&self, sql: &str, args: &[Arg<'_>]) -> Result<u64> {
-        on_pool!(self, |p, _i, _t| Ok(bind_args!(sqlx::query(sql), args).execute(p).await?.rows_affected()))
+        on_conn!(self, |c, _i, _t| Ok(bind_args!(sqlx::query(AssertSqlSafe(sql)), args).execute(c).await?.rows_affected()))
     }
 
     pub async fn fetch_blob(&self, sql: &str, args: &[Arg<'_>]) -> Result<Option<Vec<u8>>> {
-        on_pool!(self, |p, _i, _t| {
-            let row = bind_args!(sqlx::query(sql), args).fetch_optional(p).await?;
+        on_conn!(self, |c, _i, _t| {
+            let row = bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_optional(c).await?;
             row.map(|r| r.try_get::<Vec<u8>, _>(0)).transpose().map_err(Error::from)
         })
     }
 
     /// First column of the first row as an integer (bools count as 0/1).
     pub async fn fetch_int(&self, sql: &str, args: &[Arg<'_>]) -> Result<Option<i64>> {
-        on_pool!(self, |p, int, _t| {
-            let row = bind_args!(sqlx::query(sql), args).fetch_optional(p).await?;
+        on_conn!(self, |c, int, _t| {
+            let row = bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_optional(c).await?;
             row.map(|r| int(&r, 0)).transpose()
         })
     }
 
     pub async fn fetch_texts(&self, sql: &str, args: &[Arg<'_>]) -> Result<Vec<String>> {
-        on_pool!(self, |p, _i, text| {
-            let rows = bind_args!(sqlx::query(sql), args).fetch_all(p).await?;
+        on_conn!(self, |c, _i, text| {
+            let rows = bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_all(c).await?;
             rows.iter().map(|r| text(r, 0)).collect()
         })
     }
 
     pub async fn fetch_int_pairs(&self, sql: &str, args: &[Arg<'_>]) -> Result<Vec<(i64, i64)>> {
-        on_pool!(self, |p, int, _t| {
-            let rows = bind_args!(sqlx::query(sql), args).fetch_all(p).await?;
+        on_conn!(self, |c, int, _t| {
+            let rows = bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_all(c).await?;
             rows.iter().map(|r| Ok((int(r, 0)?, int(r, 1)?))).collect()
         })
     }
 
     /// Runs an INSERT and returns the generated id (PostgreSQL statements carry `RETURNING id`).
     pub async fn insert_returning_id(&self, sql: &str, args: &[Arg<'_>]) -> Result<i64> {
-        match self {
-            Self::MySql(p) => {
-                let id = bind_args!(sqlx::query(sql), args).execute(p).await?.last_insert_id();
+        match &self.inner {
+            Inner::MySql(p) => timed!(self, p, |c| {
+                let id = bind_args!(sqlx::query(AssertSqlSafe(sql)), args).execute(c).await?.last_insert_id();
                 i64::try_from(id).map_err(|_| Error::Protocol("generated id out of range"))
+            }),
+            Inner::Postgres(p) => timed!(self, p, |c| pg_int(&bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_one(c).await?, 0)),
+            Inner::Sqlite(p) => {
+                timed!(self, p, |c| Ok(bind_args!(sqlx::query(AssertSqlSafe(sql)), args).execute(c).await?.last_insert_rowid()))
             }
-            Self::Postgres(p) => pg_int(&bind_args!(sqlx::query(sql), args).fetch_one(p).await?, 0),
-            Self::Sqlite(p) => Ok(bind_args!(sqlx::query(sql), args).execute(p).await?.last_insert_rowid()),
         }
     }
 
+    /// Waits for checked-out connections to come back, but not forever (a lost one must not hang the exit).
     pub async fn close(&self) {
-        on_pool!(self, |p, _i, _t| p.close().await)
+        let close = async {
+            match &self.inner {
+                Inner::MySql(p) => p.close().await,
+                Inner::Postgres(p) => p.close().await,
+                Inner::Sqlite(p) => p.close().await,
+            }
+        };
+        _ = tokio::time::timeout(CLOSE_TIMEOUT, close).await;
     }
 }
 

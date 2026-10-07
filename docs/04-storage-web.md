@@ -71,7 +71,10 @@ Six tables (MySQL form, `MySQLCommandSet.java:49-157`, all `COLLATE utf8mb4_bin`
 bluemap-rs against real servers (MariaDB 11.8, MySQL 8.4, PostgreSQL 18; `tools/dbs.py`, `tools/accept_sql.py`,
 `tests/sql_remote.rs`): schema (`SHOW CREATE TABLE` / `information_schema` + constraints + indexes) identical to the
 tables Java 5.28 creates; Java-rendered DBs re-render 0 tiles here and Java's `-r` rewrites no tile of ours; both
-webservers serve the same tile bytes. Intentional differences: `max-connections: -1` (Java: unbounded) = 8; blobs above
+webservers serve the same tile bytes. Intentional differences: `max-connections: -1` (Java: unbounded) = 64, opened
+lazily; `dialect:` must agree with the URL's driver (Java would run that dialect's SQL over any driver); no wait is
+unbounded: 30 s for a connection, 5 min per statement (`STATEMENT_TIMEOUT`; Java has none), and an overrunning
+statement's connection is dropped rather than reused (`sql/db.rs`); blobs above
 MySQL `max_allowed_packet` fail before sending (`BlobTooLarge`, #694) instead of mid-protocol; JDBC `user`/`password`
 are taken from the URL query too and percent-encoded; dead pooled connections (server restart, `wait_timeout`) are
 replaced on the next acquire. JSON items (settings/markers) are stored uncompressed and gzipped per request, so their

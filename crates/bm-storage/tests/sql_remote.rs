@@ -7,9 +7,10 @@
 mod common;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use bm_storage::{Dialect, Error, Format, GridKey, ItemKey, SqlConfig, SqlStorage, Storage};
-use sqlx::{Connection, Executor, Row};
+use sqlx::{AssertSqlSafe, Connection, Executor, Row};
 use tokio::runtime::Runtime;
 
 const TABLES_DROP_ORDER: [&str; 6] =
@@ -47,12 +48,12 @@ impl Server {
             match self.dialect {
                 Dialect::MySql => {
                     let mut c = sqlx::MySqlConnection::connect(&self.sqlx_url).await.unwrap();
-                    let row = c.fetch_optional(sql).await.unwrap();
+                    let row = c.fetch_optional(AssertSqlSafe(sql)).await.unwrap();
                     row.map(|r| r.try_get::<i64, _>(0).or_else(|_| r.try_get::<u64, _>(0).map(|v| v as i64)).unwrap())
                 }
                 Dialect::Postgres => {
                     let mut c = sqlx::PgConnection::connect(&self.sqlx_url).await.unwrap();
-                    let row = c.fetch_optional(sql).await.unwrap();
+                    let row = c.fetch_optional(AssertSqlSafe(sql)).await.unwrap();
                     row.and_then(|r| r.try_get::<Option<i64>, _>(0).ok().flatten())
                 }
                 Dialect::Sqlite => unreachable!(),
@@ -160,7 +161,7 @@ fn reconnects(s: &Server, name: &str) {
                 let id = |r: &sqlx::mysql::MySqlRow| r.try_get::<u64, _>(0).or_else(|_| r.try_get::<i64, _>(0).map(|v| v as u64));
                 let ids: Vec<u64> = rows.iter().map(|r| id(r).unwrap()).collect();
                 for id in &ids {
-                    c.execute(format!("KILL {id}").as_str()).await.unwrap();
+                    c.execute(AssertSqlSafe(format!("KILL {id}"))).await.unwrap();
                 }
                 ids
             });
@@ -190,10 +191,79 @@ fn tls(s: &Server, name: &str) {
     storage.close();
 }
 
+/// Large writes over fresh TLS connections, several at once. sqlx 0.8's TLS adapter, after a write hit a full
+/// send buffer, waited for the socket to become readable while the server waited for the rest of the request:
+/// `bluemap -r` hung writing textures.json (~1 in 80 runs). Fails as a statement timeout instead of hanging.
+fn tls_large_writes(s: &Server, name: &str) {
+    let require = if s.dialect == Dialect::MySql { "ssl-mode=REQUIRED" } else { "sslmode=require" };
+    let url = format!("{}{}{require}", s.url, if s.url.contains('?') { '&' } else { '?' });
+    let cfg = SqlConfig { url, statement_timeout: Duration::from_secs(20), ..s.config(name, Format::Compat) };
+    let blob: Vec<u8> = (0..(2 << 20) + 12345).map(|i| (i * 7 % 253) as u8).collect();
+    // concurrent CREATE TABLE IF NOT EXISTS races on PostgreSQL
+    s.connect(&cfg).close();
+    std::thread::scope(|scope| {
+        for t in 0..4 {
+            let (cfg, blob) = (&cfg, &blob);
+            scope.spawn(move || {
+                for round in 0..50 {
+                    let storage = s.connect(cfg);
+                    let item = ItemKey::Asset(format!("t{t}-{round}"));
+                    storage.map("m").unwrap().write_item_encoded(&item, blob).unwrap();
+                    storage.close();
+                }
+            });
+        }
+    });
+}
+
+/// A statement stuck behind another session's table lock fails with `Timeout` instead of waiting forever, and its
+/// connection is replaced: the storage works again (even with a single-connection pool) once the lock is gone.
+fn statement_timeout(s: &Server, name: &str) {
+    let cfg = SqlConfig { max_connections: 1, statement_timeout: Duration::from_secs(2), ..s.config(name, Format::Compat) };
+    let storage = s.connect(&cfg);
+    let map = storage.map("m").unwrap();
+    map.write_item(&ItemKey::Settings, b"{}").unwrap();
+    let table = format!("{}item_storage_data", cfg.table_prefix);
+    let blocked = s.rt.block_on(async {
+        let lock = |mysql: bool| {
+            if mysql { format!("LOCK TABLES {table} WRITE") } else { format!("LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE") }
+        };
+        match s.dialect {
+            Dialect::MySql => {
+                let mut c = sqlx::MySqlConnection::connect(&s.sqlx_url).await.unwrap();
+                c.execute(AssertSqlSafe(lock(true))).await.unwrap();
+                let blocked = tokio::task::spawn_blocking({
+                    let map = map.clone();
+                    move || map.read_item(&ItemKey::Settings)
+                });
+                let blocked = blocked.await.unwrap();
+                c.execute("UNLOCK TABLES").await.unwrap();
+                blocked
+            }
+            _ => {
+                let mut c = sqlx::PgConnection::connect(&s.sqlx_url).await.unwrap();
+                c.execute("BEGIN").await.unwrap();
+                c.execute(AssertSqlSafe(lock(false))).await.unwrap();
+                let blocked = tokio::task::spawn_blocking({
+                    let map = map.clone();
+                    move || map.read_item(&ItemKey::Settings)
+                });
+                let blocked = blocked.await.unwrap();
+                c.execute("ROLLBACK").await.unwrap();
+                blocked
+            }
+        }
+    });
+    assert!(matches!(blocked, Err(Error::Timeout(_))), "{blocked:?}");
+    assert_eq!(map.read_item(&ItemKey::Settings).unwrap().unwrap().data, b"{}");
+    storage.close();
+}
+
 fn run(env: &str) {
     let Some(server) = Server::from_env(env) else { return };
     if std::env::var_os("BM_TEST_SQL_TLS").is_some() {
         server.with_tables("tls", tls);
+        server.with_tables("tlsbig", tls_large_writes);
     }
     server.with_tables("compat", compat);
     server.with_tables("opt", optimized);
@@ -201,6 +271,7 @@ fn run(env: &str) {
     server.with_tables("big", big_blobs);
     server.with_tables("race", concurrent_writers);
     server.with_tables("kill", reconnects);
+    server.with_tables("stuck", statement_timeout);
 }
 
 #[test]

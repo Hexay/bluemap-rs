@@ -23,6 +23,10 @@ pub enum Error {
     BlobTooLarge { size: usize, limit: usize },
     #[error("read-only database lacks BlueMap tables: {0}")]
     MissingTables(String),
+    #[error("sql statement did not complete within {0:?}")]
+    Timeout(std::time::Duration),
+    #[error("dialect: {configured} does not match the {url} connection-url")]
+    DialectMismatch { configured: &'static str, url: &'static str },
     #[error("unexpected sql result: {0}")]
     Protocol(&'static str),
     #[error(transparent)]
