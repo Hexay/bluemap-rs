@@ -38,10 +38,7 @@ fn check(pack: &Pack) {
     assert!(pack.exists("assets") && pack.exists("pack.mcmeta") && !pack.exists("x"));
     assert_eq!(pack.list(""), ["assets", "overlay_1", "pack.mcmeta"]);
     assert_eq!(pack.list("assets/minecraft/models/block"), ["stone.json", "sub"]);
-    assert_eq!(
-        pack.walk("assets/minecraft/models"),
-        ["assets/minecraft/models/block/stone.json", "assets/minecraft/models/block/sub/x.json"]
-    );
+    assert_eq!(pack.walk("assets/minecraft/models"), ["assets/minecraft/models/block/stone.json", "assets/minecraft/models/block/sub/x.json"]);
     let overlay = pack.sub("overlay_1");
     assert_eq!(overlay.read_string("assets/minecraft/models/block/stone.json").as_deref(), Some("{\"overlay\":true}"));
     assert_eq!(overlay.walk("assets"), ["assets/minecraft/models/block/stone.json"]);
