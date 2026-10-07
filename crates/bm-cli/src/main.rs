@@ -4,6 +4,7 @@
 mod args;
 mod convert;
 mod log;
+mod plugin;
 mod render;
 mod shutdown;
 mod watch;
@@ -28,6 +29,9 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    if args.plugin_ipc {
+        return plugin::run(args.parent_pid);
+    }
     match run(&args) {
         Ok(code) => code,
         Err(e) if is_missing_resources(&e) => {

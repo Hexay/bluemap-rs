@@ -15,12 +15,19 @@ path = "src/main.rs"
 anyhow.workspace = true
 bm-config.workspace = true
 bm-engine.workspace = true
+bm-ipc.workspace = true
+bm-java.workspace = true
+bm-map.workspace = true
 bm-storage.workspace = true
 bm-web.workspace = true
 chrono.workspace = true
 clap.workspace = true
 rayon.workspace = true
-tokio = { workspace = true, features = ["signal"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal", "sync"] }
+zip.workspace = true
 
 [dev-dependencies]
 bm-golden = { path = "../bm-golden" }
+tempfile.workspace = true
