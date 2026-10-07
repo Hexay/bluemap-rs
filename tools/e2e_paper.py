@@ -116,6 +116,7 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         around = [f"maps/{map_id}/tiles/0/x{x}/z{z}.prbm" for x in range(-9, 10) for z in range(-9, 10)]
         hires = poll(lambda: next((p for p in around if get(p)[0] == 200), None), 300, 5)
         check("hires tile served", hires, str(hires))
+        diagnostic_commands(server, folder, map_id)
 
         server.send("start 1 none")
         bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
@@ -146,7 +147,26 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         check("server stopped", code == 0, f"exit {code}")
         if last:
             check("no orphan core process", poll(lambda: not pid_alive(last), 30), f"pid {last}")
+    check("tasks.dat written on stop", any((folder / "bluemap").rglob("tasks.dat")))
     return folder
+
+
+def diagnostic_commands(server: Paper, folder: Path, map_id: str) -> None:
+    """troubleshoot / debug / storages from the console (no sender world, so only the explicit-argument forms)."""
+    server.command("bluemap troubleshoot", r"Troubleshooting", 30)
+    check("/bluemap troubleshoot", True)
+    server.command(f"bluemap troubleshoot {map_id} 0 0", r"Troubleshooting", 30)
+    check("/bluemap troubleshoot <map> <x> <z>", True)
+    server.command(f"bluemap debug world {map_id} 0 64 0", r"World-Info \(debug\)", 30)
+    check("/bluemap debug world <map> <x> <y> <z>", server.wait_for(r"block: minecraft:", 10))
+    server.command(f"bluemap debug map {map_id} 0 0", r"Map-Info \(debug\)", 30)
+    check("/bluemap debug map <map> <x> <z>", server.wait_for(r"state: ", 10))
+    server.command("bluemap debug dump", r"created at: ", 30)
+    check("/bluemap debug dump", any(folder.rglob("dump.json")))
+    server.command("bluemap storages", r"BlueMap Storages", 30)
+    check("/bluemap storages", True)
+    server.command("bluemap storages file", r"Type: bluemap:file", 30)
+    check("/bluemap storages <storage>", True)
 
 
 def run_jvm_kill(folder: Path) -> None:
