@@ -262,11 +262,23 @@ on Windows upgrades. Older versions are deleted after a successful start. Keep i
 Override: a `BLUEMAP_CORE` system property/env var (or hidden `plugin.conf` key) for noexec hosts, unsupported
 arches (armv7, FreeBSD, riscv) and debugging. Without an override, unsupported platform or exec failure → loud
 error naming the override, plus a pointer to running the core as a standalone CLI.
-Linux: ship **static musl** (`x86_64/aarch64-unknown-linux-musl`, built with cargo-zigbuild) so the glibc
-version and Alpine stop mattering. Use **mimalloc** as the global allocator, because musl's malloc serialises the
-multi-threaded mesher (guess, benchmark it). **Blocker found:** the workspace pins `native-tls`
-(`Cargo.toml:60` sqlx `tls-native-tls`, `:66` ureq), which links OpenSSL dynamically on Linux. Switch to rustls for
-portable binaries.
+Linux: ship **static musl** (`x86_64/aarch64-unknown-linux-musl`, `armv7-unknown-linux-musleabihf`, built with
+cargo-zigbuild from any host by `tools/build_core.py`) so the glibc version and Alpine stop mattering. TLS is
+rustls-ring, so nothing links OpenSSL. Allocator, measured on testbox (forced render of `structures`, optimized
+storage, 12 threads, 4 interleaved runs, all cross-built with zig; `docs/perf-exp/testbox_alloc.sh`):
+
+| Build | CPU (user+sys) | Wall | Peak RSS |
+|---|---|---|---|
+| glibc 2.31 (system malloc) | 49.8 s | 5.4 s | 452 MB |
+| musl malloc | 61.8 s | 7.7 s | 544 MB |
+| musl + mimalloc v3 defaults | 51.6 s | 6.4 s | 723 MB |
+| **musl + mimalloc, purge delay 3 ms, no eager arena commit** (shipped, `bm-cli/src/alloc.rs`) | 57.7 s | 6.9 s | 325 MB |
+
+mimalloc's defaults buy CPU with +60 % RSS, which a core sharing a container with the JVM can't afford; the tuned
+setting beats musl malloc on both axes. `MIMALLOC_*` env vars still override it. Compat-storage renders are
+byte-identical across all variants (optimized `.bmb` bundles differ in entry order between any two runs). The
+remaining gap to glibc (+27 % wall) is the price of one portable binary; a `gnu.2.17` build is the fallback if it
+matters.
 macOS: binaries need at least an ad-hoc signature on arm64 (rustc/ld does this by default). For quarantine, see
 the limits note above.
 
@@ -324,23 +336,39 @@ bStats id; demand-driven live markers; auto-respawn with backoff; armv7-musl if 
 
 ## 8. Implementation status (2026-10-07)
 
-Vertical slice done end to end on Windows: `crates/bm-ipc` (protocol, crate docs = spec), `bluemap --plugin-ipc`
-(`crates/bm-cli/src/plugin/`), the Java shim (`platforms/paper/`) and `tools/e2e_paper.py`.
+Vertical slice done end to end on Windows and Linux: `crates/bm-ipc` (protocol, crate docs = spec), `bluemap
+--plugin-ipc` (`crates/bm-cli/src/plugin/`), the Java shim (`platforms/paper/`), `tools/e2e_paper.py` and the
+per-target builds (`tools/build_core.py`, shared with `.github/workflows/{ci,release}.yml`).
 
-**Verified** by `py -3 tools/e2e_paper.py` on Paper 26.3 build 159 (Java 25) with BlueBorder 1.1.2 (marker addon)
-and BetterStresstestbots (server-side fake players), 31/31 checks:
-- core spawn → `Ready` 2–3 s with a warm data folder, 4–18 s on a first start (config generation + resource load;
-  this box was heavily loaded); core RSS ~40–48 MiB after rendering a 3-map spawn-area world; plugin jar 5.5 MiB
-  (windows-x64; core exe 13.3 MiB uncompressed).
-- webapp, lowres and hires tiles served from `webserver.conf`; `/bluemap`, `maps`, `force-update`, `reload` from
-  the console; a bot appears in `live/players.json`; BlueBorder's set reaches `live/markers.json` and comes back
-  after reload and after a killed core is respawned; server stop leaves no core process.
+**Verified** by `tools/e2e_paper.py` on Paper 26.3 build 159 (Java 25) with BlueBorder 1.1.2 (marker addon)
+and BetterStresstestbots (server-side fake players), 43/43 checks on Windows (windows-x64 jar) and on the Linux
+testbox (linux-x64 static musl jar, `--core`/`--jar` prebuilt from Windows):
+- core spawn → `Ready` 1–4 s with a warm data folder; core RSS ~46–53 MiB after rendering a 3-map spawn-area world.
+- webapp, lowres and hires tiles served from `webserver.conf`; `/bluemap`, `maps`, `force-update`, `troubleshoot`,
+  `debug world|map|dump`, `storages [<s>]`, `reload` from the console; a bot appears in `live/players.json`;
+  BlueBorder's set reaches `live/markers.json` and comes back after reload and after a killed core is respawned;
+  server stop leaves no core process and writes `tasks.dat`; SIGKILLing the JVM makes the core exit (stdin EOF).
 - Against upstream BlueMap 5.28 Paper on a copy of the same world: `live/markers.json` and the empty
-  `live/players.json` are byte-identical; all generated configs identical except the deliberate `format: optimized`
-  block appended to `storages/*.conf`.
+  `live/players.json` are byte-identical; console text of `storages`, `storages file`, `debug world <map> 0 64 0`
+  identical; all generated configs identical except the deliberate `format: optimized` block in `storages/*.conf`.
+- Cross-built cores: linux-arm64 and linux-armv7 render `structures` byte-identically to glibc x64 under
+  qemu-user; `tasks.dat` encoder byte-identical to BlueNBT 3.5.1 (unit test).
 - Rust tests: framing edge cases (`bm-ipc`), players JSON vs `JsonWriter` (`bm-map`), command spec/parser,
   pluginState, scripted-shim lifecycle (`crates/bm-cli/tests/plugin_ipc.rs`: handshake, `NotReady`, command
   round trip, lock exit 4, protocol mismatch exit 3, `Shutdown`/EOF → `Bye`).
+
+Sizes (core stripped of debuginfo; jar = shim + one deflated core; Hangar cap 10,000,000 B):
+
+| Target | Core | Jar |
+|---|---|---|
+| windows-x64 (MSVC) | 15,448,064 | 6,507,252 |
+| linux-x64 (musl) | 14,369,704 | 6,628,116 |
+| linux-arm64 (musl) | 13,021,968 | 6,225,810 |
+| linux-armv7 (musl) | 12,969,700 | 6,216,263 |
+| universal (the four above) | | 24,856,874 |
+
+macOS cores are built only in CI (native `cargo build` on `macos-latest`, `codesign --verify`); cross-building them
+from Windows needs the Apple SDK, so they are unverified locally.
 
 **Deviations from the design**
 - `Hello` carries `maxMemoryMib` (render-thread suggestion in a new `core.conf`); `Unloading` was added so the shim
@@ -356,11 +384,20 @@ and BetterStresstestbots (server-side fake players), 31/31 checks:
   `RenderStart{threads}` count is ignored.
 - Marker demand: viewers (SSE or `markers.json` read within 30 s), the first 30 s after a load and 30 s before a
   storage write.
+- Skins: the shim runs upstream's `PlayerSkinUpdater` logic (≤1/h per player, API `SkinProvider` +
+  `PlayerIconFactory`) and sends one `AssetWrite`/`AssetDelete` of `playerheads/<uuid>.png` per map.
+- `tasks.dat` (raw BlueNBT, `renderTasks: [{type, data}]`): whole-map tasks are written as `map-update` with their
+  region list at save time (upstream writes an unprepared task as `unknown` and loses it); `map-save` entries are
+  ignored on load (we save after every task); unreadable files are logged and deleted as upstream.
+- `debug dump` writes our own state (maps, tasks, pluginState, worlds, RSS), not upstream's reflective dump;
+  `storages <s> delete <map>` deletes on the command thread instead of queueing a render task; `debug world` with no
+  map for the sender's world answers "No map found" (upstream loads the world on demand).
+- musl cores use mimalloc with a 3 ms purge delay (table in §5).
 
 **Left**
-- linux/macOS/arm targets (CI with cargo-zigbuild, musl + mimalloc, rustls), Folia run (no Folia 26.3 build yet;
-  scheduler code paths are in place but untested), skin updater (`AssetWrite` of player heads), `tasks.dat`,
-  `troubleshoot`/`debug`/`storages <s>` commands, hourly watcher restart (our watchers self-heal), persisting
-  `lastFullUpdate` on watcher-driven full updates, bStats id.
+- macOS run on real hardware (CI builds and signs only), Folia run (no Folia 26.3 build yet; scheduler code paths
+  are in place but untested), player-head bytes vs upstream on a real online-mode join (offline bots have no skin),
+  hourly watcher restart (our watchers self-heal), persisting `lastFullUpdate` on watcher-driven full updates,
+  bStats id, version stamping of release jars (`coreVersion` from the tag).
 - A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
   `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.

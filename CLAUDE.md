@@ -35,7 +35,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   thread for lowres + rstate; each region-boundary tile rendered once (crate docs); `-u` render queue + region
   watcher (`task`, `queue`, `runner`, `watch/`)
 - `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes/log format; `-u`, `--markers`, `--convert-storage`;
-  hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`)
+  hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`); musl builds
+  use tuned mimalloc (`src/alloc.rs`)
 - `bm-ipc` — shim↔core wire protocol (stdin/stdout frames, JSON headers); crate docs are the canonical spec
 - `platforms/paper` — Java shim (Gradle, Java 21, BlueMapAPI 2.8.1 proxy); bundles the core from `natives/<target>/`
 - `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` / `compare-webroots` CLI
@@ -53,6 +54,9 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   tests: `BM_TEST_MYSQL_URL=… BM_TEST_POSTGRES_URL=… cargo test -p bm-storage --test sql_remote -- --ignored`; vs Java
   over the same DBs: `py -3 tools/accept_sql.py [--servers …]`
 - Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots, upstream compare): `py -3 tools/e2e_paper.py`
+  (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one)
+- Plugin cores per target (musl via cargo-zigbuild + `pip install ziglang cargo-zigbuild`) + jars, same as CI:
+  `py -3 tools/build_core.py [windows-x64 linux-x64 linux-arm64 linux-armv7 …] [--jars]`
 
 ## Gotchas
 
@@ -62,5 +66,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - BlueMap configs use paths relative to the working directory: run `bluemap`/Java with cwd = the folder holding
   `config/` (fixtures: `work/bluemap/<fx>`).
 - BlueMap renders unlit chunks dark/skips them: worlds written without light need `render_serve.py --relight`.
+- Cross-builds: zig 0.16's clang rejects libdeflate's AVX-512 kernel without `-mevex512` (set per triple in
+  `tools/build_core.py`); a bare `cargo zigbuild` for x86_64 fails without it.
 - `diff-render` compares every face by default. Pass `--inset 16` only when the two renders read different worlds
   (sky light leaks 15 blocks sideways where one world ends).
