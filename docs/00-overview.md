@@ -13,7 +13,7 @@ Subsystem deep-dives:
 | 06 | [06-prior-art-and-ecosystem.md](06-prior-art-and-ecosystem.md) | Known perf pain, Rust crates, format drift, JVM interop, license |
 | 07 | [07-bluemap-reverse-reuse.md](07-bluemap-reverse-reuse.md) | What to take from `C:/Users/hexay/bluemap_reverse` (golden harness, diff oracle, lz4-java, Java Random) |
 | 08 | [08-github-issues.md](08-github-issues.md) | All 628 upstream issues categorised: real pain points, bugs not to copy, behaviour to keep |
-| 12 | [12-perf-profile-rs.md](12-perf-profile-rs.md) | Profiled our engine: gzip 22%, Volume::fill 11%, soft floor 6% (last two fixed, −10.8% CPU); disk/web hotspots |
+| 12 | [12-perf-profile-rs.md](12-perf-profile-rs.md) | Profiled our engine: gzip 22%, Volume::fill 11%, soft floor 6% (all fixed, −19.7% CPU); disk/web hotspots |
 
 ## What BlueMap is
 

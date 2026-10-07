@@ -90,5 +90,12 @@ Engine, structures, testbox, 3 interleaved runs each:
 Hires and lowres output are byte-identical to the previous build. Only `rstate` `.dat` differs, and it differs
 between any two runs. The golden suite and a `diff-render` of `structures` against Java show 0 differences.
 
-Item 1 (gzip level) is open. It trades byte-identity with Java's Deflater for CPU; madler zlib at level 6 (as
-`bm-java` uses for PNGs) should make `.prbm.gz` byte-identical instead (unverified, and likely slower).
+Item 1 then landed: `DEFLATE_LEVEL` 6 → 5 (`bm-compress/src/lib.rs`). This drops byte-identity with Java's
+Deflater, which zlib-rs never had; madler zlib at level 6, as `bm-java` uses for PNGs, would be the route back.
+
+| | CPU | wall | hires bytes |
+|---|---|---|---|
+| level 6 | 68.8–68.9 s | 7.1–7.4 s | 80.29 MB |
+| level 5 | 62.1–62.2 s (**−9.8%**) | 6.6–6.9 s | 80.72 MB (+0.53%) |
+
+Cumulative: 77.3 → 62.1 s CPU (−19.7%), 8.1 → 6.7 s wall.
