@@ -400,7 +400,7 @@ from Windows needs the Apple SDK, so they are unverified locally.
   map updates, cancellable, progress in `/bluemap`); `purge` still runs on the command thread.
 - Release jars and cores carry one version: `tools/build_core.py` takes `$BLUEMAP_RS_VERSION`, else the `v*` tag
   (CI) or a `v*` tag on HEAD, else Cargo's, and passes it to cargo (`bluemap --version`, `coreVersion`) and Gradle
-  (`-PpluginVersion` → plugin.yml `version`, natives manifest).
+  (`-PreleaseVersion` → `5.28+rs.<version>` in plugin.yml/fabric.mod.json, jar names, natives manifest).
 - Maps load only per (re)load, as upstream, so every loaded map's web routes exist from session start. (The CLI's
   `-u -w` loads maps whose world appears later; they get live routes through `bm_web::MapRegistry`.)
 - musl cores use mimalloc with a 3 ms purge delay (table in §5).

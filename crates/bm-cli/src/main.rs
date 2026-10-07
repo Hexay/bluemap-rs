@@ -23,6 +23,12 @@ use bm_engine::{ResourceOptions, Service, TileUpdateStrategy};
 use clap::Parser;
 use shutdown::Shutdown;
 
+/// bluemap-rs version: a release build's (`BLUEMAP_RS_VERSION` from `tools/build_core.py`), else Cargo's.
+pub const VERSION: &str = match option_env!("BLUEMAP_RS_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 fn main() -> ExitCode {
     #[cfg(target_env = "musl")]
     alloc::tune();
@@ -75,7 +81,7 @@ fn run(args: &Args) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     if args.version {
-        println!("{}\nbluemap-rs {}", bm_engine::BLUEMAP_VERSION, env!("CARGO_PKG_VERSION"));
+        println!("{}\nbluemap-rs {VERSION}", bm_engine::BLUEMAP_VERSION);
         return Ok(ExitCode::SUCCESS);
     }
     let config_folder = config_folder(args);
