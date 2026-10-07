@@ -5,6 +5,7 @@
 mod alloc;
 mod args;
 mod convert;
+mod eta;
 mod log;
 mod plugin;
 mod render;
@@ -123,7 +124,8 @@ fn run(args: &Args) -> Result<ExitCode> {
         } else {
             TileUpdateStrategy::ForceNone
         };
-        ok = render::run(&service, maps, failed, strategy, args.watch, &shutdown)?;
+        let web = webserver.as_ref().map(web::Webserver::maps);
+        ok = render::run(&service, maps, failed, strategy, args.watch, web, &shutdown)?;
     } else {
         if args.markers {
             update_markers(&service, args.maps.as_deref());

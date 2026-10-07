@@ -43,13 +43,20 @@ impl<'a> Watchers<'a> {
         }
     }
 
-    /// Re-opens each failed map every 30 s until it loads, then renders and watches it. Returns once `stop`'s
-    /// sender is dropped.
-    pub fn retry_failed(&self, mut failed: Vec<String>, loaded: &LoadedMaps, stop: Receiver<()>) {
+    /// Re-opens each failed map every 30 s until it loads, then `prepare`s (e.g. gives it live web routes), renders
+    /// and watches it. Returns once `stop`'s sender is dropped.
+    pub fn retry_failed(
+        &self,
+        mut failed: Vec<String>,
+        loaded: &LoadedMaps,
+        prepare: &dyn Fn(&mut MapContext),
+        stop: Receiver<()>,
+    ) {
         while !failed.is_empty() && matches!(stop.recv_timeout(RETRY_INTERVAL), Err(RecvTimeoutError::Timeout)) {
             failed.retain(|id| match self.service.open_map(id) {
-                Ok(Some(map)) => {
+                Ok(Some(mut map)) => {
                     log::info(&format!("Loading map '{id}'..."));
+                    prepare(&mut map);
                     let map = loaded.insert(map);
                     self.start(&map);
                     self.queue.schedule(RenderTask::full(id.clone(), TileUpdateStrategy::ForceNone));

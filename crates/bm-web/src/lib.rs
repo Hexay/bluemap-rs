@@ -25,6 +25,7 @@ mod live;
 mod map_data;
 mod map_handler;
 mod paths;
+mod registry;
 mod response;
 mod server;
 mod static_cache;
@@ -39,6 +40,7 @@ pub use error::WebError;
 pub use javafmt::{Arg, FormatError, JavaFormat};
 pub use live::LiveMap;
 pub use map_handler::MapRoute;
+pub use registry::MapRegistry;
 pub use server::WebServer;
 pub use webapp::{WEBAPP_VERSION, install_webapp, webapp_files, write_settings};
 
