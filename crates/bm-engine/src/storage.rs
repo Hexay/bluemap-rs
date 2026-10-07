@@ -84,20 +84,10 @@ impl Storages {
     }
 }
 
-/// JDBC URL + `connection-properties` → a sqlx URL with the credentials inlined.
 fn sql_config(c: &SqlStorageConfig) -> std::result::Result<SqlConfig, String> {
-    let mut url = c.connection_url.clone();
-    let prop = |k: &str| c.connection_properties.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
-    if let (Some(user), Some(scheme_end)) = (prop("user"), url.find("://"))
-        && !url[scheme_end + 3..].contains('@')
-    {
-        let auth = match prop("password") {
-            Some(pw) => format!("{user}:{pw}@"),
-            None => format!("{user}@"),
-        };
-        url.insert_str(scheme_end + 3, &auth);
-    }
-    let mut sql = SqlConfig::new(url);
+    let mut sql = SqlConfig::new(&c.connection_url);
+    sql.properties = c.connection_properties.clone();
+    sql.init_sql = c.connection_init_sql.clone();
     sql.table_prefix = c.table_prefix()?.to_owned();
     sql.compression = compression(c.compression()?);
     sql.format = format(c.format);

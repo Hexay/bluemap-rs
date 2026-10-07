@@ -8,6 +8,7 @@ mod keys;
 mod map;
 mod schema;
 mod statements;
+mod url;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -37,26 +38,14 @@ pub enum Dialect {
     Sqlite,
 }
 
-impl Dialect {
-    /// Dialect and sqlx URL for a sqlx-style or BlueMap JDBC-style (`jdbc:mysql://…`) connection URL.
-    pub fn from_url(url: &str) -> Result<(Self, String)> {
-        let bare = url.strip_prefix("jdbc:").unwrap_or(url);
-        let (scheme, rest) = bare.split_once(':').ok_or_else(|| Error::UnsupportedUrl(url.to_owned()))?;
-        let dialect = match scheme {
-            "mysql" | "mariadb" => Self::MySql,
-            "postgres" | "postgresql" => Self::Postgres,
-            "sqlite" => Self::Sqlite,
-            _ => return Err(Error::UnsupportedUrl(url.to_owned())),
-        };
-        let scheme = if dialect == Self::MySql { "mysql" } else { scheme };
-        Ok((dialect, format!("{scheme}:{rest}")))
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct SqlConfig {
-    /// sqlx or JDBC URL including credentials.
+    /// sqlx or JDBC URL, credentials in it or in `properties`.
     pub url: String,
+    /// JDBC `connection-properties`; `user` and `password` are used.
+    pub properties: Vec<(String, String)>,
+    /// Statements run on every new connection; `None`: the dialect's defaults (upstream `Dialect`).
+    pub init_sql: Option<Vec<String>>,
     /// Must match `[a-z0-9_]{0,32}`; `sql.php` hardcodes the default.
     pub table_prefix: String,
     pub compression: Compression,
@@ -70,6 +59,8 @@ impl SqlConfig {
     pub fn new(url: impl Into<String>) -> Self {
         Self {
             url: url.into(),
+            properties: Vec::new(),
+            init_sql: None,
             table_prefix: "bluemap_".into(),
             compression: Compression::Gzip,
             read_only: false,
@@ -184,10 +175,10 @@ impl SqlStorage {
         if !valid_prefix(&config.table_prefix) {
             return Err(Error::InvalidTablePrefix(config.table_prefix.clone()));
         }
-        let (dialect, url) = Dialect::from_url(&config.url)?;
+        let (dialect, url) = url::connect_url(&config.url, &config.properties)?;
         let prefix = config.table_prefix.as_str();
         let (pool, max_packet) = runtime.block_on(async {
-            let pool = Pool::connect(dialect, &url, config.max_connections.max(1), config.read_only).await?;
+            let pool = Pool::connect(dialect, &url, config).await?;
             let ready = async {
                 initialize_tables(&pool, dialect, prefix, config.read_only).await?;
                 if dialect != Dialect::MySql {
@@ -287,12 +278,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn urls_and_prefixes() {
-        assert_eq!(Dialect::from_url("jdbc:mysql://h:3306/db").unwrap(), (Dialect::MySql, "mysql://h:3306/db".into()));
-        assert_eq!(Dialect::from_url("jdbc:mariadb://h/db").unwrap(), (Dialect::MySql, "mysql://h/db".into()));
-        assert_eq!(Dialect::from_url("jdbc:postgresql://h/db").unwrap().0, Dialect::Postgres);
-        assert_eq!(Dialect::from_url("sqlite:bluemap.db").unwrap(), (Dialect::Sqlite, "sqlite:bluemap.db".into()));
-        assert!(Dialect::from_url("jdbc:oracle:thin:@h").is_err());
+    fn prefixes() {
         assert!(valid_prefix("bluemap_") && valid_prefix(""));
         assert!(!valid_prefix("Bluemap") && !valid_prefix("a-b") && !valid_prefix(&"a".repeat(33)));
     }
