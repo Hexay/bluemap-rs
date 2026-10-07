@@ -64,7 +64,10 @@ pub fn purge(s: &Session, map: &str, say: Say) -> i32 {
         }
         Err(e) => {
             crate::log::error(&format!("Failed to purge map '{map}': {e:#}"));
-            say(text::lines(vec![text::format("There was an error trying to purge %, see console for details.", &[map])]));
+            say(text::lines(vec![text::format(
+                "There was an error trying to purge %, see console for details.",
+                &[map],
+            )]));
             0
         }
     }
@@ -103,7 +106,10 @@ pub fn update(core: &Core, s: &Session, m: &Matched, sender: &CommandSender, say
     }
     let maps: Vec<String> = match m.get("map") {
         Some(map) => {
-            if m.int("x").is_none() && radius.is_some() && s.map_server_world.get(map).cloned().flatten() != sender.world {
+            if m.int("x").is_none()
+                && radius.is_some()
+                && s.map_server_world.get(map).cloned().flatten() != sender.world
+            {
                 say(text::one("The map does not belong to the same world you are currently in!", NEGATIVE));
                 return 0;
             }
@@ -151,7 +157,10 @@ fn regions_around(x: i32, z: i32, radius: i32) -> BTreeSet<(i32, i32)> {
 mod tests {
     #[test]
     fn regions_cover_the_square() {
-        assert_eq!(super::regions_around(0, 0, 10).into_iter().collect::<Vec<_>>(), [(-1, -1), (-1, 0), (0, -1), (0, 0)]);
+        assert_eq!(
+            super::regions_around(0, 0, 10).into_iter().collect::<Vec<_>>(),
+            [(-1, -1), (-1, 0), (0, -1), (0, 0)]
+        );
         assert_eq!(super::regions_around(100, 100, 5).len(), 1);
     }
 }

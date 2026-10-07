@@ -30,7 +30,9 @@ pub fn write_pack(data: &Path, dump: &[u8]) -> Result<()> {
         zip.finish()?;
         Ok(())
     };
-    write().with_context(|| format!("Failed to create {}! Does BlueMap have sufficient write permissions?", file.display()))
+    write().with_context(|| {
+        format!("Failed to create {}! Does BlueMap have sufficient write permissions?", file.display())
+    })
 }
 
 #[cfg(test)]

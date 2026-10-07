@@ -140,10 +140,7 @@ fn run(args: &Args) -> Result<ExitCode> {
     if args.renders() || args.webserver || args.generate_webapp || args.generate_websettings || args.markers {
         return Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) });
     }
-    log::info(&format!(
-        "Generated default config files for you, here: {}\n",
-        absolute(&config_folder).display()
-    ));
+    log::info(&format!("Generated default config files for you, here: {}\n", absolute(&config_folder).display()));
     print!("{HELP}");
     Ok(ExitCode::from(1))
 }

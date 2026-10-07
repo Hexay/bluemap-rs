@@ -57,13 +57,25 @@ def fetch(key: str) -> Path:
     return path
 
 
+def _work_dirs() -> list[Path]:
+    # work/ is not versioned, so a worktree finds the fixtures in an enclosing checkout
+    return [WORK, *[d / "work" for d in WORK.parent.parents]]
+
+
 def client_jar() -> Path | None:
     """A cached 26.3 client jar, so neither BlueMap has to download it."""
-    # work/ is not versioned, so a worktree finds the fixtures in an enclosing checkout
-    for work in [WORK, *[d / "work" for d in WORK.parent.parents]]:
+    for work in _work_dirs():
         for p in (work / "bluemap").glob(f"*/data/minecraft-client-{MC}.jar"):
             return p
     return None
+
+
+def fixture_world(name: str) -> Path:
+    """A world made by tools/make_world.py (vanilla 26.3 server)."""
+    for work in _work_dirs():
+        if (world := work / "worlds" / name / "world").is_dir():
+            return world
+    raise FileNotFoundError(f"fixture world '{name}' missing: run py -3 tools/make_world.py {name}")
 
 
 def prepare(folder: Path, plugins: list[Path], fresh: bool, world_from: Path | None = None) -> None:

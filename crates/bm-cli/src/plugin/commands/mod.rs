@@ -25,7 +25,9 @@ pub fn execute(core: &Core, id: u64, input: &str, sender: &CommandSender) {
 fn run(core: &Core, input: &str, sender: &CommandSender, say: Say) -> i32 {
     let session = core.session();
     let (maps, storages) = match &session {
-        Some(s) => (s.maps.all().iter().map(|m| m.id.clone()).collect(), s.service.config.storages.keys().cloned().collect()),
+        Some(s) => {
+            (s.maps.all().iter().map(|m| m.id.clone()).collect(), s.service.config.storages.keys().cloned().collect())
+        }
         None => (Vec::new(), Vec::new()),
     };
     let Some(m) = parse::parse(input.trim().trim_start_matches('/'), &Ids { maps: &maps, storages: &storages }) else {

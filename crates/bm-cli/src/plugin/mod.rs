@@ -145,8 +145,9 @@ pub fn run(parent_pid: Option<u32>) -> ExitCode {
 fn handshake(rx: &Receiver<Event>, out: &Outbox) -> Option<(Hello, Vec<bm_ipc::WorldInfo>)> {
     let Ok(Event::Frame(frame)) = rx.recv() else { return None };
     let hello = frame.parse::<ShimMsg>();
-    let Ok(ShimMsg::Hello { protocol, platform, mc_version, config_folder, mods_folder, max_memory_mib, worlds, .. }) =
-        hello
+    let Ok(ShimMsg::Hello {
+        protocol, platform, mc_version, config_folder, mods_folder, max_memory_mib, worlds, ..
+    }) = hello
     else {
         eprintln!("bluemap: expected Hello, got {}", frame.kind());
         return None;

@@ -329,8 +329,9 @@ Vertical slice done end to end on Windows: `crates/bm-ipc` (protocol, crate docs
 
 **Verified** by `py -3 tools/e2e_paper.py` on Paper 26.3 build 159 (Java 25) with BlueBorder 1.1.2 (marker addon)
 and BetterStresstestbots (server-side fake players), 31/31 checks:
-- core spawn → `Ready` 2–3 s with a warm data folder (18 s on first start, incl. resource load); idle RSS ~40 MiB
-  on a 3-map spawn-area world; plugin jar 5.5 MiB (windows-x64, core exe 13.3 MiB uncompressed).
+- core spawn → `Ready` 2–3 s with a warm data folder, 4–18 s on a first start (config generation + resource load;
+  this box was heavily loaded); core RSS ~40–48 MiB after rendering a 3-map spawn-area world; plugin jar 5.5 MiB
+  (windows-x64; core exe 13.3 MiB uncompressed).
 - webapp, lowres and hires tiles served from `webserver.conf`; `/bluemap`, `maps`, `force-update`, `reload` from
   the console; a bot appears in `live/players.json`; BlueBorder's set reaches `live/markers.json` and comes back
   after reload and after a killed core is respawned; server stop leaves no core process.
@@ -348,7 +349,8 @@ and BetterStresstestbots (server-side fake players), 31/31 checks:
 - Command tree: one shared `crates/bm-cli/src/plugin/commands.json` (no `--dump-command-tree`); the shim registers
   `bluemap` + a greedy argument and sends the sender's permission nodes, the core gates per usage.
 - Shim compiles against paper-api 1.21.11 for Java 21 (26.x API jars are Java 25 class files) and recompiles
-  BlueMapAPI 2.8.1 from its sources jar for the same reason. It also loads on 1.21.x servers.
+  BlueMapAPI 2.8.1 from its sources jar for the same reason. 1.21.x servers should work too (untested).
+- The core logs one line per finished render task (`Map 'x': N regions, M tiles rendered, …`); upstream is silent.
 - Command output follows upstream's wording and palette but is not component-identical.
 - `reload light` reloads resources too; the rayon pool keeps the first load's thread count until restart; the
   `RenderStart{threads}` count is ignored.
@@ -360,5 +362,5 @@ and BetterStresstestbots (server-side fake players), 31/31 checks:
   scheduler code paths are in place but untested), skin updater (`AssetWrite` of player heads), `tasks.dat`,
   `troubleshoot`/`debug`/`storages <s>` commands, hourly watcher restart (our watchers self-heal), persisting
   `lastFullUpdate` on watcher-driven full updates, bStats id.
-- A fresh world's first render skips chunks the server has not lit yet (upstream too); they render on the next
-  region change or `/bluemap force-update`.
+- A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
+  `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.

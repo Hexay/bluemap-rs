@@ -110,11 +110,7 @@ fn log(level: Level, msg: &str) {
         sink(level, msg);
     } else {
         let line = format!("[{} {}] {msg}", Local::now().format("%H:%M:%S"), level.console());
-        if matches!(level, Level::Error) {
-            eprintln!("{line}")
-        } else {
-            println!("{line}")
-        }
+        if matches!(level, Level::Error) { eprintln!("{line}") } else { println!("{line}") }
     }
     let mut files = FILES.lock().unwrap_or_else(PoisonError::into_inner);
     if files.is_empty() {

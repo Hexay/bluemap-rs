@@ -36,15 +36,21 @@ pub fn spawn(core: Arc<Core>, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<
                     demand = None;
                 }
                 let config = &s.service.config.plugin;
-                let (markers_every, players_every) = (secs(config.write_markers_interval), secs(config.write_players_interval));
+                let (markers_every, players_every) =
+                    (secs(config.write_markers_interval), secs(config.write_players_interval));
 
-                let due = core.settings_due.lock().unwrap_or_else(PoisonError::into_inner).filter(|t| t.elapsed() >= SETTINGS_DEBOUNCE);
+                let due = core
+                    .settings_due
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .filter(|t| t.elapsed() >= SETTINGS_DEBOUNCE);
                 if due.is_some() {
                     *core.settings_due.lock().unwrap_or_else(PoisonError::into_inner) = None;
                     let files = core.web_files.lock().unwrap_or_else(PoisonError::into_inner).clone();
                     s.write_webapp((&files.0, &files.1));
                 }
-                let check = core.limit_check_at.lock().unwrap_or_else(PoisonError::into_inner).filter(|t| *t <= Instant::now());
+                let check =
+                    core.limit_check_at.lock().unwrap_or_else(PoisonError::into_inner).filter(|t| *t <= Instant::now());
                 if check.is_some() {
                     *core.limit_check_at.lock().unwrap_or_else(PoisonError::into_inner) = None;
                     ops::check_render_limit(&core, &s);
@@ -53,7 +59,10 @@ pub fn spawn(core: Arc<Core>, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<
                     continue;
                 }
 
-                let write_due = [next_due(last_save, SAVE_EVERY), next_due(last_markers, markers_every)].into_iter().flatten().min();
+                let write_due = [next_due(last_save, SAVE_EVERY), next_due(last_markers, markers_every)]
+                    .into_iter()
+                    .flatten()
+                    .min();
                 let wanted = marker_demand(&s, write_due);
                 if demand.as_ref() != Some(&wanted) {
                     core.out.send(CoreMsg::MarkerDemand { maps: wanted.clone() });

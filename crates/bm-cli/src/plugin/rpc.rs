@@ -21,7 +21,9 @@ pub fn handle(core: &Core, msg: ShimMsg, body: Vec<u8>) {
         ShimMsg::RenderStart { id, .. } => (id, with_session(core, |s| render(core, s, true))),
         ShimMsg::RenderStop { id } => (id, with_session(core, |s| render(core, s, false))),
         ShimMsg::RenderStatus { id } => (id, with_session(core, status)),
-        ShimMsg::Schedule { id, map, regions, force } => (id, with_session(core, |s| schedule(s, &map, regions, force))),
+        ShimMsg::Schedule { id, map, regions, force } => {
+            (id, with_session(core, |s| schedule(s, &map, regions, force)))
+        }
         ShimMsg::Purge { id, map } => (id, with_session(core, |s| ops::purge(s, &map).map(|()| Value::Null))),
         ShimMsg::SetFrozen { id, map, frozen } => {
             (id, with_session(core, |s| Ok(json!(ops::set_frozen(core, s, &map, frozen)))))
@@ -55,10 +57,9 @@ pub fn handle(core: &Core, msg: ShimMsg, body: Vec<u8>) {
             }
             return;
         }
-        ShimMsg::AssetExists { id, map, name } => (
-            id,
-            with_session(core, |s| Ok(json!(s.service.map_storage(&map)?.item_exists(&ItemKey::asset(&name))?))),
-        ),
+        ShimMsg::AssetExists { id, map, name } => {
+            (id, with_session(core, |s| Ok(json!(s.service.map_storage(&map)?.item_exists(&ItemKey::asset(&name))?))))
+        }
         ShimMsg::AssetDelete { id, map, name } => (
             id,
             with_session(core, |s| {

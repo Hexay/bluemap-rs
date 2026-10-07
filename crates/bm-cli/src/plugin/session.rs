@@ -10,8 +10,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use bm_config::generate::{ServerWorld, suggest_render_thread_count};
 use bm_config::{BlueMapConfig, ConfigOptions, Key};
 use bm_engine::{
-    LoadedMaps, LogLevel, MapContext, MapUpdateService, RenderQueue, RenderTask, ResourceOptions, Service,
-    TaskEvent, TileUpdateStrategy, WatchSettings, run_queue,
+    LoadedMaps, LogLevel, MapContext, MapUpdateService, RenderQueue, RenderTask, ResourceOptions, Service, TaskEvent,
+    TileUpdateStrategy, WatchSettings, run_queue,
 };
 use bm_ipc::{CoreWorld, WorldInfo};
 use bm_web::LiveMap;
@@ -307,6 +307,10 @@ fn log_task_event(event: TaskEvent) {
     match event {
         TaskEvent::Update(_, bm_engine::UpdateEvent::Warning(w)) => log::warn(&w),
         TaskEvent::Finished(task, Err(e)) => log::error(&format!("Failed to update map '{}': {e}", task.map)),
+        TaskEvent::Finished(task, Ok(s)) => log::info(&format!(
+            "Map '{}': {} regions, {} tiles rendered, {} skipped, {} deleted, {} failed",
+            task.map, s.regions, s.tiles_rendered, s.tiles_skipped, s.tiles_deleted, s.tile_errors
+        )),
         _ => {}
     }
 }

@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from paper_server import E2E, Paper, fetch, get, json_get, kill, pid_alive, poll, prepare, rss_mib
+from paper_server import E2E, Paper, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, rss_mib
 from paths import EXE, ROOT, WINDOWS, jdk_dir
 
 PLATFORM = ROOT / "platforms" / "paper"
@@ -76,7 +76,9 @@ def save(name: str, data: bytes) -> None:
 
 def run_ours(jar: Path, fresh: bool) -> Path:
     folder = E2E / "rs"
-    prepare(folder, [jar, fetch("blueborder"), fetch("bots")], fresh)
+    # a world Paper generates itself keeps its spawn chunks unlit on disk for the first sessions, and both BlueMaps
+    # skip unlit chunks; the `context` fixture (vanilla 26.3 server) is lit and small
+    prepare(folder, [jar, fetch("blueborder"), fetch("bots")], fresh, world_from=fixture_world("context"))
     server = Paper(folder)
     try:
         spawned = server.wait_for(r"\[(\d+:\d+:\d+) .*BlueMap core \S+ started", 600, since_start=True)
@@ -104,11 +106,10 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         check("BlueBorder markers in markers.json", markers, str(list(markers or {})))
         save("rs-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
 
-        tile = poll(lambda: get(f"maps/{map_id}/tiles/1/x0/z0.png")[0] == 200, 600, 5)
-        check("map renders (lowres tile 1/x0/z0)", tile)
-        # a fresh world's first render may skip chunks the server hadn't lit yet; force one with the command
         server.command(f"bluemap force-update {map_id}", r"Created new update-task", 120)
         check("/bluemap force-update", True)
+        tile = poll(lambda: get(f"maps/{map_id}/tiles/1/x0/z0.png")[0] == 200, 600, 5)
+        check("map renders (lowres tile 1/x0/z0)", tile)
         # single-digit coordinates need no per-digit folders
         around = [f"maps/{map_id}/tiles/0/x{x}/z{z}.prbm" for x in range(-9, 10) for z in range(-9, 10)]
         hires = poll(lambda: next((p for p in around if get(p)[0] == 200), None), 300, 5)
