@@ -82,6 +82,22 @@ fn blocks_biomes_and_metadata() {
 }
 
 #[test]
+fn column_reads_match_block_and_light() {
+    let f = Fixture::new();
+    for status in ["minecraft:full", "minecraft:features"] {
+        let c = f.parse(&modern_chunk(status)).unwrap();
+        for (x, z) in [(0, 0), (1, 0), (17, 5), (-3, 9)] {
+            let (mut states, mut light) = (Vec::new(), Vec::new());
+            c.column_into(x, z, -100, 300, &mut states, &mut light);
+            for (i, y) in (-100..=300).enumerate() {
+                let (sky, block) = c.light(x, y, z);
+                assert_eq!((states[i], light[i]), (c.block(x, y, z), [sky, block]), "{status} {x},{y},{z}");
+            }
+        }
+    }
+}
+
+#[test]
 fn light_follows_bluemap_fallbacks() {
     let f = Fixture::new();
     let c = f.parse(&modern_chunk("minecraft:full")).unwrap();

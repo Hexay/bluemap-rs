@@ -89,7 +89,10 @@ impl Renderer<'_, '_, '_> {
 
 /// `Math.round(float)`: half up; exact in double for every float that isn't already an integer.
 fn java_round(v: f32) -> i32 {
-    (f64::from(v) + 0.5).floor() as i32
+    // integer floor: `f64::floor` is a libm call without SSE4.1, ~6% of render CPU
+    let d = f64::from(v) + 0.5;
+    let t = d as i64;
+    (t - i64::from((t as f64) > d)).clamp(i32::MIN.into(), i32::MAX.into()) as i32
 }
 
 /// `ResourceModelRenderer.hashToFloat`, in `[0, 1)`.
@@ -107,5 +110,9 @@ mod tests {
         assert_eq!([java_round(-0.5), java_round(0.5), java_round(-1.5), java_round(0.49999997)], [0, 1, -1, 0]);
         assert_eq!(java_round(-4.371139e-8), 0);
         assert_eq!(java_round(f32::NAN), 0);
+        assert_eq!([java_round(-2.5), java_round(-2.6), java_round(1e10), java_round(-1e10)], [-2, -3, i32::MAX, i32::MIN]);
+        for v in [-3.75f32, -1.0, -0.25, 0.0, 0.7, 2.5, 1e-9, -1e-9] {
+            assert_eq!(java_round(v), (f64::from(v) + 0.5).floor() as i32, "{v}");
+        }
     }
 }
