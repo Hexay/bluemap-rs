@@ -1,4 +1,4 @@
-//! The rotation-relative lookups of `ResourceModelRenderer`: neighbours, AO and the uv-lock angle.
+//! The rotation-relative lookups of `ResourceModelRenderer`: AO and the uv-lock angle.
 
 use bm_java::trig;
 use bm_math::VectorM3f;
@@ -15,19 +15,8 @@ impl Renderer<'_, '_, '_> {
         }
     }
 
-    /// `getRotationRelativeBlock`'s offset.
-    pub(super) fn relative(&self, [x, y, z]: [i32; 3]) -> [i32; 3] {
-        if !self.v.variant.transformed {
-            return [x, y, z];
-        }
-        let mut v = VectorM3f::default();
-        v.set_i([x, y, z]);
-        self.make_relative(&mut v);
-        [java_round(v.x), java_round(v.y), java_round(v.z)]
-    }
-
     fn occluding(&self, offset: [i32; 3]) -> bool {
-        let [dx, dy, dz] = self.relative(offset);
+        let [dx, dy, dz] = self.v.relative.get(offset);
         self.block.neighbor(self.ctx, dx, dy, dz).1.props.occluding
     }
 
@@ -87,32 +76,8 @@ impl Renderer<'_, '_, '_> {
     }
 }
 
-/// `Math.round(float)`: half up; exact in double for every float that isn't already an integer.
-fn java_round(v: f32) -> i32 {
-    // integer floor: `f64::floor` is a libm call without SSE4.1, ~6% of render CPU
-    let d = f64::from(v) + 0.5;
-    let t = d as i64;
-    (t - i64::from((t as f64) > d)).clamp(i32::MIN.into(), i32::MAX.into()) as i32
-}
-
 /// `ResourceModelRenderer.hashToFloat`, in `[0, 1)`.
 pub(super) fn hash_to_float(x: i32, z: i32, seed: i64) -> f32 {
     let hash = i64::from(x).wrapping_mul(73428767) ^ i64::from(z).wrapping_mul(4382893) ^ seed.wrapping_mul(457);
     (hash.wrapping_mul(hash.wrapping_add(456149)) & 0x00ff_ffff) as f32 / 16_777_216.0
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rounding_matches_java() {
-        assert_eq!([java_round(-0.5), java_round(0.5), java_round(-1.5), java_round(0.49999997)], [0, 1, -1, 0]);
-        assert_eq!(java_round(-4.371139e-8), 0);
-        assert_eq!(java_round(f32::NAN), 0);
-        assert_eq!([java_round(-2.5), java_round(-2.6), java_round(1e10), java_round(-1e10)], [-2, -3, i32::MAX, i32::MIN]);
-        for v in [-3.75f32, -1.0, -0.25, 0.0, 0.7, 2.5, 1e-9, -1e-9] {
-            assert_eq!(java_round(v), (f64::from(v) + 0.5).floor() as i32, "{v}");
-        }
-    }
 }

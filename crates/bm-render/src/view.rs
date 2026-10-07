@@ -104,6 +104,21 @@ impl Bounds {
         let inside = (dx as u32) < w as u32 && (dy as u32) < h as u32 && (dz as u32) < d as u32;
         inside.then(|| ((dx * d + dz) * h + dy) as usize)
     }
+
+    /// [`Bounds::index`] for positions whose 26 neighbours are inside as well.
+    fn interior_index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
+        let [ox, oy, oz] = self.origin;
+        let [w, h, d] = self.size;
+        let (dx, dy, dz) = (x.wrapping_sub(ox), y.wrapping_sub(oy), z.wrapping_sub(oz));
+        let interior = |p: i32, s: i32| p >= 1 && p < s - 1;
+        (interior(dx, w) && interior(dy, h) && interior(dz, d)).then(|| ((dx * d + dz) * h + dy) as usize)
+    }
+
+    /// The index `(dx, dy, dz)` away from `i`.
+    fn step(&self, i: usize, dx: i32, dy: i32, dz: i32) -> usize {
+        let [_, h, d] = self.size;
+        i.wrapping_add_signed(((dx * d + dz) * h + dy) as isize)
+    }
 }
 
 impl Volume {
@@ -182,6 +197,26 @@ impl<'a> View<'a> {
             Some(i) => self.volume.light[i],
             None => self.masking.read(self.area.chunk_at_block(x, z), x, y, z).1,
         };
+        (sky, block)
+    }
+
+    /// The block's index into the tile's dense copy when every neighbour within one block is in it too, so
+    /// [`View::step`] from it stays in bounds for offsets in `-1..=1`³.
+    pub fn interior_index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
+        self.volume.bounds.interior_index(x, y, z)
+    }
+
+    pub fn step(&self, i: usize, dx: i32, dy: i32, dz: i32) -> usize {
+        self.volume.bounds.step(i, dx, dy, dz)
+    }
+
+    pub fn state_at(&self, i: usize) -> StateId {
+        self.volume.states[i]
+    }
+
+    /// `(sky, block)`.
+    pub fn light_at(&self, i: usize) -> (u8, u8) {
+        let [sky, block] = self.volume.light[i];
         (sky, block)
     }
 
