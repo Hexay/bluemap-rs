@@ -62,6 +62,7 @@ impl HiresRenderer<'_, '_> {
         };
         out.unsorted.clear();
         out.columns.clear();
+        out.columns.reserve(grid.size[0] as usize * grid.size[1] as usize);
         // TODO: entity pass (`EntityRenderPass`); core ships no entity models, so BlueMap's output has none either
         out.truncated = block_pass::render(&ctx, min, max, &mut out.unsorted, &mut out.columns).is_err();
         mesh::sort_by_material(&out.unsorted, &mut out.model);

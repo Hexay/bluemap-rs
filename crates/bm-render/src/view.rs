@@ -145,6 +145,8 @@ impl Volume {
         self.bounds = Bounds::new([x0, y0, z0], [x1, y1, z1]);
         self.states.clear();
         self.light.clear();
+        self.states.reserve(self.bounds.len());
+        self.light.reserve(self.bounds.len());
         let height = (y1 - y0 + 1) as usize;
         for x in x0..=x1 {
             for z in z0..=z1 {
