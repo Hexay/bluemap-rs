@@ -50,6 +50,19 @@ impl<'a> Masking<'a> {
         let (state, (sky, block)) = chunk.map_or((StateId::AIR, (0, 0)), |c| (c.block(x, y, z), c.light(x, y, z)));
         if self.edge(x, y, z) { (StateId::AIR, [self.edge_sky, block]) } else { (state, [sky, block]) }
     }
+
+    /// [`Masking::read`]'s edge rule over a column already read from the chunk, starting at `y0`.
+    fn edge_column(&self, x: i32, z: i32, y0: i32, states: &mut [StateId], light: &mut [[u8; 2]]) {
+        if !self.render_edges || self.mask.is_none() {
+            return;
+        }
+        for (y, (state, l)) in (y0..).zip(states.iter_mut().zip(light)) {
+            if !self.inside(x, y, z) {
+                *state = StateId::AIR;
+                l[0] = self.edge_sky;
+            }
+        }
+    }
 }
 
 /// Per-thread storage for a tile's dense copy, reused across tiles.
@@ -108,14 +121,18 @@ impl Volume {
         self.bounds = Bounds::new([x0, y0, z0], [x1, y1, z1]);
         self.states.clear();
         self.light.clear();
+        let height = (y1 - y0 + 1) as usize;
         for x in x0..=x1 {
             for z in z0..=z1 {
-                let chunk = area.chunk_at_block(x, z);
-                for y in y0..=y1 {
-                    let (state, light) = masking.read(chunk, x, y, z);
-                    self.states.push(state);
-                    self.light.push(light);
+                let start = self.states.len();
+                match area.chunk_at_block(x, z) {
+                    Some(c) => c.column_into(x, z, y0, y1, &mut self.states, &mut self.light),
+                    None => {
+                        self.states.extend(std::iter::repeat_n(StateId::AIR, height));
+                        self.light.extend(std::iter::repeat_n([0, 0], height));
+                    }
                 }
+                masking.edge_column(x, z, y0, &mut self.states[start..], &mut self.light[start..]);
             }
         }
         self.biome_bounds = Bounds::new([min[0] - BLEND, y0, min[1] - BLEND], [max[0] + BLEND, y1, max[1] + BLEND]);
