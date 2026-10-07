@@ -41,6 +41,11 @@ pub struct Args {
     pub watch: bool,
     #[arg(short = 'V', long = "version")]
     pub version: bool,
+    /// bluemap-rs only: convert this storage in place to the `--to` format.
+    #[arg(long = "convert-storage", value_name = "storage-id", requires = "to")]
+    pub convert_storage: Option<String>,
+    #[arg(long = "to", value_name = "format", requires = "convert_storage")]
+    pub to: Option<String>,
 }
 
 impl Args {
@@ -74,6 +79,11 @@ Options:
                                  configuration-files to use
                                  (configurations will be generated here if
                                  they don't exist)
+    --convert-storage <storage-id>
+                                 Converts that storage in place to the
+                                 format given by --to (compat or
+                                 optimized) and updates its config.
+                                 Stop BlueMap first.
  -e,--fix-edges                  Forces rendering the map-edges, instead
                                  of only rendering chunks that have been
                                  modified since the last render
@@ -96,6 +106,7 @@ Options:
                                  rendering.
  -r,--render                     Renders the maps configured in the
                                  'render.conf' file
+    --to <format>                The target format of --convert-storage
  -s,--generate-websettings       Updates the settings.json for the
                                  web-app
  -u,--watch                      Watches for file-changes after rendering

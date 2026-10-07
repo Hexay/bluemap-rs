@@ -60,6 +60,16 @@ impl Service {
         Ok(self.storages.get(&self.config, &map.storage)?.map(id)?)
     }
 
+    /// Converts storage `id` in place between compat and optimized; nothing else may use it meanwhile.
+    pub fn convert_storage(
+        &self,
+        id: &str,
+        to: bm_storage::Format,
+        progress: bm_storage::Progress,
+    ) -> Result<bm_storage::ConvertStats> {
+        self.storages.convert(&self.config, id, to, progress)
+    }
+
     /// Configured map ids passing `filter`, by `sorting` (stable, ties by id).
     pub fn map_ids(&self, filter: impl Fn(&str) -> bool) -> Vec<String> {
         let mut ids: Vec<(&String, i32)> =

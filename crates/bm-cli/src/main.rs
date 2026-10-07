@@ -2,6 +2,7 @@
 //! exit codes (1 configuration/IO error, 2 missing resources).
 
 mod args;
+mod convert;
 mod log;
 mod render;
 mod web;
@@ -97,6 +98,10 @@ fn run(args: &Args) -> Result<ExitCode> {
         mods_folder: args.mods.clone(),
     };
     let service = Service::new(config, options);
+    if let (Some(id), Some(to)) = (&args.convert_storage, &args.to) {
+        convert::convert_storage(&service, &config_folder, id, to)?;
+        return Ok(ExitCode::SUCCESS);
+    }
 
     let webserver = args.webserver.then(|| web::start(&service, args.verbose)).transpose()?;
     let mut ok = true;
