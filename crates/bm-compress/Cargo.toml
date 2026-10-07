@@ -9,6 +9,7 @@ description = "BlueMap storage compressions and Minecraft region chunk compressi
 
 [dependencies]
 flate2.workspace = true
+libdeflater.workspace = true
 lz4_flex.workspace = true
 thiserror.workspace = true
 twox-hash.workspace = true

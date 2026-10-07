@@ -73,6 +73,24 @@ fn corrupt_input_is_an_error() {
 }
 
 #[test]
+fn incompressible_input_outgrows_the_first_output_guess() {
+    let mut x = 0x9E37_79B9_7F4A_7C15u64;
+    let noise: Vec<u8> = (0..200_000)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 32) as u8
+        })
+        .collect();
+    for c in [Compression::Gzip, Compression::Deflate] {
+        let packed = c.compress(&noise).unwrap();
+        assert!(packed.len() > first_output_guess(noise.len()), "{c:?}: the retry path must run");
+        assert_eq!(c.decompress(&packed, LIMIT).unwrap(), noise, "{c:?}");
+    }
+}
+
+#[test]
 fn into_variants_replace_buffer_contents() {
     let mut buf = b"stale".to_vec();
     for c in COMPRESSED {

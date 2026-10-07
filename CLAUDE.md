@@ -12,7 +12,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 
 ## Crates
 
-- `bm-compress` — storage + region chunk compressions (gzip/deflate/zstd/lz4-java)
+- `bm-compress` — storage + region chunk compressions (gzip/deflate/zstd/lz4-java); gzip/zlib encode via libdeflate
+  (C build through `libdeflater`), decode via flate2
 - `bm-format` — tile grid and digit-split paths (more formats land here)
 - `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`,
   ImageIO PNG read/write behind feature `png` — madler zlib via `libz-sys`, since zlib-rs output differs)

@@ -48,6 +48,8 @@ tracing = "0.1"
 clap = { version = "4", features = ["derive"] }
 # zlib-rs: pure-Rust backend, faster than miniz_oxide
 flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+# gzip/zlib encode only (decode stays on flate2: multi-member gzip, output caps); small C build via cc
+libdeflater = "1"
 # lz4-java block framing only needs the raw block API; checked-decode turns malformed input into errors
 lz4_flex = { version = "0.14", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
 png = "0.18"

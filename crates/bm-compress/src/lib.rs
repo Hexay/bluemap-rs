@@ -4,10 +4,11 @@
 
 pub mod lz4_block;
 
+use std::cell::RefCell;
 use std::io::{self, Read, Write};
 
 use flate2::read::{MultiGzDecoder, ZlibDecoder};
-use flate2::write::{GzEncoder, ZlibEncoder};
+use flate2::write::GzEncoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Compression {
@@ -32,9 +33,15 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// One below Java's `Deflater.DEFAULT_COMPRESSION` (6): zlib-rs bytes never match Java's anyway, and 5 halves
-/// hires gzip CPU for +0.5% size (docs/12-perf-profile-rs.md).
-const DEFLATE_LEVEL: u32 = 5;
+/// libdeflate 4 beats zlib-rs 5 on hires tiles both ways: 0.987× Java's bytes vs 0.997×, 35% faster
+/// (docs/12-perf-profile-rs.md). Java's own Deflater bytes are never matched, so compat only pins the format.
+const DEFLATE_LEVEL: i32 = 4;
+
+thread_local! {
+    static DEFLATER: RefCell<libdeflater::Compressor> = RefCell::new(libdeflater::Compressor::new(
+        libdeflater::CompressionLvl::new(DEFLATE_LEVEL).expect("valid libdeflate level"),
+    ));
+}
 /// airlift `ZstdOutputStream`'s level.
 const ZSTD_LEVEL: i32 = 3;
 
@@ -109,20 +116,12 @@ impl Compression {
 
     pub fn compress_into(self, data: &[u8], out: &mut Vec<u8>) -> Result<()> {
         out.clear();
-        let level = flate2::Compression::new(DEFLATE_LEVEL);
         let written = match self {
             Self::None => {
                 out.extend_from_slice(data);
                 Ok(())
             }
-            Self::Gzip => {
-                let mut encoder = GzEncoder::new(&mut *out, level);
-                encoder.write_all(data).and_then(|()| encoder.finish().map(drop))
-            }
-            Self::Deflate => {
-                let mut encoder = ZlibEncoder::new(&mut *out, level);
-                encoder.write_all(data).and_then(|()| encoder.finish().map(drop))
-            }
+            Self::Gzip | Self::Deflate => deflate_into(data, out, self == Self::Deflate),
             Self::Zstd => zstd::stream::copy_encode(data, &mut *out, ZSTD_LEVEL),
             Self::Lz4 => {
                 lz4_block::compress_into(data, out);
@@ -165,6 +164,32 @@ pub fn gzip_with_level(data: &[u8], level: u32) -> Vec<u8> {
 }
 
 /// The last member's ISIZE trailer (size mod 2^32), capped by `limit` and deflate's maximum ratio (~1032:1).
+/// Output space for a first libdeflate attempt; hires tiles shrink ~18×, worse input retries at the full bound.
+fn first_output_guess(len: usize) -> usize {
+    len / 8 + 4096
+}
+
+/// Gzip, or zlib-wrapped deflate when `zlib`, with this thread's libdeflate compressor.
+fn deflate_into(data: &[u8], out: &mut Vec<u8>, zlib: bool) -> io::Result<()> {
+    DEFLATER.with_borrow_mut(|c| {
+        let bound = if zlib { c.zlib_compress_bound(data.len()) } else { c.gzip_compress_bound(data.len()) };
+        // libdeflate needs the whole output up front; sizing to the bound would leave every buffer at input size
+        for size in [bound.min(first_output_guess(data.len())), bound] {
+            out.resize(size, 0);
+            match if zlib { c.zlib_compress(data, out) } else { c.gzip_compress(data, out) } {
+                Ok(n) => {
+                    out.truncate(n);
+                    out.shrink_to(n);
+                    return Ok(());
+                }
+                Err(libdeflater::CompressionError::InsufficientSpace) if size < bound => {}
+                Err(e) => return Err(io::Error::other(e.to_string())),
+            }
+        }
+        unreachable!("the bound always fits")
+    })
+}
+
 fn gzip_size_hint(data: &[u8], limit: usize) -> usize {
     data.last_chunk::<4>()
         .map_or(0, |t| u32::from_le_bytes(*t) as usize)
