@@ -9,6 +9,7 @@
 //! lowres tile is saved once its last contributing region is done.
 
 mod actions;
+mod addons;
 mod convert;
 mod error;
 mod io;
@@ -26,6 +27,7 @@ mod task;
 mod update;
 mod watch;
 
+pub use addons::{JavaAddon, find_java_addons};
 pub use bm_map::renderstate::TileUpdateStrategy;
 pub use error::{Error, Result};
 pub use map::{MapContext, TileListener};
