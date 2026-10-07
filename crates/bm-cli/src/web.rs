@@ -1,31 +1,30 @@
-//! `BlueMapCLI.startWebserver`: webroot + every configured map's storage, served until Ctrl+C.
+//! `BlueMapCLI.startWebserver`: webroot + every configured map's storage, served until shutdown. Maps loaded for
+//! rendering in this run get Java's live routes: `live/markers.json` and, with `sse-enabled`, `live/sse` pushing
+//! `tile` events as tiles are written.
 
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use bm_engine::Service;
+use bm_engine::{MapContext, Service};
 use bm_web::{LiveMap, MapRoute, WebApp, WebOptions, WebServer};
 
 use crate::log;
+use crate::shutdown::Shutdown;
 
-/// The running server; dropping it doesn't stop it, [`Webserver::wait`] blocks until Ctrl+C.
+/// The running server; [`Webserver::wait`] blocks until it stopped after shutdown.
 pub struct Webserver {
     runtime: tokio::runtime::Runtime,
     task: tokio::task::JoinHandle<Result<(), bm_web::WebError>>,
 }
 
-pub fn start(service: &Service, verbose: bool) -> Result<Webserver> {
+/// `loaded`: the maps this run renders; their tile listeners are hooked up to SSE here.
+pub fn start(service: &Service, verbose: bool, loaded: &mut [MapContext], shutdown: &Shutdown) -> Result<Webserver> {
     log::info("Starting webserver ...");
     let config = &service.config.webserver;
     std::fs::create_dir_all(&config.webroot).with_context(|| format!("create {}", config.webroot.display()))?;
     let mut app = WebApp::new(WebOptions::from_config(config, verbose)?)?;
-    for (id, map) in &service.config.maps {
-        // like Java: maps this instance renders get live markers, display-only maps are served from storage
-        let live = map.world.is_some().then(|| {
-            let live = LiveMap::new(config.sse_enabled).with_markers();
-            live.set_markers("{}");
-            Arc::new(live)
-        });
+    for id in service.config.maps.keys() {
+        let live = loaded.iter_mut().find(|m| &m.id == id).map(|map| live_map(map, config.sse_enabled));
         app.add_map(id.clone(), MapRoute { storage: service.map_storage(id)?, live })?;
     }
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build().context("start web runtime")?;
@@ -36,10 +35,19 @@ pub fn start(service: &Service, verbose: bool) -> Result<Webserver> {
             config.port
         )
     })?;
-    let task = runtime.spawn(server.serve(app, async {
-        let _ = tokio::signal::ctrl_c().await;
-    }));
+    let task = runtime.spawn(server.serve(app, shutdown.wait()));
     Ok(Webserver { runtime, task })
+}
+
+/// `MapRequestHandler(map, null, LiveMarkersDataSupplier, sse)`: live markers, no live players (the CLI has none).
+fn live_map(map: &mut MapContext, sse: bool) -> Arc<LiveMap> {
+    let live = Arc::new(LiveMap::new(sse).with_markers());
+    live.set_markers(map.markers_json.clone());
+    if sse {
+        let events = live.clone();
+        map.tile_listener = Some(Arc::new(move |(x, z), lod| events.tile_updated(x, z, lod)));
+    }
+    live
 }
 
 impl Webserver {
