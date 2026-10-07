@@ -12,6 +12,7 @@ mod renderer;
 mod resource;
 mod settings;
 mod states;
+mod tints;
 mod view;
 
 pub use mesh::{CapacityReached, MAX_FACES};

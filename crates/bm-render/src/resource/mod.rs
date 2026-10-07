@@ -133,7 +133,7 @@ impl Renderer<'_, '_, '_> {
         }
 
         let tint = if face.tinted {
-            let t = *self.tint.get_or_insert_with(|| ctx.tint(block.info, block.x, block.y, block.z));
+            let t = *self.tint.get_or_insert_with(|| ctx.tint(block.id, block.info, block.x, block.y, block.z));
             [t.r, t.g, t.b]
         } else {
             [1.0; 3]

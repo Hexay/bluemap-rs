@@ -10,7 +10,7 @@ use serde_json::Value;
 use super::tint::{self, premultiplied_argb};
 use super::{ColorMap, ColorMaps, ConfigError, LoadFailure, StateMapping, StateMatcher, namespace_files};
 use crate::ResourcePath;
-use crate::datapack::BiomeTable;
+use crate::datapack::{Biome, BiomeTable, GrassColorModifier};
 use crate::json;
 
 const WHITE: u32 = 0xFFFF_FFFF;
@@ -150,6 +150,21 @@ impl BlockColors {
     /// The first mapping that fits `state`, else white. Worth caching per state id.
     pub fn tint(&self, state: &BlockState) -> &Tint {
         self.mappings.get(state).unwrap_or(&DEFAULT_TINT)
+    }
+
+    /// What [`BlockColors::color`] returns wherever all 75 blend samples lie in `biome`, when that doesn't depend on
+    /// the position: `None` for tints that aren't blended and for swamp grass (noise per sample).
+    pub fn uniform_blend(&self, state: &BlockState, biome: &Biome) -> Option<Color> {
+        let sample = match self.tint(state) {
+            Tint::Fixed(_) | Tint::ColorMap(_) | Tint::Redstone => return None,
+            Tint::Grass if biome.grass_color_modifier == GrassColorModifier::Swamp => return None,
+            Tint::Foliage => tint::foliage(biome, self.foliage.as_deref()),
+            Tint::DryFoliage => tint::dry_foliage(biome, self.dry_foliage.as_deref()),
+            // the swamp modifier is the only one reading the position
+            Tint::Grass => tint::grass(biome, self.grass.as_deref(), 0, 0),
+            Tint::Water => tint::water(biome),
+        };
+        Some(tint::blend(0, 0, 0, |_, _, _| sample))
     }
 
     /// The colour of `state` at block (x, y, z). `biome_at` returns the biome at any block position; the biome

@@ -20,9 +20,14 @@ pub(crate) struct Ctx<'r, 'a> {
 }
 
 impl<'r, 'a> Ctx<'r, 'a> {
-    /// `BlockColorCalculator.getBlockColor` for `state` at the position.
-    pub fn tint(&self, state: &StateInfo, x: i32, y: i32, z: i32) -> Color {
-        self.pack.block_colors.color(&state.state, (x, y, z), self.biomes, |x, y, z| self.view.biome(x, y, z))
+    /// `BlockColorCalculator.getBlockColor` for `state` (`id`) at the position.
+    pub fn tint(&self, id: StateId, state: &StateInfo, x: i32, y: i32, z: i32) -> Color {
+        let colors = &self.pack.block_colors;
+        let uniform = |biome| colors.uniform_blend(&state.state, self.biomes.get(biome));
+        let full = || colors.color(&state.state, (x, y, z), self.biomes, |x, y, z| self.view.biome(x, y, z));
+        let tint = self.view.uniform_tint(id, (x, y, z), uniform).unwrap_or_else(full);
+        debug_assert_eq!(tint, full());
+        tint
     }
 }
 

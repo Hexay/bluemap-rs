@@ -6,6 +6,7 @@ use bm_format::prbm::TileModel;
 use bm_java::trig::RAD_TO_DEG;
 use bm_math::{Color, MatrixM3f, VectorM2f};
 use bm_resources::model::Direction;
+use bm_world::StateId;
 
 use crate::context::{Block, Ctx};
 use crate::mesh::{CapacityReached, Face, MeshExt};
@@ -25,8 +26,8 @@ pub(crate) fn render(
         return Ok(());
     }
     // waterlogged blocks render as plain water
-    let liquid = if block.info.renders_water() { ctx.states.get(ctx.states.water) } else { block.info };
-    Liquid { ctx, block, v, liquid }.build(out, color)
+    let liquid_id = if block.info.renders_water() { ctx.states.water } else { block.id };
+    Liquid { ctx, block, v, liquid: ctx.states.get(liquid_id), liquid_id }.build(out, color)
 }
 
 struct Liquid<'x, 'r, 'a> {
@@ -34,6 +35,7 @@ struct Liquid<'x, 'r, 'a> {
     block: &'x Block<'r, 'a>,
     v: &'x VariantInfo<'a>,
     liquid: &'x StateInfo<'a>,
+    liquid_id: StateId,
 }
 
 impl Liquid<'_, '_, '_> {
@@ -93,7 +95,7 @@ impl Liquid<'_, '_, '_> {
     }
 
     fn tint<'c>(&self, cell: &'c OnceCell<Color>) -> &'c Color {
-        cell.get_or_init(|| self.ctx.tint(self.liquid, self.block.x, self.block.y, self.block.z))
+        cell.get_or_init(|| self.ctx.tint(self.liquid_id, self.liquid, self.block.x, self.block.y, self.block.z))
     }
 
     fn same_liquid(&self, other: &StateInfo) -> bool {
