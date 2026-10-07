@@ -57,6 +57,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 ## Gotchas
 
 - `work/downloads` is a junction to `bluemap_reverse/work/downloads` (shared JDKs/jars); `work/` is git-ignored.
+  Before deleting a worktree or `work/` dir, unlink junctions with `cmd /c rmdir <link>` — a recursive delete
+  (`git worktree remove --force`, `rm -rf`) follows them and wipes the shared downloads.
 - BlueMap configs use paths relative to the working directory: run `bluemap`/Java with cwd = the folder holding
   `config/` (fixtures: `work/bluemap/<fx>`).
 - BlueMap renders unlit chunks dark/skips them: worlds written without light need `render_serve.py --relight`.
