@@ -26,6 +26,7 @@ tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+zip.workspace = true
 
 [build-dependencies]
 # entries are stored uncompressed, so the build script needs no deflate backend
