@@ -19,12 +19,14 @@ mod app;
 mod content_type;
 mod encoding;
 mod error;
+mod http_date;
 mod javafmt;
 mod live;
 mod map_handler;
 mod paths;
 mod response;
 mod server;
+mod static_cache;
 mod static_files;
 mod webapp;
 

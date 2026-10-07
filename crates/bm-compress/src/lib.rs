@@ -154,6 +154,13 @@ impl Compression {
     }
 }
 
+/// Gzip at a chosen level (0–9), e.g. 9 for content compressed once and served many times.
+pub fn gzip_with_level(data: &[u8], level: u32) -> Vec<u8> {
+    let mut encoder = GzEncoder::new(Vec::with_capacity(data.len() / 3), flate2::Compression::new(level));
+    encoder.write_all(data).expect("writing to a Vec cannot fail");
+    encoder.finish().expect("writing to a Vec cannot fail")
+}
+
 fn read_capped(reader: impl Read, limit: usize, out: &mut Vec<u8>, c: Compression) -> Result<()> {
     reader.take(limit as u64 + 1).read_to_end(out).map_err(|e| Error::Corrupt(c, e))?;
     if out.len() > limit {

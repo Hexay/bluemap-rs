@@ -5,7 +5,7 @@ use crate::encoding::{Accepted, Encoded, encode};
 use crate::javafmt::{Arg, JavaFormat};
 use crate::map_handler::parse_tile;
 use crate::paths::{Resolved, java_path_hash, java_query_string, resolve};
-use crate::static_files::java_http_date;
+use crate::http_date::java_http_date;
 use crate::{content_type, java_host_address};
 
 #[test]

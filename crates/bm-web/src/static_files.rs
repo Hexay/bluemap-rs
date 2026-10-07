@@ -1,33 +1,37 @@
-//! `FileRequestHandler`: the webroot, with the bundled webapp behind it (files on disk win).
+//! `FileRequestHandler`: the webroot, with the bundled webapp behind it (files on disk win). Lookups and bodies
+//! come from [`StaticCache`]; compressible files go out gzipped to clients that accept it (Java never compresses).
 
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::Arc;
 
 use axum::body::Body;
-use chrono::{DateTime, Utc};
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION};
+use http::header::{
+    CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION,
+    VARY,
+};
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::io::ReaderStream;
 
 use crate::content_type;
+use crate::encoding::Accepted;
+use crate::http_date::parse_http_date;
 use crate::paths::{Resolved, java_path_hash, join, resolve, unnormalized};
 use crate::response::{empty, header_static};
-use crate::webapp::{embedded_file, embedded_is_dir};
+use crate::static_cache::{Content, FileEntry, StaticCache};
+
+/// Appended to the Java ETag of a gzipped body: a strong tag must differ per representation.
+const GZIP_TAG: &str = "-gzip";
 
 pub(crate) struct StaticFiles {
     /// Normalized like Java's `webRoot.normalize()`: the ETag hashes this path's string form.
     root: PathBuf,
-    embedded: bool,
-}
-
-enum Source {
-    Disk(tokio::fs::File, u64),
-    Embedded(bytes::Bytes),
+    cache: StaticCache,
 }
 
 impl StaticFiles {
     pub fn new(root: &Path, embedded: bool) -> Self {
-        Self { root: root.components().collect(), embedded }
+        let root: PathBuf = root.components().collect();
+        Self { cache: StaticCache::new(&root, embedded), root }
     }
 
     /// `route_path` is the router's path (leading `/` stripped, `/` for the root); `query` is Java's re-encoded one.
@@ -42,102 +46,103 @@ impl StaticFiles {
             Resolved::Outside => return empty(StatusCode::FORBIDDEN),
             Resolved::Invalid => return empty(StatusCode::NOT_FOUND),
         };
-        if !route_path.ends_with('/') && self.is_dir(&rel).await {
-            let mut res = empty(StatusCode::SEE_OTHER);
-            let q = if query.is_empty() { String::new() } else { format!("?{query}") };
-            if let Ok(loc) = HeaderValue::from_str(&format!("/{path}/{q}")) {
-                res.headers_mut().insert(LOCATION, loc);
-            }
-            return res;
+        let node = self.cache.lookup(&rel).await;
+        if !route_path.ends_with('/') && node.is_dir {
+            return redirect(path, query);
         }
         let with_index = |p: &str| if p.is_empty() { "index.html".to_owned() } else { format!("{p}/index.html") };
         // the ETag hashes the path as requested, before normalization, like Java
         let java_rel = unnormalized(path);
-        let mut found = None;
-        for (candidate, java_path) in [(rel.clone(), java_rel.clone()), (with_index(&rel), with_index(&java_rel))] {
-            if let Some(f) = self.open(&candidate).await {
-                found = Some((candidate, java_path, f));
-                break;
+        let (rel, java_path, file) = match node.file {
+            Some(file) => (rel, java_rel, file),
+            None => {
+                let index = with_index(&rel);
+                match self.cache.lookup(&index).await.file {
+                    Some(file) => (index, with_index(&java_rel), file),
+                    None => return empty(StatusCode::NOT_FOUND),
+                }
             }
-        }
-        let Some((rel, java_path, (source, mtime_ms))) = found else { return empty(StatusCode::NOT_FOUND) };
+        };
         if rel.ends_with(".php") {
             return empty(StatusCode::FORBIDDEN);
         }
-        let size = match &source {
-            Source::Disk(_, len) => *len,
-            Source::Embedded(data) => data.len() as u64,
-        };
-        let etag = self.etag(&java_path, size, mtime_ms);
-        if not_modified(headers, mtime_ms, &etag) {
+        let etag = format!("{:x}{:x}{:x}", file.len, java_path_hash(&join(&self.root, &java_path)), file.mtime_ms);
+        if not_modified(headers, file.mtime_ms, &etag) {
             return empty(StatusCode::NOT_MODIFIED);
         }
-        let mut res = match source {
-            Source::Disk(file, len) => {
-                let mut res = Response::new(Body::from_stream(ReaderStream::with_capacity(file, 64 * 1024)));
-                res.headers_mut().insert(CONTENT_LENGTH, len.into());
-                res
+        let name = rel.rsplit('/').next().unwrap_or(&rel);
+        let content_type = content_type::static_file(name);
+        let gzip = match compressible(content_type) && Accepted::from_headers(headers).accepts("gzip") {
+            true => gzipped(&file).await,
+            false => None,
+        };
+        let (mut res, etag) = match gzip {
+            Some(gz) => {
+                let mut res = Response::new(Body::from(gz));
+                header_static(&mut res, CONTENT_ENCODING, "gzip");
+                header_static(&mut res, VARY, "Accept-Encoding");
+                (res, etag + GZIP_TAG)
             }
-            Source::Embedded(data) => Response::new(Body::from(data)),
+            None => match identity_body(&file).await {
+                Some(res) => (res, etag),
+                None => return empty(StatusCode::NOT_FOUND),
+            },
         };
         let h = res.headers_mut();
         if let Ok(v) = HeaderValue::from_str(&etag) {
             h.insert(ETAG, v);
         }
-        if mtime_ms > 0
-            && let Ok(v) = HeaderValue::from_str(&java_http_date(mtime_ms))
-        {
-            h.insert(LAST_MODIFIED, v);
+        if let Some(lm) = &file.last_modified {
+            h.insert(LAST_MODIFIED, lm.clone());
         }
-        let name = rel.rsplit('/').next().unwrap_or(&rel);
-        header_static(&mut res, CONTENT_TYPE, content_type::static_file(name));
+        header_static(&mut res, CONTENT_TYPE, content_type);
         res
-    }
-
-    async fn is_dir(&self, rel: &str) -> bool {
-        tokio::fs::metadata(join(&self.root, rel)).await.is_ok_and(|m| m.is_dir())
-            || (self.embedded && embedded_is_dir(rel))
-    }
-
-    async fn open(&self, rel: &str) -> Option<(Source, i64)> {
-        let path = join(&self.root, rel);
-        if let Ok(meta) = tokio::fs::metadata(&path).await {
-            if meta.is_dir() {
-                return None;
-            }
-            let mtime =
-                meta.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis());
-            let file = tokio::fs::File::open(&path).await.ok()?;
-            return Some((Source::Disk(file, meta.len()), i64::try_from(mtime).unwrap_or(0)));
-        }
-        let f = self.embedded.then(|| embedded_file(rel)).flatten()?;
-        Some((Source::Embedded(f.data), f.last_modified_ms))
-    }
-
-    /// Java's (unquoted) `hex(size) + hex(path.hashCode()) + hex(lastModified)`.
-    fn etag(&self, rel: &str, size: u64, mtime_ms: i64) -> String {
-        format!("{size:x}{:x}{mtime_ms:x}", java_path_hash(&join(&self.root, rel)))
     }
 }
 
-/// `If-Modified-Since` (1 s slack) is checked first, then an exact `If-None-Match`; also accepts the tag quoted.
+fn redirect(path: &str, query: &str) -> Response<Body> {
+    let mut res = empty(StatusCode::SEE_OTHER);
+    let q = if query.is_empty() { String::new() } else { format!("?{query}") };
+    if let Ok(loc) = HeaderValue::from_str(&format!("/{path}/{q}")) {
+        res.headers_mut().insert(LOCATION, loc);
+    }
+    res
+}
+
+fn compressible(content_type: &str) -> bool {
+    !matches!(content_type, "image/png" | "image/jpeg")
+}
+
+async fn gzipped(file: &Arc<FileEntry>) -> Option<bytes::Bytes> {
+    if let Some(ready) = file.gzip_ready() {
+        return ready;
+    }
+    let file = file.clone();
+    tokio::task::spawn_blocking(move || file.gzip()).await.ok().flatten()
+}
+
+/// `None` when a streamed file vanished.
+async fn identity_body(file: &FileEntry) -> Option<Response<Body>> {
+    match &file.content {
+        Content::Memory(data) => Some(Response::new(Body::from(data.clone()))),
+        Content::Disk(path) => {
+            let f = tokio::fs::File::open(path).await.ok()?;
+            let mut res = Response::new(Body::from_stream(ReaderStream::with_capacity(f, 64 * 1024)));
+            res.headers_mut().insert(CONTENT_LENGTH, file.len.into());
+            Some(res)
+        }
+    }
+}
+
+/// `If-Modified-Since` (1 s slack) is checked first, then an exact `If-None-Match`; also accepts the tag quoted
+/// or with our gzip suffix.
 fn not_modified(headers: &HeaderMap, mtime_ms: i64, etag: &str) -> bool {
     let since = headers.get(IF_MODIFIED_SINCE).and_then(|v| v.to_str().ok()).and_then(parse_http_date);
     if since.is_some_and(|since| since + 1000 >= mtime_ms) {
         return true;
     }
-    headers
-        .get(IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v == etag || v.split(',').any(|t| t.trim().trim_start_matches("W/").trim_matches('"') == etag))
-}
-
-/// `DateTimeFormatter.RFC_1123_DATE_TIME`: the day of month is not zero-padded (`Tue, 6 Oct 2026 …`).
-pub(crate) fn java_http_date(ms: i64) -> String {
-    DateTime::<Utc>::from_timestamp_millis(ms)
-        .map_or_else(String::new, |t| t.format("%a, %-d %b %Y %H:%M:%S GMT").to_string())
-}
-
-fn parse_http_date(s: &str) -> Option<i64> {
-    DateTime::parse_from_rfc2822(s.trim()).ok().map(|t| t.timestamp_millis())
+    let matches = |t: &str| t == etag || t.strip_suffix(GZIP_TAG) == Some(etag);
+    headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok()).is_some_and(|v| {
+        v == etag || v.split(',').any(|t| matches(t.trim().trim_start_matches("W/").trim_matches('"')))
+    })
 }
