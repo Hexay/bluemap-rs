@@ -2,6 +2,7 @@
 
 use super::CompactError;
 use super::bytes::{Reader, put_planes, stream};
+use super::view::QV;
 
 /// Grid exponents a tile may use; the one with the fewest escapes wins (ties: the coarser).
 const GRIDS: [u8; 3] = [4, 5, 8];
@@ -17,41 +18,44 @@ fn quantize(bits: u32, g: u8) -> (i16, bool) {
     (q, grid_value(q, g).to_bits() == bits)
 }
 
-pub(super) fn pick_grid(values: &[u32]) -> u8 {
-    let escapes = |g: u8| values.iter().filter(|&&b| !quantize(b, g).1).count();
-    GRIDS.into_iter().min_by_key(|&g| escapes(g)).unwrap_or(GRIDS[0])
-}
-
-/// Writes the residual stream and the escape stream for `values` (f32 bits, `[quad][4 vertices][k]`).
-pub(super) fn encode(body: &mut Vec<u8>, values: &[u32], k: usize, g: u8, q: &mut Vec<i16>) {
-    q.clear();
-    let mut escapes = Vec::new();
-    for (i, &bits) in values.iter().enumerate() {
-        let (v, exact) = quantize(bits, g);
-        q.push(v);
-        if !exact {
-            escapes.push((i as u32, bits.wrapping_sub(grid_value(v, g).to_bits())));
+/// Calls `f(quad, vertex, component, bits)` for the stored values of a PRBM f32 attribute with `K` components, in
+/// `[quad][4 vertices QV][K]` order.
+#[allow(clippy::chunks_exact_to_as_chunks)] // `as_chunks::<{ 24 * K }>` needs generic_const_exprs
+fn for_each_stored<const K: usize>(attr: &[u8], mut f: impl FnMut(usize, usize, usize, u32)) {
+    for (q, quad) in attr.chunks_exact(24 * K).enumerate() {
+        for (vert, prbm) in QV.into_iter().enumerate() {
+            let values = quad[4 * K * prbm..4 * K * (prbm + 1)].as_chunks::<4>().0;
+            values.iter().enumerate().for_each(|(c, &b)| f(q, vert, c, u32::from_le_bytes(b)));
         }
     }
+}
+
+pub(super) fn pick_grid<const K: usize>(attr: &[u8]) -> u8 {
+    let mut escapes = [0usize; GRIDS.len()];
+    for_each_stored::<K>(attr, |_, _, _, bits| {
+        for (n, g) in escapes.iter_mut().zip(GRIDS) {
+            *n += usize::from(!quantize(bits, g).1);
+        }
+    });
+    GRIDS.into_iter().zip(escapes).min_by_key(|&(_, n)| n).map_or(GRIDS[0], |(g, _)| g)
+}
+
+/// Writes the residual stream and the escape stream for the `K`-component f32 attribute `attr` of a quad-shaped PRBM.
+pub(super) fn encode<const K: usize>(body: &mut Vec<u8>, attr: &[u8], g: u8) {
+    let mut escapes = Vec::new();
     stream(body, |out| {
         let mut prev = [0i16; 3];
-        for quad in q.chunks_exact(4 * k) {
-            let v = |vert: usize, c: usize| quad[vert * k + c];
-            for (c, p) in prev.iter_mut().enumerate().take(k) {
-                out.extend(v(0, c).wrapping_sub(*p).to_le_bytes());
-                *p = v(0, c);
+        let mut quad = [[0i16; 3]; 4];
+        for_each_stored::<K>(attr, |q, vert, c, bits| {
+            let (v, exact) = quantize(bits, g);
+            if !exact {
+                escapes.push((((4 * q + vert) * K + c) as u32, bits.wrapping_sub(grid_value(v, g).to_bits())));
             }
-            for c in 0..k {
-                out.extend(v(1, c).wrapping_sub(v(0, c)).to_le_bytes());
+            quad[vert][c] = v;
+            if vert == 3 && c == K - 1 {
+                put_residuals(out, &quad, &mut prev, K);
             }
-            for c in 0..k {
-                out.extend(v(2, c).wrapping_sub(v(1, c)).to_le_bytes());
-            }
-            for c in 0..k {
-                let predicted = v(0, c).wrapping_add(v(2, c)).wrapping_sub(v(1, c));
-                out.extend(v(3, c).wrapping_sub(predicted).to_le_bytes());
-            }
-        }
+        });
     });
     stream(body, |out| {
         out.extend((escapes.len() as u32).to_le_bytes());
@@ -64,6 +68,15 @@ pub(super) fn encode(body: &mut Vec<u8>, values: &[u32], k: usize, g: u8, q: &mu
         put_planes(out, gaps);
         put_planes(out, escapes.iter().map(|&(_, r)| r));
     });
+}
+
+/// One quad's 24-byte (k = 3) or 16-byte (k = 2) residual record.
+fn put_residuals(out: &mut Vec<u8>, v: &[[i16; 3]; 4], prev: &mut [i16; 3], k: usize) {
+    let parallelogram: [i16; 3] = std::array::from_fn(|c| v[0][c].wrapping_add(v[2][c]).wrapping_sub(v[1][c]));
+    for (value, base) in [(&v[0], &*prev), (&v[1], &v[0]), (&v[2], &v[1]), (&v[3], &parallelogram)] {
+        value[..k].iter().zip(base).for_each(|(x, y)| out.extend(x.wrapping_sub(*y).to_le_bytes()));
+    }
+    *prev = v[0];
 }
 
 /// Inverse of [`encode`]: `quads × 4 × k` f32 bit patterns into `values`.
@@ -119,8 +132,14 @@ mod tests {
         assert_eq!(quantize(1e9f32.to_bits(), 4), (32767, false));
         let floats = [0.0, 1.0, 1.0, 0.05, 2.0, -0.0, 3.0, f32::INFINITY, 0.5, 1e9, -7.25, 0.1];
         let bits: Vec<u32> = floats.iter().map(|f: &f32| f.to_bits()).collect();
+        // PRBM vertices 0,1,2,5 hold the quad; 3 and 4 are never read
+        let mut attr = vec![0xAB; 6 * 12];
+        for (i, b) in bits.iter().enumerate() {
+            let at = 4 * (3 * QV[i / 3] + i % 3);
+            attr[at..at + 4].copy_from_slice(&b.to_le_bytes());
+        }
         let mut body = Vec::new();
-        encode(&mut body, &bits, 3, 4, &mut Vec::new());
+        encode::<3>(&mut body, &attr, 4);
         let mut out = Vec::new();
         decode(&mut Reader::new(&body), 1, 3, 4, &mut out).unwrap();
         assert_eq!(out, bits);
