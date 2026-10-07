@@ -79,6 +79,11 @@ fn java_path_cmp(a: &Path, b: &Path) -> Ordering {
 pub struct OpenedRoots(FxHashMap<PathBuf, Option<Pack>>);
 
 impl OpenedRoots {
+    /// Uses `pack` for the root at `path`, e.g. one opened from bytes already in memory.
+    pub fn insert(&mut self, path: PathBuf, pack: Pack) {
+        self.0.insert(path, Some(pack));
+    }
+
     fn open(&mut self, path: &Path) -> Option<Pack> {
         self.0.entry(path.to_owned()).or_insert_with(|| Pack::open(path).ok()).clone()
     }
