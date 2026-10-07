@@ -57,24 +57,26 @@ pub struct VariantInfo<'a> {
 }
 
 pub struct SetInfo<'a> {
-    set: &'a VariantSet,
     pub variants: Vec<VariantInfo<'a>>,
+    /// The variants' weights, contiguous for the pick loop.
+    weights: Box<[f64]>,
+    total_weight: f64,
+    /// One variant the pick always takes: a finite non-negative weight wins the loop's first step.
+    only: bool,
 }
 
 impl SetInfo<'_> {
     /// `VariantSet.pick` as an index.
     pub fn pick(&self, x: i32, y: i32, z: i32) -> Option<&VariantInfo<'_>> {
-        if let [only] = &*self.variants
-            && only.variant.weight >= 0.0
-            && only.variant.weight.is_finite()
-        {
-            return Some(only);
+        if self.only {
+            return self.variants.first();
         }
-        let mut selection = f64::from(hash_to_float(x, y, z)) * self.set.total_weight();
-        self.variants.iter().find(|v| {
-            selection -= v.variant.weight;
+        let mut selection = f64::from(hash_to_float(x, y, z)) * self.total_weight;
+        let i = self.weights.iter().position(|w| {
+            selection -= w;
             selection <= 0.0
-        })
+        })?;
+        Some(&self.variants[i])
     }
 }
 
@@ -85,20 +87,24 @@ pub struct StateInfo<'a> {
     pub liquid_level: i32,
     /// The matching sets in `forEach` order; empty when there is no blockstate file.
     pub sets: Vec<SetInfo<'a>>,
+    /// Copies of the `state` bits read per block, so they don't chase the `Arc`.
+    air: bool,
+    water: bool,
+    renders_water: bool,
 }
 
 impl StateInfo<'_> {
     pub fn is_air(&self) -> bool {
-        self.state.is_air
+        self.air
     }
 
     pub fn is_water(&self) -> bool {
-        self.state.is_water
+        self.water
     }
 
     /// Rendered with an extra water model.
     pub fn renders_water(&self) -> bool {
-        self.state.waterlogged || self.props.always_waterlogged
+        self.renders_water
     }
 }
 
@@ -192,11 +198,26 @@ impl<'a> StateCache<'a> {
             let parts = def.multipart.iter().flat_map(|m| &m.parts);
             sets.extend(parts.filter(|p| p.condition.matches(&state)).map(|s| self.set_info(s)));
         }
-        StateInfo { props: pack.block_properties(&state).into(), liquid_level: liquid_level(&state), sets, state }
+        let props: Props = pack.block_properties(&state).into();
+        StateInfo {
+            air: state.is_air,
+            water: state.is_water,
+            renders_water: state.waterlogged || props.always_waterlogged,
+            props,
+            liquid_level: liquid_level(&state),
+            sets,
+            state,
+        }
     }
 
     fn set_info(&self, set: &'a VariantSet) -> SetInfo<'a> {
-        SetInfo { set, variants: set.variants.iter().map(|v| self.variant_info(v)).collect() }
+        let weights: Box<[f64]> = set.variants.iter().map(|v| v.weight).collect();
+        SetInfo {
+            variants: set.variants.iter().map(|v| self.variant_info(v)).collect(),
+            only: matches!(*weights, [w] if w >= 0.0 && w.is_finite()),
+            weights,
+            total_weight: set.total_weight(),
+        }
     }
 
     fn variant_info(&self, variant: &'a Variant) -> VariantInfo<'a> {
