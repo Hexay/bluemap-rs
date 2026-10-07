@@ -1,5 +1,5 @@
 //! The wire protocol between a server-plugin shim (JVM) and the `bluemap` core process (docs/13 §4). This
-//! docstring is the canonical spec; the Java side (`platforms/paper`) mirrors it.
+//! docstring is the canonical spec; the Java side (`platforms/common`) mirrors it.
 //!
 //! # Transport
 //!
