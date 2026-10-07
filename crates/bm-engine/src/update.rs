@@ -1,6 +1,8 @@
-//! A full map update (`MapUpdatePreparationTask` → `MapUpdateTask` of `WorldRegionUpdateTask`s): regions one after
-//! another, each region's tiles in parallel; render state and lowres are persisted off the render threads.
+//! A map update (`MapUpdatePreparationTask` → `MapUpdateTask` of `WorldRegionUpdateTask`s, or just some regions'
+//! tasks): regions one after another, each region's tiles in parallel; render state and lowres are persisted off
+//! the render threads.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bm_map::renderstate::{
@@ -18,6 +20,7 @@ use crate::persist::{LowresSettings, Persister};
 use crate::plan::{Plan, REGION_GRID};
 use crate::render::{Outcome, RegionRender};
 use crate::resources::Resources;
+use crate::task::Regions;
 
 /// Render state is saved at least this often during an update, so an interrupted render resumes close to where it
 /// stopped.
@@ -33,6 +36,16 @@ pub struct UpdateStats {
     pub tiles_deleted: usize,
     pub tile_errors: usize,
     pub lowres_saves: usize,
+    /// Stopped early by [`UpdateJob::cancel`]; finished regions are saved.
+    pub cancelled: bool,
+}
+
+/// What a map update does: which regions, how forcefully, and a flag that stops it after the current region.
+#[derive(Clone, Copy)]
+pub struct UpdateJob<'a> {
+    pub strategy: TileUpdateStrategy,
+    pub regions: &'a Regions,
+    pub cancel: &'a AtomicBool,
 }
 
 pub enum UpdateEvent<'a> {
@@ -59,17 +72,17 @@ impl<S: CellIo> States<S> {
     }
 }
 
-/// Updates every region of the map that `strategy` or changed chunks call for.
+/// Updates every region of `job` that its strategy or changed chunks call for.
 pub fn update_map(
     ctx: &MapContext,
     resources: &Resources,
-    strategy: TileUpdateStrategy,
+    job: UpdateJob,
     on_event: &mut dyn FnMut(UpdateEvent),
 ) -> Result<UpdateStats> {
     let c = &ctx.config;
     let lowres = LowresSettings { tile_size: c.lowres_tile_size, lod_count: c.lod_count.max(0) as u32, lod_factor: c.lod_factor };
-    let persister = Persister::start(ctx.storage.clone(), lowres)?;
-    let result = run(ctx, resources, strategy, &persister, on_event);
+    let persister = Persister::start(ctx.storage.clone(), lowres, ctx.tile_listener.clone())?;
+    let result = run(ctx, resources, job, &persister, on_event);
     let persisted = persister.finish();
     let mut stats = result?;
     stats.lowres_saves = persisted?.lowres_saves;
@@ -79,7 +92,7 @@ pub fn update_map(
 fn run(
     ctx: &MapContext,
     resources: &Resources,
-    strategy: TileUpdateStrategy,
+    job: UpdateJob,
     persister: &Persister,
     on_event: &mut dyn FnMut(UpdateEvent),
 ) -> Result<UpdateStats> {
@@ -88,18 +101,22 @@ fn run(
         States { tiles: MapTileState::new(cells()), chunks: MapChunkState::new(cells()), regions: MapRegionState::new(cells()) };
     let mut stats = UpdateStats::default();
 
-    let Some(mut plan) = plan(ctx, &mut states.regions, on_event)? else { return Ok(stats) };
+    let Some(mut plan) = plan(ctx, job.regions, &mut states.regions, on_event)? else { return Ok(stats) };
     stats.regions = plan.regions.len();
     let mut cache = StateCache::new(&resources.pack, &ctx.gallery, &resources.states);
     let mut last_save = Instant::now();
     for region in plan.regions.clone() {
+        if job.cancel.load(Ordering::Relaxed) {
+            stats.cancelled = true;
+            break;
+        }
         let headers = Headers::load(&ctx.world, &plan, region);
         if headers.region(region).is_none() {
             // like a cancelled region task: no tiles, no render state written
             on_event(UpdateEvent::Warning(format!("Failed to load chunks for region {region:?}")));
             continue;
         }
-        let jobs = tile_jobs(ctx, &plan, region, &headers, &mut states.tiles, &mut states.chunks, strategy);
+        let jobs = tile_jobs(ctx, &plan, region, &headers, &mut states.tiles, &mut states.chunks, job.strategy);
         if !jobs.is_empty() {
             let area = load_area(ctx, &jobs);
             cache.update(&resources.states);
@@ -134,15 +151,22 @@ fn run(
     Ok(stats)
 }
 
-/// The planned regions, or `None` (with a warning) when the world has none: then nothing is touched, so a
-/// misconfigured world never wipes a map.
+/// The planned regions, or `None` when there are none; for a full update that is warned about and nothing is
+/// touched, so a misconfigured world never wipes a map.
 fn plan<S: CellIo>(
     ctx: &MapContext,
+    only: &Regions,
     region_state: &mut MapRegionState<S>,
     on_event: &mut dyn FnMut(UpdateEvent),
 ) -> Result<Option<Plan>> {
-    let mut regions: FxHashSet<(i32, i32)> =
-        ctx.world.regions()?.into_iter().filter(|&r| ctx.mask.is_cell_inside(&REGION_GRID, r, true)).collect();
+    let inside = |r: &(i32, i32)| ctx.mask.is_cell_inside(&REGION_GRID, *r, true);
+    let mut regions: FxHashSet<(i32, i32)> = match only {
+        Regions::All => ctx.world.regions()?.into_iter().filter(inside).collect(),
+        Regions::Only(set) => {
+            let regions: FxHashSet<_> = set.iter().copied().filter(inside).collect();
+            return Ok((!regions.is_empty()).then(|| new_plan(ctx, regions, region_state)));
+        }
+    };
     if regions.is_empty() {
         let world = ctx.world.path.display();
         let msg = format!("No regions found in world '{world}', update-task for map '{}' will not be created.", ctx.id);
@@ -152,10 +176,14 @@ fn plan<S: CellIo>(
     if ctx.config.check_for_removed_regions {
         region_state.for_each(|x, z, _| _ = regions.insert((x, z)))?;
     }
+    Ok(Some(new_plan(ctx, regions, region_state)))
+}
+
+fn new_plan<S: CellIo>(ctx: &MapContext, regions: FxHashSet<(i32, i32)>, region_state: &mut MapRegionState<S>) -> Plan {
     let timed = regions.into_iter().map(|r| (r, region_state.get(r.0, r.1))).collect();
     let c = &ctx.config;
     let lowres = bm_format::grid::Grid { size: [c.lowres_tile_size; 2], offset: [0, 0] };
-    Ok(Some(Plan::new(timed, ctx.hires_grid, lowres, c.lod_count.max(1) as u32, c.lod_factor.max(1))))
+    Plan::new(timed, ctx.hires_grid, lowres, c.lod_count.max(1) as u32, c.lod_factor.max(1))
 }
 
 /// The chunks the rendered tiles read: their own, a two-block border (biome blending) and the

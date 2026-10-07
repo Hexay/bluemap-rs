@@ -34,7 +34,14 @@ pub struct MapContext {
     pub hires_grid: Grid,
     /// Problems BlueMap only logs (e.g. an unreadable `textures.json`).
     pub warnings: Vec<String>,
+    /// `MarkerGson` of the config's marker sets, as written to `live/markers.json` (and served live by Java).
+    pub markers_json: String,
+    /// Called after a hires (lod 0) or lowres tile was written, like BlueMap's tile update listeners.
+    pub tile_listener: Option<TileListener>,
 }
+
+/// `(tile, lod)`; lod 0 is hires.
+pub type TileListener = Arc<dyn Fn(bm_format::grid::Tile, u32) + Send + Sync>;
 
 impl MapContext {
     /// `None` for a map without `world`: display-only, served from storage but never rendered.
@@ -76,7 +83,7 @@ impl MapContext {
         let settings = map_settings_json(id, &convert::map_settings(map))?;
         storage.write_item(&ItemKey::Settings, settings.as_bytes())?;
         storage.write_item(&ItemKey::Players, b"{}")?;
-        write_markers(storage.as_ref(), map)?;
+        let markers_json = write_markers(storage.as_ref(), map)?;
 
         Ok(Some(Self {
             id: id.to_owned(),
@@ -89,6 +96,8 @@ impl MapContext {
             mask,
             hires_grid: Grid { size: [map.hires_tile_size; 2], offset: [HIRES_OFFSET; 2] },
             warnings,
+            markers_json,
+            tile_listener: None,
         }))
     }
 
@@ -140,12 +149,12 @@ fn load_gallery(
 }
 
 /// `MarkerGson` of the config's marker sets; only the empty case is written byte-exact so far.
-fn write_markers(storage: &dyn MapStorage, map: &MapConfig) -> Result<()> {
+pub(crate) fn write_markers(storage: &dyn MapStorage, map: &MapConfig) -> Result<String> {
     let markers = map.marker_sets_json();
     // TODO: MarkerGson's marker serialization for non-empty `marker-sets`
     let json = if markers.as_object().is_some_and(|m| m.is_empty()) { "{}".to_owned() } else { markers.to_string() };
     storage.write_item(&ItemKey::Markers, json.as_bytes())?;
-    Ok(())
+    Ok(json)
 }
 
 fn render_settings(c: &MapConfig, mask: &Mask) -> RenderSettings {

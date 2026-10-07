@@ -36,6 +36,7 @@ gethostname = "1"
 http = "1"
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-graceful", "service"] }
+notify = "8"
 percent-encoding = "2"
 # debug-embed: debug builds embed too, so tests serve exactly what release ships
 rust-embed = { version = "8", features = ["debug-embed"] }

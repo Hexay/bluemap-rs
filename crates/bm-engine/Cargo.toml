@@ -17,11 +17,15 @@ bm-render.workspace = true
 bm-resources.workspace = true
 bm-storage.workspace = true
 bm-world.workspace = true
+notify.workspace = true
 rayon.workspace = true
 rustc-hash.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [build-dependencies]
 # entries are stored uncompressed, so the build script needs no deflate backend

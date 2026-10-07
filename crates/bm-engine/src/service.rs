@@ -60,6 +60,12 @@ impl Service {
         Ok(self.storages.get(&self.config, &map.storage)?.map(id)?)
     }
 
+    /// `BlueMapCLI.updateMarkers` for one map: its config marker sets, written to its storage.
+    pub fn write_config_markers(&self, id: &str) -> Result<()> {
+        let map = self.config.maps.get(id).ok_or_else(|| crate::Error::Invalid(format!("no map '{id}'")))?;
+        crate::map::write_markers(self.map_storage(id)?.as_ref(), map).map(drop)
+    }
+
     /// Configured map ids passing `filter`, by `sorting` (stable, ties by id).
     pub fn map_ids(&self, filter: impl Fn(&str) -> bool) -> Vec<String> {
         let mut ids: Vec<(&String, i32)> =
