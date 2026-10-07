@@ -86,6 +86,7 @@ fn run(args: &Args) -> Result<ExitCode> {
     }
     let packs = config_folder.join("packs");
     std::fs::create_dir_all(&packs).with_context(|| format!("create {}", packs.display()))?;
+    bm_engine::find_java_addons(&packs).iter().for_each(|a| log::warn(&a.warning()));
 
     let config = BlueMapConfig::load(&ConfigOptions::cli(&config_folder))?;
     if let Some(file) = &config.core.log.file {

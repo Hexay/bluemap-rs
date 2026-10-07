@@ -79,6 +79,7 @@ impl Session {
     pub fn load(hello: &Hello, worlds: &[WorldInfo], scripts: (&[String], &[String])) -> Result<Self, NotReady> {
         let packs = hello.config_folder.join("packs");
         let _ = std::fs::create_dir_all(&packs);
+        bm_engine::find_java_addons(&packs).iter().for_each(|a| log::warn(&a.warning()));
         let config = BlueMapConfig::load(&config_options(hello, worlds))
             .map_err(|e| not_ready("config-error", format!("{e}")))?;
         if let Some(file) = &config.core.log.file
