@@ -19,6 +19,7 @@ use crate::file::{self, FileStorage, fsops, layout};
 use crate::format::Format;
 use crate::key::GridKey;
 use crate::optimized::OptimizedMapStorage;
+use crate::optimized::bundle::bundle_of;
 use crate::sql::{SqlConfig, SqlStorage};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -133,9 +134,12 @@ fn remove_source(p: &dyn Physical, ids: &[String], optimized: bool) -> Result<()
     Ok(())
 }
 
-/// Copies every hires tile in parallel, reading each back to compare the raw PRBM.
+/// Copies every hires tile, reading each back to compare the raw PRBM. Bundles convert in parallel, the tiles of
+/// one bundle in order on one thread, so converted bundles hold their records in a deterministic order.
 fn copy_hires(id: &str, src: &dyn MapStorage, dst: &dyn MapStorage, progress: Progress) -> Result<usize> {
-    let tiles = src.list_grid(GridKey::Hires)?;
+    let mut tiles = src.list_grid(GridKey::Hires)?;
+    tiles.sort_unstable_by_key(|&t| (bundle_of(t), t));
+    let groups: Vec<&[Tile]> = tiles.chunk_by(|&a, &b| bundle_of(a) == bundle_of(b)).collect();
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
@@ -150,20 +154,24 @@ fn copy_hires(id: &str, src: &dyn MapStorage, dst: &dyn MapStorage, progress: Pr
         }
         Ok(())
     };
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(tiles.len().max(1));
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(groups.len().max(1));
     std::thread::scope(|scope| {
         for _ in 0..threads {
             scope.spawn(|| {
-                while !failed.load(Ordering::Relaxed) {
-                    let Some(&tile) = tiles.get(next.fetch_add(1, Ordering::Relaxed)) else { break };
-                    if let Err(e) = work(tile) {
-                        failed.store(true, Ordering::Relaxed);
-                        error.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert(e);
-                        break;
-                    }
-                    let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                    if n.is_multiple_of(256) || n == tiles.len() {
-                        progress(id, n, tiles.len());
+                while let Some(group) = groups.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    for &tile in *group {
+                        if failed.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        if let Err(e) = work(tile) {
+                            failed.store(true, Ordering::Relaxed);
+                            error.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert(e);
+                            return;
+                        }
+                        let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        if n.is_multiple_of(256) || n == tiles.len() {
+                            progress(id, n, tiles.len());
+                        }
                     }
                 }
             });
