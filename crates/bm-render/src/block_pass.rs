@@ -45,6 +45,12 @@ pub(crate) fn render(
                 }
                 // the volume spans every column's y range plus a border, so the whole column is interior or none of it
                 let top = ctx.view.interior_index(x, max_y, z);
+                let s = ctx.settings;
+                let floor = ctx.view.ocean_floor_y(x, z);
+                // `Block::remove_if_cave` for a block that isn't air
+                let cave = |y: i32| {
+                    y < s.remove_caves_below_y && floor.is_none_or(|f| y < f.wrapping_add(s.cave_detection_ocean_floor))
+                };
                 for y in (min_y..=max_y).rev() {
                     if !ctx.view.inside(x, y, z) {
                         continue;
@@ -55,8 +61,8 @@ pub(crate) fn render(
                         light_under(ctx.view.light_at(i).1, &column_color);
                         continue;
                     }
-                    // the same for buried blocks: every cullface culled means no faces and no colour
-                    if let Some(i) = index.filter(|&i| fully_culled(ctx, i)) {
+                    // the same for buried blocks (every cullface culled) and dark cave blocks (every face culled as cave)
+                    if let Some(i) = index.filter(|&i| fully_culled(ctx, i) || (cave(y) && dark(ctx, i))) {
                         debug_assert!(renders_nothing(ctx, &Block::new(ctx, x, y, z, index)));
                         light_under(ctx.view.light_at(i).1, &column_color);
                         continue;
@@ -108,7 +114,28 @@ fn fully_culled(ctx: &Ctx, i: usize) -> bool {
     }
 }
 
-/// The full render of a block [`fully_culled`] skips, for debug builds to check it adds nothing.
+/// Whether the interior block at `i` and every neighbour its faces take light from have no light the cave test
+/// counts, so a block removed as cave culls all its faces.
+fn dark(ctx: &Ctx, i: usize) -> bool {
+    let Some(mut slots) = ctx.states.get(ctx.view.state_at(i)).light_slots else { return false };
+    let dark_at = |i: usize| {
+        let (sky, block) = ctx.view.light_at(i);
+        sky == 0 && (block == 0 || !ctx.settings.cave_detection_uses_block_light)
+    };
+    if !dark_at(i) {
+        return false;
+    }
+    while slots != 0 {
+        let slot = slots.trailing_zeros() as u8;
+        slots &= slots - 1;
+        if !dark_at(ctx.view.step(i, slot)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The full render of a block [`fully_culled`] or [`dark`] skips, for debug builds to check it adds nothing.
 fn renders_nothing(ctx: &Ctx, block: &Block) -> bool {
     let (mut out, mut color) = (TileModel::default(), Color::default());
     render_block(ctx, block, &mut out, &mut color).is_ok() && out.faces() == 0 && color.a == 0.0

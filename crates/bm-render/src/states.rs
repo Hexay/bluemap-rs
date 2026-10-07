@@ -7,7 +7,7 @@ use bm_math::Color;
 use bm_resources::ResourcePath;
 use bm_resources::blockstate::{RendererType, Variant, VariantSet, hash_to_float};
 use bm_resources::color::BlockProperties;
-use bm_resources::model::BakedModel;
+use bm_resources::model::{BakedModel, Direction};
 use bm_resources::resource_pack::ResourcePack;
 use bm_resources::texture::TextureGallery;
 use bm_world::{BlockState, BlockStates, StateId};
@@ -93,6 +93,8 @@ pub struct StateInfo<'a> {
     water: bool,
     renders_water: bool,
     pub(crate) hidden: Hidden,
+    /// The `Offset::slot`s whose light the cave test of a face reads, as bits; `None` when one lies further out.
+    pub(crate) light_slots: Option<u32>,
 }
 
 impl StateInfo<'_> {
@@ -177,6 +179,7 @@ impl<'a> StateCache<'a> {
             water: state.is_water,
             renders_water,
             hidden: if renders_water { Hidden::Never } else { hidden(&sets, state.is_water) },
+            light_slots: light_slots(&sets),
             props,
             liquid_level: liquid_level(&state),
             sets,
@@ -249,6 +252,24 @@ fn hidden(sets: &[SetInfo], is_water: bool) -> Hidden {
         }
     }
     Hidden::Cullfaces(slots)
+}
+
+/// [`StateInfo::light_slots`]: each face's light neighbour. Liquids (and the water of waterlogged blocks) test the
+/// block's own light only.
+fn light_slots(sets: &[SetInfo]) -> Option<u32> {
+    let mut slots = 0u32;
+    for v in sets.iter().flat_map(|s| &s.variants).filter(|v| v.renderer != RendererType::Liquid) {
+        for e in v.model.iter().flat_map(|m| &m.elements) {
+            for dir in Direction::ALL.into_iter().filter(|&d| e.face(d).is_some()) {
+                let slot = v.relative.get(dir.to_vector()).slot;
+                if slot == Offset::FAR {
+                    return None;
+                }
+                slots |= 1 << slot;
+            }
+        }
+    }
+    Some(slots)
 }
 
 /// `level` clamped to 0..=15; absent or unparseable is 0.
