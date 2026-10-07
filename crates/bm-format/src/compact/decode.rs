@@ -16,6 +16,13 @@ pub(super) struct Scratch {
     uv: Vec<u32>,
 }
 
+impl Scratch {
+    pub fn trim(&mut self) {
+        super::trim(&mut self.pos);
+        super::trim(&mut self.uv);
+    }
+}
+
 pub(super) fn quads(body: &[u8], out: &mut Vec<u8>, s: &mut Scratch) -> Result<(), CompactError> {
     let mut r = Reader::new(body);
     let quads = r.u32()? as usize;

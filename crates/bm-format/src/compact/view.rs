@@ -30,12 +30,16 @@ pub(super) struct PrbmView<'a> {
     pub groups: Vec<[i32; 3]>,
 }
 
-/// `None` unless `buf` has PRBMWriter's structure (padding bytes are not checked; the encoder's round-trip is).
+/// `None` unless every byte of `buf` outside the attribute payloads and groups is PRBMWriter's (zero padding included).
 pub(super) fn parse(buf: &[u8]) -> Option<PrbmView<'_>> {
     if buf.len() < 8 || buf[0] != 1 || buf[1] != 7 || buf[5..8] != [0, 0, 0] {
         return None;
     }
     let vertices = u32::from_le_bytes([buf[2], buf[3], buf[4], 0]) as usize;
+    let padded = |end: usize| -> Option<usize> {
+        let aligned = end.next_multiple_of(4);
+        buf.get(end..aligned)?.iter().all(|&b| b == 0).then_some(aligned)
+    };
     let mut pos = 8;
     let mut attrs: [&[u8]; 7] = [&[]; 7];
     for (slot, (name, ty, size)) in attrs.iter_mut().zip(ATTRS) {
@@ -43,11 +47,11 @@ pub(super) fn parse(buf: &[u8]) -> Option<PrbmView<'_>> {
         if &head[..name.len()] != name.as_bytes() || head[name.len()] != 0 || head[name.len() + 1] != ty {
             return None;
         }
-        pos = (pos + name.len() + 2).next_multiple_of(4);
+        pos = padded(pos + name.len() + 2)?;
         *slot = buf.get(pos..pos + vertices * size)?;
         pos += vertices * size;
     }
-    pos = pos.next_multiple_of(4);
+    pos = padded(pos)?;
     let rest = buf.get(pos..)?;
     if rest.len() < 4 || (rest.len() - 4) % 12 != 0 || rest[rest.len() - 4..] != (-1i32).to_le_bytes() {
         return None;

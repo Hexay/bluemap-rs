@@ -5,29 +5,19 @@ use super::fixed;
 use super::view::{AO, BLOCKLIGHT, COLOR, NORMAL, POSITION, PrbmView, QV, SUNLIGHT, UV};
 use crate::prbm::{normal_byte, surface_normal};
 
-/// Reused per-codec buffers.
-#[derive(Default)]
-pub(super) struct Scratch {
-    pos: Vec<u32>,
-    uv: Vec<u32>,
-    q: Vec<i16>,
-}
-
 /// Appends the quad body of a [`PrbmView::is_quad_shaped`] tile to `body`.
-pub(super) fn quads(v: &PrbmView, body: &mut Vec<u8>, s: &mut Scratch) {
+pub(super) fn quads(v: &PrbmView, body: &mut Vec<u8>) {
     let quads = v.vertices / 6;
-    gather(v.attrs[POSITION], 3, &mut s.pos);
-    gather(v.attrs[UV], 2, &mut s.uv);
-    let (gp, gu) = (fixed::pick_grid(&s.pos), fixed::pick_grid(&s.uv));
+    let (pos, uv) = (v.attrs[POSITION], v.attrs[UV]);
+    let (gp, gu) = (fixed::pick_grid::<3>(pos), fixed::pick_grid::<2>(uv));
     body.extend((quads as u32).to_le_bytes());
     body.extend([gp, gu]);
-    fixed::encode(body, &s.pos, 3, gp, &mut s.q);
-    fixed::encode(body, &s.uv, 2, gu, &mut s.q);
+    fixed::encode::<3>(body, pos, gp);
+    fixed::encode::<2>(body, uv, gu);
 
     let ao = v.attrs[AO];
     stream(body, |out| (0..quads).for_each(|q| out.extend(QV.map(|i| ao[6 * q + i]))));
 
-    let pos = v.attrs[POSITION];
     let normal = v.attrs[NORMAL];
     exceptions(body, quads, 18, |q, row| row.copy_from_slice(&normal[18 * q..18 * q + 18]), |q, pred| {
         predict_normals(&pos[72 * q..72 * q + 72], pred)
@@ -59,18 +49,6 @@ pub(super) fn quads(v: &PrbmView, body: &mut Vec<u8>, s: &mut Scratch) {
             out.extend((count / 6).to_le_bytes());
         }
     });
-}
-
-/// Quad vertices `QV` of a per-vertex f32 attribute with `k` components, as bit patterns.
-fn gather(attr: &[u8], k: usize, out: &mut Vec<u32>) {
-    out.clear();
-    let stride = 4 * k;
-    for quad in attr.chunks_exact(6 * stride) {
-        for i in QV {
-            let vert = &quad[i * stride..(i + 1) * stride];
-            out.extend(vert.as_chunks::<4>().0.iter().map(|&b| u32::from_le_bytes(b)));
-        }
-    }
 }
 
 /// PRBMWriter normals of a quad's two triangles from its 6 PRBM vertex positions (72 bytes) → 18 bytes.

@@ -61,6 +61,10 @@ fn anything_else_round_trips_raw() {
     assert_eq!(round_trip(&mut codec, &padded)[4], MODE_RAW);
     assert_eq!(round_trip(&mut codec, b"not a tile")[4], MODE_RAW);
     assert_eq!(round_trip(&mut codec, b"")[4], MODE_RAW);
+    // incompressible: overflows the first output buffer
+    let mut x = 1u64;
+    let noise: Vec<u8> = (0..100_000).map(|_| (x = x.wrapping_mul(6364136223846793005).wrapping_add(1), (x >> 56) as u8).1).collect();
+    assert_eq!(round_trip(&mut codec, &noise)[4], MODE_RAW);
 }
 
 #[test]
