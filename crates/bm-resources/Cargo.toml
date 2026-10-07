@@ -12,6 +12,7 @@ base64.workspace = true
 bm-java = { workspace = true, features = ["png"] }
 bm-math.workspace = true
 bm-world.workspace = true
+flate2.workspace = true
 png.workspace = true
 rayon.workspace = true
 rustc-hash.workspace = true
@@ -22,6 +23,3 @@ sha1.workspace = true
 thiserror.workspace = true
 ureq.workspace = true
 zip.workspace = true
-
-[dev-dependencies]
-flate2.workspace = true

@@ -14,6 +14,7 @@ pub mod packs;
 pub mod resource_pack;
 pub mod texture;
 pub mod vfs;
+mod zip_scan;
 
 pub use client_jar::{MinecraftVersion, PackVersions};
 pub use key::ResourcePath;

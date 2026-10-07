@@ -76,6 +76,10 @@ impl Resources {
             .filter_map(|e| e.ok().map(|e| e.path()))
             .collect();
         world_packs.sort();
+        // no extra roots: the shared pack roots, so the shared datapack (reloading costs ~60 ms, mostly the jar)
+        if world_packs.is_empty() {
+            return Ok(self.pack.datapack.clone());
+        }
         let roots = pack_roots(&self.roots, &world_packs, &self.minecraft.data_pack).map_err(io("list", &folder))?;
         Ok(DataPack::load(&load_order(&roots, self.minecraft.data_pack_version)).0)
     }
