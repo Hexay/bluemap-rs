@@ -27,10 +27,12 @@ pub fn reload(core: &Core, light: bool, say: Say) -> i32 {
     }
 }
 
-/// `start` clears only `/bluemap stop`; other pause reasons (players, memory, server load) are reported.
+/// `start` clears `/bluemap stop` and the player limit (upstream); memory and server-load pauses are reported.
 pub fn start_stop(core: &Core, s: &Session, start: bool, say: Say) -> i32 {
     let enabled = s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled;
-    let already = if start { enabled && !s.queue.pause_reasons().contains(PauseReason::Stopped) } else { !enabled };
+    let reasons = s.queue.pause_reasons();
+    let upstream_paused = reasons.contains(PauseReason::Stopped) || reasons.contains(PauseReason::PlayerLimit);
+    let already = if start { enabled && !upstream_paused } else { !enabled };
     if already {
         let reasons = info::pause_lines(core, s);
         if start && !reasons.is_empty() {

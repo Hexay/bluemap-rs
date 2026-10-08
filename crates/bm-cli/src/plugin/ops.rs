@@ -35,9 +35,13 @@ pub fn set_frozen(core: &Core, s: &Session, map: &str, frozen: bool) -> bool {
     true
 }
 
-/// `/bluemap start|stop`, `RenderManager.start/stop`: persisted in plugin state. Other pause reasons stay.
+/// `/bluemap start|stop`, `RenderManager.start/stop`: persisted in plugin state. Like upstream, start also lifts
+/// the player-limit pause until the next join/leave check; memory and server-load pauses stay.
 pub fn set_render_threads(core: &Core, s: &Session, running: bool) {
     s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled = running;
+    if running {
+        set_paused(core, s, PauseReason::PlayerLimit, false);
+    }
     set_paused(core, s, PauseReason::Stopped, !running);
 }
 

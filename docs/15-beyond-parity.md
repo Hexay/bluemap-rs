@@ -12,7 +12,7 @@ only when none is set:
 | Reason | Set by | Cleared by |
 |---|---|---|
 | `Stopped` | `/bluemap stop`, `RenderManager.stop()`, persisted `renderThreadsEnabled: false` | `/bluemap start`, `RenderManager.start()` |
-| `PlayerLimit` | `player-render-limit` reached (checked 1 s after a join/leave) | fewer players |
+| `PlayerLimit` | `player-render-limit` reached (checked 1 s after a join/leave) | fewer players, or `/bluemap start` until the next check (upstream) |
 | `Memory` | core RSS above `memory-limit` (§2) | RSS below 90 % of it |
 | `ServerLoad` | 10 s average MSPT above `render-pause-mspt` (§3) | average below `render-resume-mspt` |
 
@@ -21,8 +21,9 @@ only when none is set:
   a forced task (`-f`, `force-update`) starts over from its first region, as with upstream-style `/bluemap stop`.
 - `take(exit_when_idle)` (CLI `-r`) no longer ends the run while the queue is paused with work left; it waits for
   the resume.
-- `/bluemap start` clears only `Stopped`. If other reasons remain it says so ("...but they stay paused:" plus one
-  line per reason); with only other reasons set it answers "Render-Threads are paused:" and the reasons.
+- `/bluemap start` clears `Stopped` and `PlayerLimit`, as upstream's restarts the threads. If `Memory` or
+  `ServerLoad` remain it says so ("...but they stay paused:" plus one line per reason); with only those set it
+  answers "Render-Threads are paused:" and the reasons.
 - `/bluemap` status keeps upstream's stopped wording; when paused it lists each reason: "there are N or more players
   online", "core memory is above the memory-limit of N MiB", "server is lagging (MSPT x)". `troubleshoot` reports
   the first reason. `RenderStatus.running`, `StateInfo.renderThreadsRunning` = no reason set.
