@@ -6,14 +6,12 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bm_engine::{
-    LoadedMaps, MapContext, RenderQueue, RenderTask, Service, TaskEvent, TileUpdateStrategy, UpdateEvent, UpdateStats,
-    run_queue,
-};
+use bm_engine::{LoadedMaps, MapContext, RenderQueue, Service, TaskEvent, UpdateEvent, UpdateStats, run_queue};
 use bm_web::MapRegistry;
 
 use crate::eta::{self, ProgressTracker};
 use crate::log;
+use crate::resume::RenderPlan;
 use crate::shutdown::Shutdown;
 use crate::throttle;
 use crate::watch::Watchers;
@@ -64,7 +62,7 @@ pub fn run(
     service: &Service,
     maps: Vec<MapContext>,
     failed: Vec<String>,
-    strategy: TileUpdateStrategy,
+    mut plan: RenderPlan,
     watch: bool,
     web: Option<&MapRegistry>,
     shutdown: &Shutdown,
@@ -75,7 +73,9 @@ pub fn run(
     for map in maps {
         let id = map.id.clone();
         loaded.insert(map);
-        queue.schedule(RenderTask::full(id, strategy));
+        for task in plan.tasks(&id) {
+            queue.schedule(task);
+        }
     }
     let watchers = Watchers::new(service, queue.clone());
     if watch {
@@ -116,6 +116,7 @@ pub fn run(
         drop((progress_stop, retry_stop, memory_stop));
     });
     watchers.close();
+    plan.save(&queue, &|map| loaded.get(map).and_then(|m| m.world.regions().ok()));
     if !shutdown.is_triggered() {
         log::info("Stopping...");
     }

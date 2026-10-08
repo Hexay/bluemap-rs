@@ -25,8 +25,8 @@ fn region(x: i32, z: i32) -> RenderTask {
 #[test]
 fn encodes_like_bluenbt() {
     let tasks = [region(0, -1), region(1, -1), RenderTask::full("gone", TileUpdateStrategy::ForceNone)];
-    assert_eq!(encode(&tasks, &|_| None), java());
-    assert_eq!(encode(&[], &|_| None), hex(EMPTY_JAVA));
+    assert_eq!(encode(&tasks, &[], &|_| None), java());
+    assert_eq!(encode(&[], &[], &|_| None), hex(EMPTY_JAVA));
 }
 
 #[test]
@@ -35,24 +35,30 @@ fn decodes_java_and_round_trips_map_updates() {
     assert_eq!(loaded.tasks, [region(0, -1), region(1, -1)]);
     assert!(decode(&java(), &|_| false).unwrap().tasks.is_empty());
 
-    let force = RenderTask {
-        strategy: TileUpdateStrategy::ForceAll,
-        ..RenderTask::full("world", TileUpdateStrategy::ForceAll)
-    };
-    let bytes = encode(&[force], &|_| Some(vec![(0, 0), (1, 0), (2, 5)]));
+    let force = RenderTask::full("world", TileUpdateStrategy::ForceAll);
+    let bytes = encode(&[force], &[], &|_| Some(vec![(0, 0), (1, 0), (2, 5)]));
     let back = decode(&bytes, &|_| true).unwrap();
-    let expected = RenderTask {
-        map: "world".into(),
-        regions: Regions::Only([(0, 0), (1, 0), (2, 5)].into()),
-        strategy: TileUpdateStrategy::ForceAll,
-    };
+    let expected =
+        RenderTask::new("world", Regions::Only([(0, 0), (1, 0), (2, 5)].into()), TileUpdateStrategy::ForceAll);
     assert_eq!(back.tasks, [expected]);
+}
+
+#[test]
+fn partly_done_tasks_resume_past_their_done_regions() {
+    let mut force = RenderTask::full("world", TileUpdateStrategy::ForceAll);
+    force.done = [(2, 5), (0, 0)].into();
+    let mut finished = RenderTask::region("world", (7, 7));
+    finished.done = [(7, 7)].into();
+    let bytes = encode(&[force, finished], &["old".into()], &|_| Some(vec![(0, 0), (1, 0), (2, 5)]));
+    let back = decode(&bytes, &|_| true).unwrap();
+    let left = RenderTask::new("world", Regions::Only([(1, 0)].into()), TileUpdateStrategy::ForceAll);
+    assert_eq!(back, Loaded { tasks: vec![left], purges: vec!["old".into()] }, "a fully done task is left out");
 }
 
 #[test]
 fn resumes_map_updates_at_the_current_index() {
     let mut bytes =
-        encode(&[RenderTask::full("world", TileUpdateStrategy::ForceNone)], &|_| Some(vec![(0, 0), (1, 0)]));
+        encode(&[RenderTask::full("world", TileUpdateStrategy::ForceNone)], &[], &|_| Some(vec![(0, 0), (1, 0)]));
     // currentTaskIndex is the last int before the two closing ENDs and the root END
     let n = bytes.len();
     bytes[n - 4] = 1;
