@@ -35,7 +35,8 @@ fn pause_requeues_running_task_and_blocks_takes() {
     let running = task(q.take(false)).unwrap();
     q.pause(PauseReason::Stopped);
     assert!(running.cancel.load(Ordering::Relaxed));
-    assert_eq!(q.pending_tasks(), vec![RenderTask::region("w", (0, 0)), RenderTask::region("n", (0, 0))]);
+    assert_eq!(q.pending_tasks(), vec![RenderTask::region("n", (0, 0))], "requeued once it has wound down");
+    assert_eq!(q.current_task(), Some(RenderTask::region("w", (0, 0))));
     let waiter = {
         let q = q.clone();
         std::thread::spawn(move || task(q.take(false)).map(|t| t.task))
@@ -56,6 +57,7 @@ fn reasons_pause_and_resume_independently() {
     let first = task(q.take(true)).unwrap();
     q.pause(PauseReason::Memory);
     assert!(first.cancel.load(Ordering::Relaxed));
+    q.finish();
     assert_eq!(q.pending(), 2, "the running task is queued again once");
 
     // a second reason doesn't requeue again
@@ -118,4 +120,29 @@ fn runs_number_each_taken_task() {
     assert_eq!(q.current_run(), Some((1, 0.25)));
     task(q.take(true));
     assert_eq!(q.current_run(), Some((2, 0.0)));
+}
+
+#[test]
+fn finished_regions_survive_pause_and_stop() {
+    use bm_map::renderstate::TileUpdateStrategy::ForceAll;
+    let q = RenderQueue::new();
+    q.schedule(RenderTask::full("w", ForceAll));
+    q.schedule(RenderTask::region("n", (0, 0)));
+    task(q.take(true));
+    q.region_done((0, 0));
+    q.pause(PauseReason::ServerLoad);
+    q.region_done((1, 0)); // the region in flight when the pause came
+    q.finish();
+    let requeued = q.pending_tasks().remove(0);
+    assert_eq!(requeued.done, [(0, 0), (1, 0)].into());
+
+    q.resume(PauseReason::ServerLoad);
+    task(q.take(true));
+    q.region_done((2, 0));
+    q.stop();
+    assert_eq!(q.abandoned_tasks(), [RenderTask::region("n", (0, 0))], "the running one joins once it winds down");
+    q.finish();
+    let abandoned = q.abandoned_tasks();
+    assert_eq!(abandoned.iter().map(|t| t.map.as_str()).collect::<Vec<_>>(), ["w", "n"]);
+    assert_eq!(abandoned[0].done, [(0, 0), (1, 0), (2, 0)].into());
 }

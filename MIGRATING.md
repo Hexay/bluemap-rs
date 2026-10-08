@@ -23,6 +23,9 @@ Replace `java -jar bluemap-cli.jar …` with `bluemap …`. Run it from the same
 config paths are relative to the working directory. `bluemap --version` prints the BlueMap version it is a drop-in
 for, then its own version.
 
+New: a forced render (`-f`) stopped with Ctrl+C resumes where it left off the next time you run `-f`. Add
+`--restart` to start over.
+
 ## Paper plugin
 
 1. Stop the server and remove the BlueMap jar from `plugins/`. bluemap-rs refuses to start next to it, because both

@@ -9,7 +9,9 @@ mod eta;
 mod log;
 mod plugin;
 mod render;
+mod resume;
 mod shutdown;
+mod tasks_dat;
 mod throttle;
 mod watch;
 mod web;
@@ -127,8 +129,9 @@ fn run(args: &Args) -> Result<ExitCode> {
         } else {
             TileUpdateStrategy::ForceNone
         };
+        let plan = resume::RenderPlan::new(strategy, &service.config.core.data, args.restart);
         let web = webserver.as_ref().map(web::Webserver::maps);
-        ok = render::run(&service, maps, failed, strategy, args.watch, web, &shutdown)?;
+        ok = render::run(&service, maps, failed, plan, args.watch, web, &shutdown)?;
     } else {
         if args.markers {
             update_markers(&service, args.maps.as_deref());

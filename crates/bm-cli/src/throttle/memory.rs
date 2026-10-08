@@ -4,7 +4,7 @@
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-use bm_engine::{PauseReason, RenderQueue, RenderTask, TileUpdateStrategy};
+use bm_engine::{PauseReason, RenderQueue};
 
 use crate::log;
 
@@ -34,21 +34,11 @@ pub struct MemoryGuard {
     /// Since when the queue sits paused with nothing running while RSS stays above the limit.
     idle_over_since: Option<Instant>,
     warn_only: bool,
-    /// A forced task restarts from scratch when paused; one interrupted twice is let finish instead.
-    forced_interrupted: Option<RenderTask>,
-    forced_warned: bool,
 }
 
 impl MemoryGuard {
     pub fn new(limit: u64) -> Self {
-        Self {
-            limit,
-            paused: false,
-            idle_over_since: None,
-            warn_only: false,
-            forced_interrupted: None,
-            forced_warned: false,
-        }
+        Self { limit, paused: false, idle_over_since: None, warn_only: false }
     }
 
     pub fn check(&mut self, rss: u64, queue: &RenderQueue, now: Instant) {
@@ -60,19 +50,6 @@ impl MemoryGuard {
             if rss <= self.limit {
                 return;
             }
-            let forced = queue.current_task().filter(|t| t.strategy == TileUpdateStrategy::ForceAll);
-            if forced.is_some() && forced == self.forced_interrupted {
-                if !self.forced_warned {
-                    self.forced_warned = true;
-                    log::warn(&format!(
-                        "Core memory ({rss_mib} MiB) is above the memory-limit ({limit_mib} MiB) again; letting the \
-                         forced render finish instead of restarting it"
-                    ));
-                }
-                return;
-            }
-            self.forced_interrupted = forced;
-            self.forced_warned = false;
             self.paused = true;
             self.idle_over_since = None;
             queue.pause(PauseReason::Memory);

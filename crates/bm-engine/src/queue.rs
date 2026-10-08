@@ -5,6 +5,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
+use bm_format::grid::Tile;
+
 use crate::job::Job;
 use crate::task::{Regions, RenderTask};
 
@@ -26,6 +28,8 @@ struct State {
     paused: PauseReasons,
     /// Tasks taken so far; numbers the running one for [`RenderQueue::current_run`].
     runs: u64,
+    /// What [`RenderQueue::stop`] interrupted: the running task (with its done regions) first, then the queue.
+    abandoned: Vec<RenderTask>,
 }
 
 struct Running {
@@ -34,6 +38,8 @@ struct Running {
     description: String,
     cancel: Arc<AtomicBool>,
     progress: f64,
+    /// Paused: queue the task again in front once it has wound down (with every region it finished).
+    requeue: bool,
 }
 
 /// What [`RenderQueue::take`] hands the worker.
@@ -114,7 +120,8 @@ impl RenderQueue {
     pub fn stop(&self) {
         let mut s = self.lock();
         s.stopped = true;
-        s.pending.clear();
+        let pending: Vec<RenderTask> = s.pending.drain(..).collect();
+        s.abandoned.extend(pending);
         s.jobs.clear();
         if let Some(running) = &s.current {
             running.cancel.store(true, Ordering::Relaxed);
@@ -126,9 +133,14 @@ impl RenderQueue {
         self.lock().stopped
     }
 
+    /// After [`RenderQueue::stop`] and the worker's return: the tasks it cut short, to persist for the next run.
+    pub fn abandoned_tasks(&self) -> Vec<RenderTask> {
+        self.lock().abandoned.clone()
+    }
+
     /// `RenderManager.stop()` of a plugin, for `reason`: nothing is taken until every reason is resumed. The first
-    /// reason cancels the running task and queues it again in front; finished regions stay done (a forced task
-    /// starts over). A running job finishes.
+    /// reason cancels the running task and queues it again in front, minus its finished regions. A running job
+    /// finishes.
     pub fn pause(&self, reason: PauseReason) {
         let mut s = self.lock();
         let first = s.paused.is_empty();
@@ -136,13 +148,11 @@ impl RenderQueue {
         if !first {
             return;
         }
-        if let Some(running) = &s.current
-            && let Some(task) = running.task.clone()
+        if let Some(running) = &mut s.current
+            && running.task.is_some()
         {
             running.cancel.store(true, Ordering::Relaxed);
-            if !s.pending.iter().any(|t| t.contains(&task)) {
-                s.pending.push_front(task);
-            }
+            running.requeue = true;
         }
         self.changed.notify_all();
     }
@@ -214,7 +224,7 @@ impl RenderQueue {
     /// `exit_when_idle` and nothing is queued; `None` once stopped (or idle with `exit_when_idle`).
     pub(crate) fn take(&self, exit_when_idle: bool) -> Option<Next> {
         let mut s = self.lock();
-        s.current = None;
+        retire_current(&mut s);
         self.changed.notify_all();
         loop {
             if s.stopped {
@@ -229,6 +239,7 @@ impl RenderQueue {
                         description: job.description.clone(),
                         cancel: cancel.clone(),
                         progress: 0.0,
+                        requeue: false,
                     });
                     return Some(Next::Job(job, cancel));
                 }
@@ -242,6 +253,7 @@ impl RenderQueue {
                         description: task.description(),
                         cancel: cancel.clone(),
                         progress: 0.0,
+                        requeue: false,
                     });
                     return Some(Next::Task(Taken { task, cancel }));
                 }
@@ -260,10 +272,26 @@ impl RenderQueue {
         }
     }
 
+    /// Records a finished region of the running task, so a pause or stop requeues only the rest.
+    pub(crate) fn region_done(&self, region: Tile) {
+        if let Some(task) = self.lock().current.as_mut().and_then(|r| r.task.as_mut()) {
+            task.done.insert(region);
+        }
+    }
+
     /// Marks the running task done without taking another.
     pub(crate) fn finish(&self) {
-        self.lock().current = None;
+        retire_current(&mut self.lock());
         self.changed.notify_all();
+    }
+}
+
+fn retire_current(s: &mut State) {
+    let Some(Running { task: Some(task), requeue, .. }) = s.current.take() else { return };
+    if s.stopped {
+        s.abandoned.insert(0, task);
+    } else if requeue && !s.pending.iter().any(|t| t.contains(&task)) {
+        s.pending.push_front(task);
     }
 }
 
