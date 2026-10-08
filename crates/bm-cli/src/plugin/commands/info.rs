@@ -9,6 +9,7 @@ use super::super::core::{CORE_VERSION, Core};
 use super::super::session::Session;
 use super::super::text::{self, BASE, FROZEN, HIGHLIGHT, INFO, POSITIVE};
 use super::{Say, task_ref};
+use crate::eta;
 use crate::throttle::memory;
 
 /// Why the render threads are paused, one line per reason other than `Stopped`.
@@ -40,9 +41,8 @@ pub fn status(core: &Core, s: &Session, say: Say) -> i32 {
     } else if s.queue.is_paused() {
         body.push(text::format("⌛ render-threads are %", &["paused"]));
         body.extend(pause_lines(core, s));
-    } else if let Some((desc, progress)) = s.queue.current() {
-        body.push(text::format("⛏ currently running: %", &[&desc]));
-        body.push(text::format("progress: %", &[&format!("{:.3}%", progress * 100.0)]));
+    } else if let Some((run, progress)) = s.queue.current_run() {
+        body.extend(active_task(s, run, progress));
     } else {
         body.push(text::format("✔ render-threads are %", &["idle"]));
     }
@@ -54,6 +54,26 @@ pub fn status(core: &Core, s: &Session, say: Say) -> i32 {
     body.push(text::format("core memory: %", &[&rss]));
     say(text::paragraph("Status", body));
     1
+}
+
+/// `StatusCommand.activeTask`: what runs, its progress and remaining time, between empty lines.
+fn active_task(s: &Session, run: u64, progress: f64) -> Vec<Vec<Value>> {
+    let mut info = match s.queue.current_task() {
+        Some(task) => text::fill("⛏ map % is currently being updated", &[text::hl(&task.map)], INFO),
+        None => {
+            let desc = s.queue.current().map(|(d, _)| d).unwrap_or_default();
+            text::fill("⛏ currently running: %", &[text::hl(&desc)], INFO)
+        }
+    };
+    let remaining = s.progress.lock().unwrap_or_else(PoisonError::into_inner).remaining_of((run, progress));
+    let mut items = vec![vec![text::format("progress: %", &[&format!("{:.3}%", progress * 100.0)])]];
+    if let Some(eta) = eta::status_remaining(remaining, progress) {
+        items.push(vec![text::format("remaining time: %", &[&eta])]);
+    }
+    info.insert(0, Vec::new());
+    info.extend(text::details(items, BASE));
+    info.push(Vec::new());
+    info
 }
 
 pub fn version(core: &Core, say: Say) -> i32 {

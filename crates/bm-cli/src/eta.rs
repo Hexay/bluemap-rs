@@ -6,7 +6,7 @@ use std::time::Duration;
 
 /// `new ProgressTracker(5000, 12)`: a sample every 5 s, averaged over the last minute.
 pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
-const AVERAGING: usize = 12;
+pub const AVERAGING: usize = 12;
 
 #[derive(Default)]
 pub struct ProgressTracker {
@@ -37,6 +37,21 @@ impl ProgressTracker {
         }
     }
 
+    /// `lastProgress` and `timesPerProgress` (`debug dump`).
+    pub fn samples(&self) -> (f64, Vec<i64>) {
+        (self.last_progress, self.times_per_progress.iter().copied().collect())
+    }
+
+    /// Whether the samples belong to task `run`.
+    pub fn tracks(&self, run: u64) -> bool {
+        self.run == Some(run)
+    }
+
+    /// `estimateCurrentRenderTaskTimeRemaining` for the running task; 0 before its first sample.
+    pub fn remaining_of(&self, (run, progress): (u64, f64)) -> i64 {
+        if self.tracks(run) { self.remaining_ms(progress) } else { 0 }
+    }
+
     /// `estimateCurrentRenderTaskTimeRemaining` for a task at `progress`; 0 without samples.
     pub fn remaining_ms(&self, progress: f64) -> i64 {
         let n = self.times_per_progress.len();
@@ -64,6 +79,11 @@ pub fn duration(millis: i64) -> String {
     }
 }
 
+/// `StatusCommand.taskETA`: the `remaining time` value, none without an estimate or below 0.1 % progress.
+pub fn status_remaining(remaining_ms: i64, progress: f64) -> Option<String> {
+    (remaining_ms != 0 && progress >= 0.001).then(|| duration(remaining_ms))
+}
+
 /// BlueMapCLI's `" (ETA: %s)"` suffix, empty when there is no estimate.
 pub fn suffix(remaining_ms: i64) -> String {
     if remaining_ms > 0 { format!(" (ETA: {})", duration(remaining_ms)) } else { String::new() }
@@ -85,6 +105,8 @@ mod tests {
         assert_eq!(t.remaining_ms(0.2), 80_000);
         t.sample(None, 25_000);
         assert_eq!(t.remaining_ms(0.5), 50_000, "idle keeps the samples");
+        assert_eq!(t.remaining_of((1, 0.5)), 50_000);
+        assert_eq!(t.remaining_of((2, 0.5)), 0, "not yet sampled: no estimate");
         t.sample(Some((2, 0.0)), 30_000);
         assert_eq!(t.remaining_ms(0.0), 0, "a new task starts over");
     }
@@ -114,6 +136,9 @@ mod tests {
         assert_eq!(duration(3_600_000), "60 minutes");
         assert_eq!(duration(5_400_000), "1.5 hours");
         assert_eq!(duration(3 * 86_400_000), "3 days");
+        assert_eq!(status_remaining(90_000, 0.5).as_deref(), Some("1.5 minutes"));
+        assert_eq!(status_remaining(0, 0.5), None);
+        assert_eq!(status_remaining(90_000, 0.000_9), None);
         assert_eq!(suffix(0), "");
         assert_eq!(suffix(-5), "");
         assert_eq!(suffix(90_000), " (ETA: 1.5 minutes)");
