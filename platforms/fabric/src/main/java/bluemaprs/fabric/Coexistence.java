@@ -9,7 +9,7 @@ import java.util.zip.ZipFile;
 
 /**
  * Upstream BlueMap's Fabric jar in {@code mods/}. Both are mod id {@code bluemap}, and Fabric Loader silently loads
- * only one of them: when it picks upstream we never run; when it picks us, this makes us stand down (docs/14).
+ * only one of them: when it picks upstream we never run; when it picks us, this makes us stand down (docs/16).
  */
 final class Coexistence {
 

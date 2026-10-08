@@ -1,4 +1,4 @@
-"""End-to-end test of the Fabric mod (docs/14) on a real Fabric 26.3 dedicated server.
+"""End-to-end test of the Fabric mod (docs/16) on a real Fabric 26.3 dedicated server.
 
     py -3 tools/e2e_fabric.py [--skip-build | --core BIN | --jar JAR] [--keep]
 

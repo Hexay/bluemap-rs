@@ -18,7 +18,10 @@ Subsystem deep-dives:
 | 10 | [10-perf-audit-render.md](10-perf-audit-render.md) | Profiled Java render: lock convoy caps at ~4 cores, CPU hotspots, fixes, port implications |
 | 11 | [11-perf-audit-storage-web.md](11-perf-audit-storage-web.md) | Disk + bandwidth wins: ETag/304, asset compression, lowres PNG, webapp loading bugs |
 | 12 | [12-perf-profile-rs.md](12-perf-profile-rs.md) | Profiled our engine: 5 rounds, render CPU −74% (structures 77 → 20 s), libdeflate, BMQ2 memory, web cache/ETags |
+| 13 | [13-plugin-design.md](13-plugin-design.md) | Server plugin: Java shim + Rust core over stdin/stdout IPC, BlueMapAPI proxy, packaging, Paper status |
 | 14 | [14-real-world-validation.md](14-real-world-validation.md) | 4096² world + MC 1.16.5–1.21.11: parity with Java 5.28, 21× less CPU; Java loses lowres writes nondeterministically |
+| 15 | [15-beyond-parity.md](15-beyond-parity.md) | Pause reasons, `memory-limit`, MSPT render throttle, low-priority render threads |
+| 16 | [16-fabric.md](16-fabric.md) | Shared shim layout (`platforms/common`), the Fabric mod (26.1–26.3, dedicated servers), e2e |
 
 ## What BlueMap is
 
