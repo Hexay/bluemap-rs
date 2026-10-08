@@ -41,7 +41,7 @@ dependencies {
     bluemapApiSources("de.bluecolored:bluemap-api:2.8.1")
     "bluemapApiCompileOnly"("com.google.code.gson:gson:2.11.0")
     "bluemapApiCompileOnly"("com.flowpowered:flow-math:1.0.3")
-    "bluemapApiCompileOnly"("org.jetbrains:annotations:26.0.2")
+    "bluemapApiCompileOnly"("org.jetbrains:annotations:26.1.0")
 
     api(files(bluemapApiJar))
 
