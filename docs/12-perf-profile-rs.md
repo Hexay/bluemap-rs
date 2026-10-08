@@ -180,3 +180,29 @@ Structures on testbox, 3 interleaved runs, each commit measured against the prev
   - caching AO neighbours, forced inlining, gathering corners after culling: +1–2.4%
   - running-max column light, per-biome colour cache inside the blend, reordered cullface checks: neutral
 - **Left:** compat gzip ~30% (fixed by the format), `Volume::fill` ~10%, face meshing ~11%.
+
+## Round 5 (render CPU, from master `df7184e`)
+
+Structures on testbox, 6 interleaved runs, each commit measured against the previous one. Compat CPU fell
+26.5 s → 20.3 s (−23%); optimized storage gained another −8.6% from the BMQ2 encoder.
+
+| commit | change | CPU |
+|---|---|---|
+| `15c2a4b` | volume filled only up to the tile's highest non-air section; air above read for its block light only | −11% |
+| `df3542a` | material sort gathers into sized buffers; `write_prbm` writes attributes in place | −5.3% |
+| `020a6c5` | column reads: palette indices and light nibbles stepped without division | −2.7% |
+| `d3075b6` | BMQ2 `quantize` rounds without libm (`f64::round` is a call on baseline x86-64) | −4.8% optimized |
+| `a13a430` | dark cave blocks (removed as cave, block and face-light neighbours unlit) skipped like buried ones | −4.2% |
+| `3a28295` | BMQ2: on-grid values skip the rounding path | −4.0% optimized |
+| `801c2b3` | lowres column light: u8 light range per column alpha instead of a float max per block | −2.8% |
+
+- Every skip has a debug path: skipped blocks are re-rendered and asserted empty, the column light and the fast
+  quantize are checked against the per-block and f64 versions (golden debug run plus a debug render of structures).
+- **Tried and dropped:**
+  - per-thread pool for `TileBuffers` (engine makes one per rayon split): page faults unchanged, ±noise
+  - one culling bit per volume block for the buried test: +5%; building it costs more than the neighbour reads
+  - solid sections (palette all culling cubes) skipped without neighbour reads: +3–5%; few qualify, scans cost
+  - `push_quad` (one capacity check per attribute per face pair): −1%
+- **Left (compat):** gzip ~38%, block pass ~30% (per-block state/flags/light loads, spread thin), chunk load
+  ~8.5% (zlib inflate ~4%, NBT walk ~4%), fill ~6%, face meshing ~8%, lowres persist ~4.6%, sort + PRBM ~6.5%.
+  Optimized: BMQ2 encode is now mostly zstd.
