@@ -14,6 +14,9 @@ Subsystem deep-dives:
 | 06 | [06-prior-art-and-ecosystem.md](06-prior-art-and-ecosystem.md) | Known perf pain, Rust crates, format drift, JVM interop, license |
 | 07 | [07-bluemap-reverse-reuse.md](07-bluemap-reverse-reuse.md) | What to take from `C:/Users/hexay/bluemap_reverse` (golden harness, diff oracle, lz4-java, Java Random) |
 | 08 | [08-github-issues.md](08-github-issues.md) | All 628 upstream issues categorised: real pain points, bugs not to copy, behaviour to keep |
+| 09 | [09-storage-experiment.md](09-storage-experiment.md) | Measured PRBM codecs: compact quads + zstd ≈7.5× smaller, lossless |
+| 10 | [10-perf-audit-render.md](10-perf-audit-render.md) | Profiled Java render: lock convoy caps at ~4 cores, CPU hotspots, fixes, port implications |
+| 11 | [11-perf-audit-storage-web.md](11-perf-audit-storage-web.md) | Disk + bandwidth wins: ETag/304, asset compression, lowres PNG, webapp loading bugs |
 | 12 | [12-perf-profile-rs.md](12-perf-profile-rs.md) | Profiled our engine: 5 rounds, render CPU −74% (structures 77 → 20 s), libdeflate, BMQ2 memory, web cache/ETags |
 | 14 | [14-real-world-validation.md](14-real-world-validation.md) | 4096² world + MC 1.16.5–1.21.11: parity with Java 5.28, 21× less CPU; Java loses lowres writes nondeterministically |
 
@@ -180,8 +183,10 @@ Settled by the drop-in goal:
 
 - Storage modes — **`compat`** (upstream layout, byte-exact) and **`optimized`** (packed bundles + compact quad
   encoding + zstd, transcoded back to exact PRBM on serve; ~7.5× smaller, see 09). Webapp unchanged in both;
-  `storage convert` moves between them. Optional later: `optimized-static` with a patched webapp tile loader.
-- Storage default — **new installs `optimized`; existing BlueMap storages stay `compat`** until the user converts.
+  `bluemap --convert-storage <id> --to <format>` moves between them. Optional later: `optimized-static` with a patched webapp tile loader.
+- Storage default — **new installs `optimized`, for file *and* SQL storages; existing BlueMap storages stay
+  `compat`** until the user converts. Our webserver transcodes optimized tiles; only external hosting that reads
+  storage directly (sql.php, nginx on the file tree) needs `compat` — the generated config says so.
 - Server integration — **separate process**: one plugin jar bundles per-OS Rust binaries, extracts to the plugin
   data folder, spawns and supervises the core, talks over local IPC. No in-process FFM/JNI.
 - Java addons — **warn only** for the port: detect `packs/*.jar` with `bluemap.addon.json`, log each by name, still
