@@ -1,4 +1,4 @@
-# 15 — Beyond parity: render pausing, memory limit, CPU throttling
+# 15 — Beyond parity: render pausing, memory limit, CPU throttling, resumable renders
 
 Upstream BlueMap's only render knobs are `render-thread-count`, `render-thread-priority` and `player-render-limit`
 (docs/06). bluemap-rs adds three, all through hidden keys (absent from the generated templates, so existing configs
@@ -102,3 +102,27 @@ session starts paused while lagging).
 (fit, hysteresis, idle give-up, MSPT window), `bm-config` `hidden_throttle_keys` + size parser, `bm-ipc` framing of
 `ServerLoad`, `crates/bm-cli/tests/plugin_ipc.rs::server_load_pauses_and_resumes` (scripted shim), and one check per
 `tools/e2e_paper.py` / `tools/e2e_fabric.py` run that the core received `ServerLoad`.
+
+## 4. Resumable renders
+
+A task remembers the regions it finished (`RenderTask.done`, fed by `UpdateStats.last_region` on every
+`Progress`), so an interruption costs at most the region in flight:
+- **Pause** (any reason, §1): the task is queued again once it has wound down, minus its done regions. Before, a
+  forced task restarted from its first region on every pause, so MSPT pausing could stall `-f` forever.
+- **Plugin `tasks.dat`** (`crates/bm-cli/src/tasks_dat.rs`): a partly done task is written as upstream's
+  `map-update` with the done regions first and `currentTaskIndex` past them, which Java BlueMap also resumes from.
+  Fully done tasks are left out.
+- **CLI `-f`** (`crates/bm-cli/src/resume.rs`): when Ctrl+C stops a forced render, the cut-short forced tasks go to
+  `<data>/tasks.dat` (`Saved the forced render's progress; run with -f again to resume it.`). The next `-f` on that map
+  continues (`Resuming the interrupted forced render of map 'x': N regions left (--restart starts over)`) and the
+  file is removed once nothing is left. `--restart` ignores the saved progress. Plain `-r`/`-e` never read or write
+  it, and entries for other maps (or a plugin's) are carried over unchanged.
+- A tile shared by a done and a remaining region is rendered again on resume (both regions own it), so totals add
+  up to slightly more than one uninterrupted run.
+
+**Checked** on testbox: `structures`, 1 render thread, `-r -f` interrupted after 3 s (3 of 31 regions done,
+`tasks.dat` 3544 bytes), then `-r -f` (28 regions left, file gone afterwards). `bm-golden compare-webroots` against
+an uninterrupted render: IDENTICAL (16,467,480 hires faces, all lowres LODs pixel-identical, rstate identical).
+**Tests**: `bm-engine` task (`done_regions_are_skipped_and_limit_containment`) and queue
+(`finished_regions_survive_pause_and_stop`), `bm-cli` `tasks_dat` (`partly_done_tasks_resume_past_their_done_regions`)
+and `resume` (resume once, `--restart`, carried entries, plain `-r` untouched).
