@@ -286,7 +286,7 @@ name = "bm-golden"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bm-compress",
  "bm-format",
  "bm-map",
@@ -368,7 +368,7 @@ dependencies = [
 name = "bm-resources"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bm-java",
  "bm-math",
  "bm-world",
