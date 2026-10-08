@@ -7,7 +7,6 @@ mod conf;
 #[allow(dead_code)]
 mod fixture;
 
-use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 
 use fixture::Fixture;
