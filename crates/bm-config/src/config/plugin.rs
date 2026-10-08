@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-/// `plugin.conf` (`PluginConfig.java`), server platforms only.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+/// `plugin.conf` (`PluginConfig.java`), server platforms only; serializes with Java's field names.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct PluginConfig {
     pub live_player_markers: bool,
     /// Java default is empty; the template writes `["spectator"]`.
