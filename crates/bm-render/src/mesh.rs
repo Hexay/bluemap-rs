@@ -80,14 +80,20 @@ pub fn sort_by_material(model: &TileModel, out: &mut TileModel) {
     out.clear();
     let mut order: Vec<u32> = (0..model.faces() as u32).collect();
     order.sort_by_key(|&i| model.material[i as usize]);
-    for &i in &order {
-        let i = i as usize;
-        out.position.extend_from_slice(&model.position[i * 9..i * 9 + 9]);
-        out.uv.extend_from_slice(&model.uv[i * 6..i * 6 + 6]);
-        out.ao.extend_from_slice(&model.ao[i * 3..i * 3 + 3]);
-        out.color.extend_from_slice(&model.color[i * 3..i * 3 + 3]);
-        out.sunlight.push(model.sunlight[i]);
-        out.blocklight.push(model.blocklight[i]);
-        out.material.push(model.material[i]);
+    gather::<9, _>(&model.position, &order, &mut out.position);
+    gather::<6, _>(&model.uv, &order, &mut out.uv);
+    gather::<3, _>(&model.ao, &order, &mut out.ao);
+    gather::<3, _>(&model.color, &order, &mut out.color);
+    gather::<1, _>(&model.sunlight, &order, &mut out.sunlight);
+    gather::<1, _>(&model.blocklight, &order, &mut out.blocklight);
+    gather::<1, _>(&model.material, &order, &mut out.material);
+}
+
+/// `out` = the `N`-element records of `src` in `order`.
+fn gather<const N: usize, T: Copy + Default>(src: &[T], order: &[u32], out: &mut Vec<T>) {
+    let src = src.as_chunks::<N>().0;
+    out.resize(order.len() * N, T::default());
+    for (dst, &i) in out.as_chunks_mut::<N>().0.iter_mut().zip(order) {
+        *dst = src[i as usize];
     }
 }

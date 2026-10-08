@@ -8,14 +8,34 @@ use super::view::QV;
 const GRIDS: [u8; 3] = [4, 5, 8];
 
 fn grid_value(q: i16, g: u8) -> f32 {
-    f32::from(q) / (1u32 << g) as f32
+    // the reciprocal of a power of two is exact, so this equals the division
+    f32::from(q) * (1.0 / (1u32 << g) as f32)
 }
 
 /// Nearest grid value (saturated to i16) and whether it reproduces `bits` exactly (-0.0 and NaN never do).
 fn quantize(bits: u32, g: u8) -> (i16, bool) {
+    // scaling by 2^g is exact in f32, so a value on the grid (the common case) is an integer in range here
+    let x = f32::from_bits(bits) * (1u32 << g) as f32;
+    if (-32768.0..=32767.0).contains(&x) && f32::from(x as i16) == x && bits != (-0.0f32).to_bits() {
+        debug_assert_eq!((x as i16, true), quantize_rounded(bits, g));
+        return (x as i16, true);
+    }
+    quantize_rounded(bits, g)
+}
+
+fn quantize_rounded(bits: u32, g: u8) -> (i16, bool) {
     let v = f32::from_bits(bits);
-    let q = if v.is_finite() { (f64::from(v) * f64::from(1u32 << g)).round().clamp(-32768.0, 32767.0) as i16 } else { 0 };
+    let scaled = f64::from(v) * f64::from(1u32 << g);
+    let q = if v.is_finite() { round_half_away(scaled.clamp(-32768.0, 32767.0)) } else { 0 };
+    debug_assert!(!v.is_finite() || q == scaled.round().clamp(-32768.0, 32767.0) as i16);
     (q, grid_value(q, g).to_bits() == bits)
+}
+
+/// `f64::round` for values in i16 range, without the libm call baseline x86-64 makes for it.
+fn round_half_away(x: f64) -> i16 {
+    let t = x as i32;
+    let frac = x - f64::from(t);
+    (t + i32::from(frac >= 0.5) - i32::from(frac <= -0.5)) as i16
 }
 
 /// Calls `f(quad, vertex, component, bits)` for the stored values of a PRBM f32 attribute with `K` components, in
@@ -123,6 +143,27 @@ pub(super) fn decode(r: &mut Reader, quads: usize, k: usize, g: u8, values: &mut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rounding_matches_f64_round() {
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        let mut samples = vec![0.5, -0.5, 1.5, -1.5, 2.5, 0.49999999999999994, -0.49999999999999994, 32767.4, -32767.6];
+        samples.extend((0..100_000).map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 11) as f64 / (1u64 << 53) as f64 * 70_000.0 - 35_000.0
+        }));
+        for v in samples {
+            let v = v.clamp(-32768.0, 32767.0);
+            assert_eq!(round_half_away(v), v.round() as i16, "{v}");
+        }
+        for q in [i16::MIN, -255, -1, 0, 1, 77, i16::MAX] {
+            for g in GRIDS {
+                assert_eq!(grid_value(q, g), f32::from(q) / (1u32 << g) as f32);
+            }
+        }
+    }
 
     #[test]
     fn grid_and_escapes_are_exact() {

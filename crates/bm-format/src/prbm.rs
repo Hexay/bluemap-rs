@@ -58,30 +58,24 @@ impl TileModel {
         u24(out, 0);
 
         attribute(out, "position", 0x21);
-        self.position.iter().for_each(|&v| f32_le(out, v));
+        floats(out, &self.position);
 
         attribute(out, "normal", 0x63);
-        for p in self.position.as_chunks::<9>().0 {
-            let n = surface_normal(p).map(normal_byte);
-            (0..3).for_each(|_| out.extend(n));
-        }
+        per_triangle(out, &self.position, |p: &[f32; 9]| surface_normal(p).map(normal_byte));
 
         attribute(out, "color", 0x67);
-        for c in self.color.as_chunks::<3>().0 {
-            let c = [unit_byte(c[0]), unit_byte(c[1]), unit_byte(c[2])];
-            (0..3).for_each(|_| out.extend(c));
-        }
+        per_triangle(out, &self.color, |c: &[f32; 3]| c.map(unit_byte));
 
         attribute(out, "uv", 0x11);
-        self.uv.iter().for_each(|&v| f32_le(out, v));
+        floats(out, &self.uv);
 
         attribute(out, "ao", 0x47);
         out.extend(self.ao.iter().map(|&v| unit_byte(v)));
 
         attribute(out, "blocklight", 0x03);
-        self.blocklight.iter().for_each(|&l| out.extend([l; 3]));
+        light(out, &self.blocklight);
         attribute(out, "sunlight", 0x03);
-        self.sunlight.iter().for_each(|&l| out.extend([l; 3]));
+        light(out, &self.sunlight);
 
         pad(out);
         let mut start = 0;
@@ -120,10 +114,34 @@ pub(crate) fn u24(out: &mut Vec<u8>, v: usize) {
     out.extend(&(v as u32).to_le_bytes()[..3]);
 }
 
-/// `Float.floatToIntBits`: every NaN collapses to the canonical one.
-fn f32_le(out: &mut Vec<u8>, v: f32) {
-    let bits = if v.is_nan() { 0x7fc0_0000 } else { v.to_bits() };
-    out.extend(bits.to_le_bytes());
+/// `count` more bytes at the end of `out`, to be written in place.
+fn append(out: &mut Vec<u8>, count: usize) -> &mut [u8] {
+    let start = out.len();
+    out.resize(start + count, 0);
+    &mut out[start..]
+}
+
+/// `Float.floatToIntBits` of each value: every NaN collapses to the canonical one.
+fn floats(out: &mut Vec<u8>, values: &[f32]) {
+    for (b, &v) in append(out, values.len() * 4).as_chunks_mut::<4>().0.iter_mut().zip(values) {
+        *b = if v.is_nan() { 0x7fc0_0000u32 } else { v.to_bits() }.to_le_bytes();
+    }
+}
+
+/// Each triangle's light byte for each of its 3 vertices.
+fn light(out: &mut Vec<u8>, values: &[u8]) {
+    for (b, &l) in append(out, values.len() * 3).as_chunks_mut::<3>().0.iter_mut().zip(values) {
+        *b = [l; 3];
+    }
+}
+
+/// One 3-byte value from each triangle's `N` inputs, written for each of its 3 vertices.
+fn per_triangle<const N: usize, T>(out: &mut Vec<u8>, values: &[T], f: impl Fn(&[T; N]) -> [u8; 3]) {
+    let values = values.as_chunks::<N>().0;
+    for (b, v) in append(out, values.len() * 9).as_chunks_mut::<9>().0.iter_mut().zip(values) {
+        let [x, y, z] = f(v);
+        *b = [x, y, z, x, y, z, x, y, z];
+    }
 }
 
 /// `(int)(v * 255) & 0xFF`: float multiply, saturating cast, low byte.
