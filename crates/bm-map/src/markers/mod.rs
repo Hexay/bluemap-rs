@@ -80,7 +80,9 @@ fn marker_set_json(id: &str, set: &Json, warnings: &mut Vec<String>) -> Result<S
             "default-hidden" => default_hidden = read::boolean(value).map_err(field)?,
             "sorting" => sorting = read::stream_int(value).map_err(field)?,
             "markers" => {
-                let Json::Obj(entries) = value else { return Err(field(format!("expected an object, got {}", value.kind()))) };
+                let Json::Obj(entries) = value else {
+                    return Err(field(format!("expected an object, got {}", value.kind())));
+                };
                 markers.clear();
                 for (marker_id, marker) in entries {
                     match Marker::read(marker) {
@@ -95,7 +97,8 @@ fn marker_set_json(id: &str, set: &Json, warnings: &mut Vec<String>) -> Result<S
             _ => {}
         }
     }
-    let markers_json = ordered_object(&concurrent_hash_map_order(&markers.iter().map(|(k, _)| *k).collect::<Vec<_>>()), &markers);
+    let markers_json =
+        ordered_object(&concurrent_hash_map_order(&markers.iter().map(|(k, _)| *k).collect::<Vec<_>>()), &markers);
     Ok(JsonObject::new()
         .string("label", &label)
         .bool("toggleable", toggleable)

@@ -59,7 +59,8 @@ impl RenderPlan {
         tasks.extend(resume.saved.tasks);
         let path = tasks_dat::file(&resume.data);
         let result = if tasks.is_empty() && resume.saved.purges.is_empty() {
-            std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
+            std::fs::remove_file(&path)
+                .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
         } else {
             tasks_dat::write(&resume.data, &tasks_dat::encode(&tasks, &resume.saved.purges, regions))
         };

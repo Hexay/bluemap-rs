@@ -69,7 +69,10 @@ mod tests {
         assert_eq!([java_round(-0.5), java_round(0.5), java_round(-1.5), java_round(0.49999997)], [0, 1, -1, 0]);
         assert_eq!(java_round(-4.371139e-8), 0);
         assert_eq!(java_round(f32::NAN), 0);
-        assert_eq!([java_round(-2.5), java_round(-2.6), java_round(1e10), java_round(-1e10)], [-2, -3, i32::MAX, i32::MIN]);
+        assert_eq!(
+            [java_round(-2.5), java_round(-2.6), java_round(1e10), java_round(-1e10)],
+            [-2, -3, i32::MAX, i32::MIN]
+        );
         for v in [-3.75f32, -1.0, -0.25, 0.0, 0.7, 2.5, 1e-9, -1e-9] {
             assert_eq!(java_round(v), (f64::from(v) + 0.5).floor() as i32, "{v}");
         }

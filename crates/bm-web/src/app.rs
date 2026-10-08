@@ -146,8 +146,7 @@ impl WebApp {
             if let Some(rest) = rest.filter(|r| !r.contains(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])) {
                 let rest = rest.strip_prefix('/').unwrap_or(rest);
                 let rest = if rest.is_empty() { "/" } else { rest };
-                return map_handler::handle(map, rest, &req.method, &req.headers, self.map_etags, &self.shutdown)
-                    .await;
+                return map_handler::handle(map, rest, &req.method, &req.headers, self.map_etags, &self.shutdown).await;
             }
         }
         self.statics.handle(&req.method, route_path, query, &req.headers).await

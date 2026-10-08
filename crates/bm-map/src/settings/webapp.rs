@@ -2,8 +2,8 @@
 
 use serde::Deserialize;
 
-use crate::gson::{JsonObject, string_array};
 use super::{SettingsError, WebappConfig};
+use crate::gson::{JsonObject, string_array};
 
 /// The persisted settings; field defaults are the `Settings` class's own, which differ from `WebappConfig`'s.
 #[derive(Clone, Debug, PartialEq, Deserialize)]

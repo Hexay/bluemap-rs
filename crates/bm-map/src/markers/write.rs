@@ -34,7 +34,10 @@ impl Marker {
             }
         }
         if let Some(object) = &self.object {
-            json = json.string("detail", &object.detail).opt_string("link", object.link.as_deref()).bool("newTab", object.new_tab);
+            json = json
+                .string("detail", &object.detail)
+                .opt_string("link", object.link.as_deref())
+                .bool("newTab", object.new_tab);
         }
         json.raw("minDistance", &double_to_string(self.min_distance))
             .raw("maxDistance", &double_to_string(self.max_distance))

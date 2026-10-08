@@ -65,7 +65,8 @@ fn check_fixture(fixture: &str) -> u64 {
     let settings: serde_json::Value = serde_json::from_slice(&fs::read(map.join("settings.json")).unwrap()).unwrap();
     let lowres = &settings["lowres"];
     let ts = [lowres["tileSize"][0].as_i64().unwrap() as i32, lowres["tileSize"][1].as_i64().unwrap() as i32];
-    let (lod_count, lod_factor) = (lowres["lodCount"].as_u64().unwrap() as u32, lowres["lodFactor"].as_i64().unwrap() as i32);
+    let (lod_count, lod_factor) =
+        (lowres["lodCount"].as_u64().unwrap() as u32, lowres["lodFactor"].as_i64().unwrap() as i32);
     let size = [ts[0] as usize, ts[1] as usize];
 
     let goldens: Vec<_> = (1..=lod_count).map(|lod| golden_tiles(&map.join(format!("tiles/{lod}")), size)).collect();
@@ -102,7 +103,8 @@ fn check_fixture(fixture: &str) -> u64 {
         }
         let bad: u64 = counts.iter().sum::<u64>() + (missing.len() + extra.len()) as u64;
         total += bad;
-        let detail: Vec<_> = CHANNELS.iter().zip(counts).filter(|(_, n)| *n > 0).map(|(c, n)| format!("{c}={n}")).collect();
+        let detail: Vec<_> =
+            CHANNELS.iter().zip(counts).filter(|(_, n)| *n > 0).map(|(c, n)| format!("{c}={n}")).collect();
         println!(
             "{fixture} lod{lod}: {} tiles, missing {missing:?}, extra {extra:?}, channel mismatches [{}]",
             golden.len(),

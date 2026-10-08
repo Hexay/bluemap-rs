@@ -2,7 +2,9 @@ mod common;
 
 use std::path::Path;
 
-use bm_storage::{Compression, Dialect, Error, FileStorage, GridKey, ItemKey, SqlConfig, SqlStorage, Storage, copy_map};
+use bm_storage::{
+    Compression, Dialect, Error, FileStorage, GridKey, ItemKey, SqlConfig, SqlStorage, Storage, copy_map,
+};
 use sqlx::{AssertSqlSafe, Connection, Row, SqliteConnection};
 use tokio::runtime::Runtime;
 

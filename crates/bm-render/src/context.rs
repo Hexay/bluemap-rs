@@ -5,9 +5,9 @@ use bm_resources::datapack::BiomeTable;
 use bm_resources::resource_pack::ResourcePack;
 use bm_world::StateId;
 
+use crate::flags::Flags;
 use crate::relative::Offset;
 use crate::settings::RenderSettings;
-use crate::flags::Flags;
 use crate::states::{StateCache, StateInfo};
 use crate::view::View;
 

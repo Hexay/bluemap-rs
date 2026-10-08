@@ -4,7 +4,10 @@ use super::*;
 
 fn pack(values: &[u32], bits: u32) -> Vec<u64> {
     let per_long = (64 / bits) as usize;
-    values.chunks(per_long).map(|c| c.iter().enumerate().fold(0, |l, (i, &v)| l | (v as u64) << (i as u32 * bits))).collect()
+    values
+        .chunks(per_long)
+        .map(|c| c.iter().enumerate().fold(0, |l, (i, &v)| l | (v as u64) << (i as u32 * bits)))
+        .collect()
 }
 
 struct Fixture {
@@ -15,12 +18,17 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let states = BlockStates::default();
-        states.add_defaults_json(r#"{"minecraft:lever": "minecraft:lever[face=wall,facing=north,powered=false]"}"#).unwrap();
+        states
+            .add_defaults_json(r#"{"minecraft:lever": "minecraft:lever[face=wall,facing=north,powered=false]"}"#)
+            .unwrap();
         Self { states, biomes: Biomes::default() }
     }
 
     fn parse(&self, nbt: &[u8]) -> Result<Chunk> {
-        Chunk::parse(nbt, &ChunkContext { states: &self.states, biomes: &self.biomes, dimension: &DimensionType::OVERWORLD })
+        Chunk::parse(
+            nbt,
+            &ChunkContext { states: &self.states, biomes: &self.biomes, dimension: &DimensionType::OVERWORLD },
+        )
     }
 }
 
@@ -38,7 +46,11 @@ fn modern_chunk(status: &str) -> Vec<u8> {
         w.begin_compound("block_states");
         w.begin_compound_list("palette", 2);
         w.string("Name", "minecraft:stone").end_compound();
-        w.string("Name", "minecraft:oak_log").begin_compound("Properties").string("axis", "x").end_compound().end_compound();
+        w.string("Name", "minecraft:oak_log")
+            .begin_compound("Properties")
+            .string("axis", "x")
+            .end_compound()
+            .end_compound();
         let indices: Vec<u32> = (0..4096).map(|i| i % 2).collect();
         w.long_array("data", &pack(&indices, 4));
         w.end_compound();
@@ -123,7 +135,11 @@ fn palette_shorthands_of_26_3() {
     w.byte("Y", 0).begin_compound("block_states").string_list("palette", &["lever"]).end_compound().end_compound();
     w.byte("Y", 1).begin_compound("block_states").begin_compound_list("palette", 3);
     w.string("", "minecraft:lever").end_compound();
-    w.string("id", "minecraft:lever").begin_compound("properties").string("face", "floor").end_compound().end_compound();
+    w.string("id", "minecraft:lever")
+        .begin_compound("properties")
+        .string("face", "floor")
+        .end_compound()
+        .end_compound();
     w.int("broken", 1).end_compound();
     w.long_array("data", &pack(&(0..4096).map(|i| i % 3).collect::<Vec<_>>(), 4)).end_compound().end_compound();
     let c = f.parse(&w.finish()).unwrap();

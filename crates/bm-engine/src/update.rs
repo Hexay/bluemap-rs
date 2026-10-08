@@ -7,10 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ScopedJoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use bm_map::renderstate::{
-    Action, CellIo, MapChunkState, MapRegionState, MapTileState, TileInfo, TileUpdateStrategy,
-};
 use bm_format::grid::Tile;
+use bm_map::renderstate::{Action, CellIo, MapChunkState, MapRegionState, MapTileState, TileInfo, TileUpdateStrategy};
 use bm_render::StateCache;
 use bm_world::ChunkArea;
 use rustc_hash::FxHashSet;
@@ -85,7 +83,11 @@ pub fn update_map(
     on_event: &mut dyn FnMut(UpdateEvent),
 ) -> Result<UpdateStats> {
     let c = &ctx.config;
-    let lowres = LowresSettings { tile_size: c.lowres_tile_size, lod_count: c.lod_count.max(0) as u32, lod_factor: c.lod_factor };
+    let lowres = LowresSettings {
+        tile_size: c.lowres_tile_size,
+        lod_count: c.lod_count.max(0) as u32,
+        lod_factor: c.lod_factor,
+    };
     let persister = Persister::start(ctx.storage.clone(), lowres, ctx.tile_listener.clone())?;
     let result = run(ctx, resources, job, &persister, on_event);
     let persisted = persister.finish();
@@ -105,8 +107,11 @@ fn run(
     on_event: &mut dyn FnMut(UpdateEvent),
 ) -> Result<UpdateStats> {
     let cells = || QueuedCells { storage: ctx.storage.clone(), queue: persister.queue.clone() };
-    let mut states =
-        States { tiles: MapTileState::new(cells()), chunks: MapChunkState::new(cells()), regions: MapRegionState::new(cells()) };
+    let mut states = States {
+        tiles: MapTileState::new(cells()),
+        chunks: MapChunkState::new(cells()),
+        regions: MapRegionState::new(cells()),
+    };
     let mut stats = UpdateStats::default();
 
     let Some(plan) = plan(ctx, job.regions, &mut states.regions, on_event)? else { return Ok(stats) };

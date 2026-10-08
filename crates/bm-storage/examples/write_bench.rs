@@ -62,7 +62,11 @@ fn load(dir: &Path) -> Tiles {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         for e in fs::read_dir(dir).unwrap().flatten() {
             let p = e.path();
-            if p.is_dir() { walk(&p, out) } else if p.to_string_lossy().ends_with(".prbm.gz") { out.push(p) }
+            if p.is_dir() {
+                walk(&p, out)
+            } else if p.to_string_lossy().ends_with(".prbm.gz") {
+                out.push(p)
+            }
         }
     }
     let mut files = Vec::new();
@@ -135,7 +139,13 @@ fn atomic_breakdown(dir: &Path, data: &[Vec<u8>]) {
         t[3] += s.elapsed().as_nanos();
     }
     let us = |x: u128| x as f64 / 1e3 / data.len() as f64;
-    println!("atomic write steps, µs/write: open(create_new) {:.0}, write {:.0}, close {:.0}, rename {:.0}", us(t[0]), us(t[1]), us(t[2]), us(t[3]));
+    println!(
+        "atomic write steps, µs/write: open(create_new) {:.0}, write {:.0}, close {:.0}, rename {:.0}",
+        us(t[0]),
+        us(t[1]),
+        us(t[2]),
+        us(t[3])
+    );
 }
 
 fn main() {
@@ -155,28 +165,49 @@ fn main() {
     for t in [1, threads] {
         let root = scratch.join(format!("file-{t}"));
         let map = FileStorage::new(&root, Compression::Gzip).map("m").unwrap();
-        run("file write_grid gzip (fresh)", n, raw_bytes, t, |i| map.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap());
-        run("file write_grid gzip (overwrite)", n, raw_bytes, t, |i| map.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap());
+        run("file write_grid gzip (fresh)", n, raw_bytes, t, |i| {
+            map.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap()
+        });
+        run("file write_grid gzip (overwrite)", n, raw_bytes, t, |i| {
+            map.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap()
+        });
         run("gzip-6 compress only", n, raw_bytes, t, |i| drop(Compression::Gzip.compress(&tiles.raw[i].1).unwrap()));
-        run("file write_grid_encoded (overwrite)", n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
+        run("file write_grid_encoded (overwrite)", n, gz_bytes, t, |i| {
+            map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap()
+        });
         let fm = FileStorage::new(&root, Compression::Gzip).file_map("m").unwrap();
-        run("plain fs::write, non-atomic (overwrite)", n, gz_bytes, t, |i| fs::write(fm.grid_cell_path(GridKey::Hires, tiles.raw[i].0), &tiles.gz[i]).unwrap());
+        run("plain fs::write, non-atomic (overwrite)", n, gz_bytes, t, |i| {
+            fs::write(fm.grid_cell_path(GridKey::Hires, tiles.raw[i].0), &tiles.gz[i]).unwrap()
+        });
         let zroot = scratch.join(format!("zstd-{t}"));
         let zmap = FileStorage::new(&zroot, Compression::Zstd).map("m").unwrap();
-        run("file write_grid zstd-3 (fresh)", n, raw_bytes, t, |i| zmap.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap());
+        run("file write_grid zstd-3 (fresh)", n, raw_bytes, t, |i| {
+            zmap.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap()
+        });
     }
     atomic_breakdown(&scratch.join("steps"), &tiles.gz);
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     for t in [1, threads] {
         let db = scratch.join(format!("sqlite-{t}.db"));
-        let storage = SqlStorage::connect(&SqlConfig::new(format!("sqlite:{}", db.display())), rt.handle().clone()).unwrap();
+        let storage =
+            SqlStorage::connect(&SqlConfig::new(format!("sqlite:{}", db.display())), rt.handle().clone()).unwrap();
         let map = storage.map("m").unwrap();
-        run("sqlite write_grid_encoded (fresh)", n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
-        run("sqlite write_grid_encoded (overwrite)", n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
-        run("sqlite write_grid gzip (overwrite)", n, raw_bytes, t, |i| map.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap());
+        run("sqlite write_grid_encoded (fresh)", n, gz_bytes, t, |i| {
+            map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap()
+        });
+        run("sqlite write_grid_encoded (overwrite)", n, gz_bytes, t, |i| {
+            map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap()
+        });
+        run("sqlite write_grid gzip (overwrite)", n, raw_bytes, t, |i| {
+            map.write_grid(GridKey::Hires, tiles.raw[i].0, &tiles.raw[i].1).unwrap()
+        });
         storage.close();
-        println!("sqlite db size after {t}-thread run: {} B (+wal {} B)", fs::metadata(&db).map_or(0, |m| m.len()), fs::metadata(db.with_extension("db-wal")).map_or(0, |m| m.len()));
+        println!(
+            "sqlite db size after {t}-thread run: {} B (+wal {} B)",
+            fs::metadata(&db).map_or(0, |m| m.len()),
+            fs::metadata(db.with_extension("db-wal")).map_or(0, |m| m.len())
+        );
     }
     sqlite_batched(&rt, &scratch.join("sqlite-batch.db"), &tiles);
     for (i, _) in args.iter().enumerate().filter(|(_, a)| *a == "--sql") {
@@ -193,18 +224,36 @@ fn sql_server(rt: &tokio::runtime::Runtime, url: &str, tiles: &Tiles, threads: u
         let config = SqlConfig { table_prefix: "bmbench_".into(), max_connections: t as u32, ..SqlConfig::new(url) };
         let storage = SqlStorage::connect(&config, rt.handle().clone()).unwrap();
         let map = storage.map("m").unwrap();
-        run(&format!("{scheme} write_grid_encoded (fresh)"), n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
-        run(&format!("{scheme} write_grid_encoded (overwrite)"), n, gz_bytes, t, |i| map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap());
-        run(&format!("{scheme} read_grid"), n, gz_bytes, t, |i| drop(map.read_grid(GridKey::Hires, tiles.raw[i].0).unwrap()));
+        run(&format!("{scheme} write_grid_encoded (fresh)"), n, gz_bytes, t, |i| {
+            map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap()
+        });
+        run(&format!("{scheme} write_grid_encoded (overwrite)"), n, gz_bytes, t, |i| {
+            map.write_grid_encoded(GridKey::Hires, tiles.raw[i].0, &tiles.gz[i]).unwrap()
+        });
+        run(&format!("{scheme} read_grid"), n, gz_bytes, t, |i| {
+            drop(map.read_grid(GridKey::Hires, tiles.raw[i].0).unwrap())
+        });
         storage.close();
         rt.block_on(async {
             let (_, sqlx_url) = bm_storage::Dialect::from_url(url).unwrap();
-            for table in ["grid_storage_data", "item_storage_data", "grid_storage", "item_storage", "compression", "map"] {
+            for table in
+                ["grid_storage_data", "item_storage_data", "grid_storage", "item_storage", "compression", "map"]
+            {
                 let drop = format!("DROP TABLE bmbench_{table}");
                 if scheme.starts_with("postgres") {
-                    sqlx::PgConnection::connect(&sqlx_url).await.unwrap().execute(sqlx::AssertSqlSafe(drop.as_str())).await.unwrap();
+                    sqlx::PgConnection::connect(&sqlx_url)
+                        .await
+                        .unwrap()
+                        .execute(sqlx::AssertSqlSafe(drop.as_str()))
+                        .await
+                        .unwrap();
                 } else {
-                    sqlx::MySqlConnection::connect(&sqlx_url).await.unwrap().execute(sqlx::AssertSqlSafe(drop.as_str())).await.unwrap();
+                    sqlx::MySqlConnection::connect(&sqlx_url)
+                        .await
+                        .unwrap()
+                        .execute(sqlx::AssertSqlSafe(drop.as_str()))
+                        .await
+                        .unwrap();
                 }
             }
         });
@@ -214,7 +263,8 @@ fn sql_server(rt: &tokio::runtime::Runtime, url: &str, tiles: &Tiles, threads: u
 /// One transaction around all upserts on one connection: the ceiling for batched SQL writes.
 fn sqlite_batched(rt: &tokio::runtime::Runtime, db: &Path, tiles: &Tiles) {
     use sqlx::Connection;
-    let storage = SqlStorage::connect(&SqlConfig::new(format!("sqlite:{}", db.display())), rt.handle().clone()).unwrap();
+    let storage =
+        SqlStorage::connect(&SqlConfig::new(format!("sqlite:{}", db.display())), rt.handle().clone()).unwrap();
     storage.map("m").unwrap().write_grid_encoded(GridKey::Hires, (9999, 9999), b"x").unwrap();
     storage.close();
     let n = tiles.gz.len();

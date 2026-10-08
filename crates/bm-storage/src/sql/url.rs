@@ -84,7 +84,10 @@ fn decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        let hex = bytes.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        let hex = bytes
+            .get(i + 1..i + 3)
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
         match (bytes[i], hex) {
             (b'%', Some(b)) => {
                 out.push(b);
@@ -131,9 +134,12 @@ mod tests {
 
     #[test]
     fn jdbc_query_parameters() {
-        let (_, url) = connect_url("jdbc:mariadb://h/db?user=bm&password=a%26b&useSSL=false&useUnicode=true", &[]).unwrap();
+        let (_, url) =
+            connect_url("jdbc:mariadb://h/db?user=bm&password=a%26b&useSSL=false&useUnicode=true", &[]).unwrap();
         assert_eq!(url, "mysql://bm:a%26b@h/db?ssl-mode=DISABLED&useUnicode=true");
-        let (_, url) = connect_url("jdbc:postgresql://h:5432/db?currentSchema=maps&sslmode=require", &props(&[("user", "u")])).unwrap();
+        let (_, url) =
+            connect_url("jdbc:postgresql://h:5432/db?currentSchema=maps&sslmode=require", &props(&[("user", "u")]))
+                .unwrap();
         assert_eq!(url, "postgresql://u@h:5432/db?options[search_path]=maps&sslmode=require");
         assert_eq!(connect_url("sqlite:bm.db", &props(&[("user", "u")])).unwrap().1, "sqlite:bm.db");
     }

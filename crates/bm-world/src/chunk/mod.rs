@@ -174,7 +174,8 @@ impl Chunk {
 
     /// Top y of the highest section holding anything but one state `is_air` accepts; every block above it is air.
     pub fn top_y(&self, is_air: impl Fn(StateId) -> bool) -> Option<i32> {
-        let solid = |s: &Option<Section>| s.as_ref().is_some_and(|s| !matches!(s.blocks, Blocks::Single(id) if is_air(id)));
+        let solid =
+            |s: &Option<Section>| s.as_ref().is_some_and(|s| !matches!(s.blocks, Blocks::Single(id) if is_air(id)));
         let i = self.sections.iter().rposition(solid)?;
         Some((self.min_section + i as i32) * 16 + 15)
     }

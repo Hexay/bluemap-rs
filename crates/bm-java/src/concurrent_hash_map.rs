@@ -99,7 +99,11 @@ fn split_list<'a>(nodes: &[Node<'a>], high: impl Fn(u32) -> bool) -> (Vec<Node<'
             last_run = j;
         }
     }
-    if run_bit { hi.extend_from_slice(&nodes[last_run..]) } else { lo.extend_from_slice(&nodes[last_run..]) }
+    if run_bit {
+        hi.extend_from_slice(&nodes[last_run..])
+    } else {
+        lo.extend_from_slice(&nodes[last_run..])
+    }
     for &node in &nodes[..last_run] {
         if high(node.0) { hi.insert(0, node) } else { lo.insert(0, node) }
     }

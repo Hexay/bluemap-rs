@@ -86,12 +86,22 @@ impl Physical for SqlStorage {
 }
 
 /// Converts the file storage at `root` (hires compat tiles use `compression`) to `to`.
-pub fn convert_file_storage(root: &Path, compression: Compression, to: Format, progress: Progress) -> Result<ConvertStats> {
+pub fn convert_file_storage(
+    root: &Path,
+    compression: Compression,
+    to: Format,
+    progress: Progress,
+) -> Result<ConvertStats> {
     convert(&FileStorage::new(root, compression), to, progress)
 }
 
 /// Converts the SQL storage of `config` (its `format` is ignored) to `to`.
-pub fn convert_sql_storage(config: &SqlConfig, runtime: Handle, to: Format, progress: Progress) -> Result<ConvertStats> {
+pub fn convert_sql_storage(
+    config: &SqlConfig,
+    runtime: Handle,
+    to: Format,
+    progress: Progress,
+) -> Result<ConvertStats> {
     let storage = SqlStorage::connect_unchecked(config, runtime)?;
     let result = convert(&storage, to, progress);
     storage.close();

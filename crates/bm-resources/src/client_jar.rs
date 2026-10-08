@@ -52,7 +52,11 @@ impl PackVersions {
 
     /// Reads `version.json` from a client jar; a jar without one gets [`PackVersions::default`].
     pub fn read(jar: &Path) -> Result<Self> {
-        let json = if jar.is_dir() { Pack::open(jar)?.read_string("version.json") } else { zip_entry_string(jar, "version.json")? };
+        let json = if jar.is_dir() {
+            Pack::open(jar)?.read_string("version.json")
+        } else {
+            zip_entry_string(jar, "version.json")?
+        };
         json.map_or(Ok(Self::default()), |s| Self::parse_version_json(&s))
     }
 }

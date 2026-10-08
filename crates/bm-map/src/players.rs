@@ -72,7 +72,8 @@ mod tests {
             // (double) 12.345f, the way Vector3d widens Location's floats
             rotation: [f64::from(12.345_f32), -90.0, 0.0],
         };
-        let other = LivePlayer { uuid: "u2", name: "Bob", foreign: true, position: [1e7, 0.0, -0.0], rotation: [0.0; 3] };
+        let other =
+            LivePlayer { uuid: "u2", name: "Bob", foreign: true, position: [1e7, 0.0, -0.0], rotation: [0.0; 3] };
         assert_eq!(
             players_json([p, other]),
             "{\"players\":[{\"uuid\":\"0b2a8e4c-1f1e-4d5e-9b7a-3c2d1e0f9a8b\",\"name\":\"Al<i>ce\\\"\\u0001\",\

@@ -144,7 +144,11 @@ impl<S: LowresStore> LowresTileManager<S> {
                 self.store.unchanged(lod, tile);
                 Ok(())
             } else {
-                saved.next().expect("one result per changed tile").map_err(|source| LowresLayerError::Save { lod, tile, source })
+                saved.next().expect("one result per changed tile").map_err(|source| LowresLayerError::Save {
+                    lod,
+                    tile,
+                    source,
+                })
             };
             if let Err(e) = result.and_then(|()| self.cascade(lod, tile, &d.data)) {
                 self.layers[lod as usize - 1].insert(tile, d);
@@ -193,7 +197,8 @@ impl<S: LowresStore> LowresTileManager<S> {
         let dirty = match self.layers[lod as usize - 1].entry(tile) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
-                let stored = self.store.load(lod, tile).map_err(|source| LowresLayerError::Load { lod, tile, source })?;
+                let stored =
+                    self.store.load(lod, tile).map_err(|source| LowresLayerError::Load { lod, tile, source })?;
                 let [sx, sz] = self.grid.size;
                 let loaded = stored.as_ref().map(pixel_hash);
                 e.insert(Dirty { data: stored.unwrap_or_else(|| LowresTile::new([sx as usize, sz as usize])), loaded })

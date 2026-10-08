@@ -73,10 +73,8 @@ impl Resources {
         if !folder.is_dir() {
             return Ok(self.pack.datapack.clone());
         }
-        let mut world_packs: Vec<PathBuf> = std::fs::read_dir(&folder)
-            .map_err(io("list", &folder))?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .collect();
+        let mut world_packs: Vec<PathBuf> =
+            std::fs::read_dir(&folder).map_err(io("list", &folder))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
         world_packs.sort();
         // no extra roots: the shared pack roots, so the shared datapack (reloading costs ~60 ms, mostly the jar)
         if world_packs.is_empty() {
@@ -93,7 +91,10 @@ fn write_resource_extensions(file: &Path) -> Result<()> {
 
 /// The packs `minecraft` selects, baked, and the block-state registry with their default states. The bundled pack
 /// is opened from memory: the same bytes and origin as the file [`write_resource_extensions`] writes.
-fn load_packs(roots: &PackRootsConfig, minecraft: &MinecraftVersion) -> std::io::Result<(ResourcePack, Arc<BlockStates>)> {
+fn load_packs(
+    roots: &PackRootsConfig,
+    minecraft: &MinecraftVersion,
+) -> std::io::Result<(ResourcePack, Arc<BlockStates>)> {
     let resource_roots = pack_roots(roots, &[], &minecraft.resource_pack)?;
     let data_roots = pack_roots(roots, &[], &minecraft.data_pack)?;
     let mut opened = OpenedRoots::default();

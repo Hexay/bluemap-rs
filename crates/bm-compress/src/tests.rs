@@ -43,7 +43,8 @@ fn ids_keys_and_suffixes_match_bluemap() {
 fn chunk_types_map_to_compressions() {
     let types: Vec<_> = (0..=5).chain([127]).map(Compression::from_chunk_type).collect();
     let c = |c| Some(c);
-    let want = [None, c(Compression::Gzip), c(Compression::Deflate), c(Compression::None), c(Compression::Lz4), None, None];
+    let want =
+        [None, c(Compression::Gzip), c(Compression::Deflate), c(Compression::None), c(Compression::Lz4), None, None];
     assert_eq!(types, want);
 }
 

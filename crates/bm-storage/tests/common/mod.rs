@@ -168,7 +168,10 @@ pub fn assert_hires(storage: &dyn Storage) {
     expected.sort();
     assert_eq!(tiles, expected);
     for (i, &t) in TILES.iter().enumerate() {
-        assert_eq!(map.read_grid(GridKey::Hires, t).unwrap().unwrap().decompress().unwrap(), prbm(100 + i * 37, i as f32));
+        assert_eq!(
+            map.read_grid(GridKey::Hires, t).unwrap().unwrap().decompress().unwrap(),
+            prbm(100 + i * 37, i as f32)
+        );
     }
 }
 

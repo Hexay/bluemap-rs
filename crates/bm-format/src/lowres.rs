@@ -32,7 +32,8 @@ impl LowresTile {
 
     pub fn set(&mut self, x: usize, z: usize, argb: u32, height: i32, block_light: u8) {
         self.pixels[z * self.width + x] = argb;
-        self.pixels[(self.depth + z) * self.width + x] = (height as u32 & 0xFFFF) | (block_light as u32) << 16 | 0xFF00_0000;
+        self.pixels[(self.depth + z) * self.width + x] =
+            (height as u32 & 0xFFFF) | (block_light as u32) << 16 | 0xFF00_0000;
     }
 
     pub fn color(&self, x: usize, z: usize) -> u32 {

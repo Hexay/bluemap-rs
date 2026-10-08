@@ -105,7 +105,8 @@ fn respan(data: BeArray<8>) -> Padded {
 fn parse_biomes(ids: BeArray<4>, cells: bool, ctx: &ChunkContext) -> Option<LegacyBiomes> {
     let biome = |id: i32| legacy_biomes::name(id).map_or(BiomeId::DEFAULT, |n| ctx.biomes.intern(n));
     if !cells {
-        return (ids.len() >= 256).then(|| LegacyBiomes::Columns(Box::new(std::array::from_fn(|i| biome(ids.get(i).unwrap())))));
+        return (ids.len() >= 256)
+            .then(|| LegacyBiomes::Columns(Box::new(std::array::from_fn(|i| biome(ids.get(i).unwrap())))));
     }
     let len = ids.len() as i32;
     (len >= 16).then(|| {

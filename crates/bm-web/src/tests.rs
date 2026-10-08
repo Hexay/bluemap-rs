@@ -2,10 +2,10 @@ use bm_storage::{Compression, Stored};
 use http::HeaderMap;
 
 use crate::encoding::{Accepted, Encoded, encode};
+use crate::http_date::java_http_date;
 use crate::javafmt::{Arg, JavaFormat};
 use crate::map_handler::parse_tile;
 use crate::paths::{Resolved, java_query_string, resolve};
-use crate::http_date::java_http_date;
 use crate::{content_type, java_host_address};
 
 #[test]
@@ -107,7 +107,10 @@ fn encoding_negotiation_follows_map_storage_request_handler() {
     let again = encode(stored(&gz, Compression::Gzip), false, false, &Accepted::default()).unwrap();
     assert_eq!(again.body, raw, "served from the transcode cache");
     let other = Compression::Gzip.compress(b"{\"a\":2}").unwrap();
-    assert_eq!(encode(stored(&other, Compression::Gzip), false, false, &Accepted::default()).unwrap().body, b"{\"a\":2}".as_slice());
+    assert_eq!(
+        encode(stored(&other, Compression::Gzip), false, false, &Accepted::default()).unwrap().body,
+        b"{\"a\":2}".as_slice()
+    );
     let regz = encode(stored(&raw, Compression::None), false, false, &accepted("gzip")).unwrap();
     assert_eq!(regz.content_encoding, Some("gzip"));
     assert_eq!(gunzip(regz), raw);

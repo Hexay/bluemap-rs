@@ -109,9 +109,9 @@ impl World {
                         Ok(region) => region,
                         Err(e) => return ChunkSlot::Failed(e.clone()),
                     };
-                    let chunk = region.read_chunk_into(lx, lz, raw, nbt).and_then(|found| {
-                        found.then(|| Chunk::parse(nbt, &ctx)).transpose()
-                    });
+                    let chunk = region
+                        .read_chunk_into(lx, lz, raw, nbt)
+                        .and_then(|found| found.then(|| Chunk::parse(nbt, &ctx)).transpose());
                     match chunk {
                         Ok(None) => ChunkSlot::Absent,
                         Ok(Some(c)) => ChunkSlot::Loaded(c),
@@ -153,6 +153,9 @@ impl ChunkArea {
     }
 
     pub fn slots(&self) -> impl Iterator<Item = ((i32, i32), &ChunkSlot)> {
-        self.slots.iter().enumerate().map(|(i, s)| ((self.x0 + i as i32 % self.width, self.z0 + i as i32 / self.width), s))
+        self.slots
+            .iter()
+            .enumerate()
+            .map(|(i, s)| ((self.x0 + i as i32 % self.width, self.z0 + i as i32 / self.width), s))
     }
 }

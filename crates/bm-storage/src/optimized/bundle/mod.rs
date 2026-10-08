@@ -141,7 +141,11 @@ impl BundleStore {
     }
 
     /// Runs `op` on a read handle and the refreshed index of an existing bundle file.
-    fn with_index<T>(&self, tile: Tile, op: impl FnOnce(&mut File, &Index, Local) -> io::Result<T>) -> Result<Option<T>> {
+    fn with_index<T>(
+        &self,
+        tile: Tile,
+        op: impl FnOnce(&mut File, &Index, Local) -> io::Result<T>,
+    ) -> Result<Option<T>> {
         let (bundle, local) = split(tile);
         let path = self.path(bundle);
         let Some(mut f) = Self::open_read(&path).ctx("read", &path)? else { return Ok(None) };

@@ -147,9 +147,10 @@ fn resolve(root: &Path, embedded: bool, rel: &str, prev: Option<Node>) -> Node {
         Err(_) => {
             let file = match prev {
                 Some(f) if f.embedded => Some(f),
-                _ => embedded.then(|| embedded_file(rel)).flatten().map(|e| {
-                    FileEntry::new(e.data.len() as u64, e.last_modified_ms, Content::Memory(e.data), true)
-                }),
+                _ => embedded
+                    .then(|| embedded_file(rel))
+                    .flatten()
+                    .map(|e| FileEntry::new(e.data.len() as u64, e.last_modified_ms, Content::Memory(e.data), true)),
             };
             Node { is_dir: embedded_dir(), file }
         }

@@ -4,9 +4,9 @@
 use bm_nbt::{Compound, List, Tag};
 
 use super::{BlockEntity, Blocks, Chunk, ChunkContext, Light, Section, SectionBiomes};
+use crate::Result;
 use crate::packed::{Padded, ceil_log2, padded_block_bits};
 use crate::registry::{BiomeId, StateId};
-use crate::Result;
 
 pub const MIN_DATA_VERSION: i32 = 2844;
 
@@ -135,7 +135,8 @@ fn parse_biomes(c: Compound, ctx: &ChunkContext) -> SectionBiomes {
         (1, _) | (_, None) => SectionBiomes::Single(palette[0]),
         (n, Some(data)) => {
             let indices = Padded::new(ceil_log2(n).max(1) as u8, data.iter().collect());
-            let cells = std::array::from_fn(|i| palette.get(indices.get(i) as usize).copied().unwrap_or(BiomeId::DEFAULT));
+            let cells =
+                std::array::from_fn(|i| palette.get(indices.get(i) as usize).copied().unwrap_or(BiomeId::DEFAULT));
             SectionBiomes::Cells(Box::new(cells))
         }
     }

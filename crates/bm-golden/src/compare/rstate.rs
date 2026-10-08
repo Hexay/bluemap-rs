@@ -23,7 +23,11 @@ pub fn compare(golden: &Path, candidate: &Path, section: &mut Section) -> Result
 }
 
 /// Cells of grid `C` present in either map dir, and every entry where `key` differs.
-fn differing<C: Cell>(golden: &Path, candidate: &Path, key: impl Fn(&C, i32, i32) -> String) -> Result<(usize, Vec<String>)> {
+fn differing<C: Cell>(
+    golden: &Path,
+    candidate: &Path,
+    key: impl Fn(&C, i32, i32) -> String,
+) -> Result<(usize, Vec<String>)> {
     let kind = C::KIND;
     let cells: BTreeSet<Tile> = list(golden, kind)?.union(&list(candidate, kind)?).copied().collect();
     let mut bad = Vec::new();
@@ -57,7 +61,9 @@ fn list(map_dir: &Path, kind: CellKind) -> Result<BTreeSet<Tile>> {
 fn load<C: Cell>(map_dir: &Path, kind: CellKind, cell: Tile) -> Result<C> {
     let path = map_dir.join(kind.relative_path(cell));
     match std::fs::read(&path) {
-        Ok(bytes) => C::from_nbt(&Compression::Gzip.decompress(&bytes, 1 << 26)?).with_context(|| path.display().to_string()),
+        Ok(bytes) => {
+            C::from_nbt(&Compression::Gzip.decompress(&bytes, 1 << 26)?).with_context(|| path.display().to_string())
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(C::new()),
         Err(e) => Err(e).context(path.display().to_string()),
     }

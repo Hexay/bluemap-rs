@@ -17,8 +17,7 @@ pub(crate) fn entry_string(zip: &Path, name: &str) -> Option<String> {
     let tail_len = len.min(22 + 0xFFFF);
     let tail = read_at(&mut file, len - tail_len, tail_len as usize)?;
     let eocd = (0..=tail.len().checked_sub(22)?).rev().find(|&i| u32_at(&tail, i) == EOCD_SIG)?;
-    let (entries, cd_size, cd_offset) =
-        (u16_at(&tail, eocd + 10), u32_at(&tail, eocd + 12), u32_at(&tail, eocd + 16));
+    let (entries, cd_size, cd_offset) = (u16_at(&tail, eocd + 10), u32_at(&tail, eocd + 12), u32_at(&tail, eocd + 16));
     if entries == 0xFFFF || cd_size == u32::MAX || cd_offset == u32::MAX {
         return None;
     }
@@ -31,7 +30,8 @@ pub(crate) fn entry_string(zip: &Path, name: &str) -> Option<String> {
         if u32_at(&cd, pos) != CENTRAL_SIG {
             return None;
         }
-        let (n, e, c) = (u16_at(&cd, pos + 28) as usize, u16_at(&cd, pos + 30) as usize, u16_at(&cd, pos + 32) as usize);
+        let (n, e, c) =
+            (u16_at(&cd, pos + 28) as usize, u16_at(&cd, pos + 30) as usize, u16_at(&cd, pos + 32) as usize);
         if cd.get(pos + 46..pos + 46 + n)? == name.as_bytes() {
             if found.is_some() {
                 return None;

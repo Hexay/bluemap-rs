@@ -88,7 +88,12 @@ impl Marker {
         let shape_center = [0.5, 0.0, 0.5];
         let (head, style, object, position) = match kind {
             "poi" => {
-                let head = Head::Poi { classes: vec![], detail: String::new(), icon: "assets/poi.svg".into(), anchor: [25, 45] };
+                let head = Head::Poi {
+                    classes: vec![],
+                    detail: String::new(),
+                    icon: "assets/poi.svg".into(),
+                    anchor: [25, 45],
+                };
                 (head, None, None, [0.0; 3])
             }
             "html" => (Head::Html { classes: vec![], anchor: [0, 0], html: String::new() }, None, None, [0.0; 3]),
@@ -105,7 +110,18 @@ impl Marker {
         };
         let (min_distance, max_distance) = (0.0, 10_000_000.0);
         let (label, sorting, listed) = (String::new(), 0, true);
-        Some(Marker { head, style, object, min_distance, max_distance, kind: kind.into(), label, position, sorting, listed })
+        Some(Marker {
+            head,
+            style,
+            object,
+            min_distance,
+            max_distance,
+            kind: kind.into(),
+            label,
+            position,
+            sorting,
+            listed,
+        })
     }
 
     fn set(&mut self, key: &str, v: &Json) -> R<()> {

@@ -22,7 +22,12 @@ fn matches_java_byte_for_byte() {
         for (mode, order) in [("cli", SetOrder::Config), ("render", SetOrder::Map)] {
             let ours = marker_sets_json(&config, order).unwrap();
             assert_eq!(ours.warnings, Vec::<String>::new(), "{name}.{mode}");
-            assert!(ours.json == golden(name, mode), "{name}.{mode}:\n  ours {}\n  java {}", ours.json, golden(name, mode));
+            assert!(
+                ours.json == golden(name, mode),
+                "{name}.{mode}:\n  ours {}\n  java {}",
+                ours.json,
+                golden(name, mode)
+            );
         }
     }
 }
@@ -34,7 +39,10 @@ fn bad_markers_and_sets_are_skipped_not_fatal() {
         "nan":{"type":"poi","position":{"x":"NaN"}},"color":{"type":"line","line-color":"#ff0000"}}},
         "b":{"sorting":1.5},"c":5}"##;
     let out = marker_sets_json(config, SetOrder::Config).unwrap();
-    assert!(out.json.starts_with(r#"{"a":{"label":"","toggleable":true,"defaultHidden":false,"sorting":0,"markers":{"ok":{"#));
+    assert!(
+        out.json
+            .starts_with(r#"{"a":{"label":"","toggleable":true,"defaultHidden":false,"sorting":0,"markers":{"ok":{"#)
+    );
     assert!(out.json.ends_with(r#""listed":true}}}}"#), "{}", out.json);
     assert_eq!(out.warnings.len(), 8, "{:#?}", out.warnings);
     assert!(out.warnings[0].contains("Unknown marker type: circle"));

@@ -6,8 +6,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use crate::error::{Error, Result};
-use crate::map::MapContext;
 use crate::job::JobControl;
+use crate::map::MapContext;
 use crate::queue::{Next, RenderQueue};
 use crate::resources::Resources;
 use crate::task::{Regions, RenderTask};

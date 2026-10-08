@@ -32,7 +32,11 @@ pub(crate) enum Msg {
     /// Save these `(lod, tile)`s if dirty: no remaining region writes to them.
     Flush(Vec<(u32, Tile)>),
     /// A gzip'd render-state cell.
-    WriteCell { grid: GridKey, cell: Tile, bytes: Vec<u8> },
+    WriteCell {
+        grid: GridKey,
+        cell: Tile,
+        bytes: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Default)]

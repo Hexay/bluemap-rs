@@ -77,14 +77,15 @@ impl Parser<'_> {
     fn value(&mut self) -> Result<Json, String> {
         self.ws();
         match self.s.get(self.pos) {
-            Some(b'{') => self.container(b'}', |p| {
-                let key = p.string()?;
-                if !p.eat(b':') {
-                    return Err(p.err("expected ':'"));
-                }
-                Ok((key, p.value()?))
-            })
-            .map(Json::Obj),
+            Some(b'{') => self
+                .container(b'}', |p| {
+                    let key = p.string()?;
+                    if !p.eat(b':') {
+                        return Err(p.err("expected ':'"));
+                    }
+                    Ok((key, p.value()?))
+                })
+                .map(Json::Obj),
             Some(b'[') => self.container(b']', Parser::value).map(Json::Arr),
             Some(b'"') => self.string().map(Json::Str),
             Some(b't') => self.literal("true", Json::Bool(true)),
@@ -95,7 +96,11 @@ impl Parser<'_> {
         }
     }
 
-    fn container<T>(&mut self, close: u8, mut item: impl FnMut(&mut Self) -> Result<T, String>) -> Result<Vec<T>, String> {
+    fn container<T>(
+        &mut self,
+        close: u8,
+        mut item: impl FnMut(&mut Self) -> Result<T, String>,
+    ) -> Result<Vec<T>, String> {
         self.pos += 1;
         let mut items = Vec::new();
         if self.eat(close) {
@@ -203,7 +208,10 @@ mod tests {
         let v = parse(r#" {"b": [1.50, -0, 1E3], "a": {"x": null, "y": true}, "s": "\u00e9\ud83d\ude00\n"} "#).unwrap();
         let Json::Obj(members) = &v else { panic!() };
         assert_eq!(members.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["b", "a", "s"]);
-        assert_eq!(v.get("b"), Some(&Json::Arr(vec![Json::Num("1.50".into()), Json::Num("-0".into()), Json::Num("1E3".into())])));
+        assert_eq!(
+            v.get("b"),
+            Some(&Json::Arr(vec![Json::Num("1.50".into()), Json::Num("-0".into()), Json::Num("1E3".into())]))
+        );
         assert_eq!(v.get("s"), Some(&Json::Str("\u{e9}\u{1f600}\n".into())));
         assert_eq!(v.get("a").and_then(|a| a.get("y")), Some(&Json::Bool(true)));
     }

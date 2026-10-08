@@ -46,12 +46,7 @@ pub type TileListener = Arc<dyn Fn(bm_format::grid::Tile, u32) + Send + Sync>;
 
 impl MapContext {
     /// `None` for a map without `world`: display-only, served from storage but never rendered.
-    pub fn open(
-        id: &str,
-        config: &BlueMapConfig,
-        resources: &Resources,
-        storages: &Storages,
-    ) -> Result<Option<Self>> {
+    pub fn open(id: &str, config: &BlueMapConfig, resources: &Resources, storages: &Storages) -> Result<Option<Self>> {
         let map = &config.maps[id];
         let Some(configured) = &map.world else { return Ok(None) };
         let (world_folder, dimension) = world_and_dimension(configured, map.dimension.as_ref());

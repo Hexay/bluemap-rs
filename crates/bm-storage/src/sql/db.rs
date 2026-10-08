@@ -142,7 +142,10 @@ impl Pool {
     }
 
     pub async fn execute(&self, sql: &str, args: &[Arg<'_>]) -> Result<u64> {
-        on_conn!(self, |c, _i, _t| Ok(bind_args!(sqlx::query(AssertSqlSafe(sql)), args).execute(c).await?.rows_affected()))
+        on_conn!(self, |c, _i, _t| Ok(bind_args!(sqlx::query(AssertSqlSafe(sql)), args)
+            .execute(c)
+            .await?
+            .rows_affected()))
     }
 
     pub async fn fetch_blob(&self, sql: &str, args: &[Arg<'_>]) -> Result<Option<Vec<u8>>> {
@@ -181,9 +184,14 @@ impl Pool {
                 let id = bind_args!(sqlx::query(AssertSqlSafe(sql)), args).execute(c).await?.last_insert_id();
                 i64::try_from(id).map_err(|_| Error::Protocol("generated id out of range"))
             }),
-            Inner::Postgres(p) => timed!(self, p, |c| pg_int(&bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_one(c).await?, 0)),
+            Inner::Postgres(p) => {
+                timed!(self, p, |c| pg_int(&bind_args!(sqlx::query(AssertSqlSafe(sql)), args).fetch_one(c).await?, 0))
+            }
             Inner::Sqlite(p) => {
-                timed!(self, p, |c| Ok(bind_args!(sqlx::query(AssertSqlSafe(sql)), args).execute(c).await?.last_insert_rowid()))
+                timed!(self, p, |c| Ok(bind_args!(sqlx::query(AssertSqlSafe(sql)), args)
+                    .execute(c)
+                    .await?
+                    .last_insert_rowid()))
             }
         }
     }

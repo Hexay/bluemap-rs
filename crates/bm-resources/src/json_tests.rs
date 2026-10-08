@@ -25,7 +25,10 @@ fn empty_array_slots_are_null() {
 fn unquoted_values_become_strings_or_numbers() {
     assert_eq!(parse("{x: minecraft:stone}").unwrap_err().msg, "expected ',' or '}'");
     assert_eq!(parse("[1 2]").unwrap_err().msg, "expected ',' or ']'");
-    assert_eq!(parse("{x: 'minecraft:stone', y: 0x10, z: .5}").unwrap(), json!({"x": "minecraft:stone", "y": "0x10", "z": 0.5}));
+    assert_eq!(
+        parse("{x: 'minecraft:stone', y: 0x10, z: .5}").unwrap(),
+        json!({"x": "minecraft:stone", "y": "0x10", "z": 0.5})
+    );
 }
 
 #[test]

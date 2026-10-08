@@ -62,17 +62,18 @@ pub fn compare_webroots(golden: &Path, candidate: &Path) -> Result<Comparison> {
     let (g, c) = (data_files(golden)?, data_files(candidate)?);
     let missing: Vec<&String> = g.difference(&c).collect();
     let extra: Vec<&String> = c.difference(&g).collect();
-    listing.check(missing.is_empty() && extra.is_empty(), format!(
-        "{} files golden, {} candidate: {} missing, {} extra",
-        g.len(), c.len(), missing.len(), extra.len()
-    ));
+    listing.check(
+        missing.is_empty() && extra.is_empty(),
+        format!("{} files golden, {} candidate: {} missing, {} extra", g.len(), c.len(), missing.len(), extra.len()),
+    );
     missing.iter().take(10).for_each(|m| listing.detail(format!("missing {m}")));
     extra.iter().take(10).for_each(|m| listing.detail(format!("extra {m}")));
     sections.push(("listing".to_owned(), listing));
 
     let mut json = Section::default();
     same_bytes(&mut json, golden, candidate, "settings.json")?;
-    let maps: BTreeSet<String> = list_dirs(&golden.join("maps"))?.union(&list_dirs(&candidate.join("maps"))?).cloned().collect();
+    let maps: BTreeSet<String> =
+        list_dirs(&golden.join("maps"))?.union(&list_dirs(&candidate.join("maps"))?).cloned().collect();
     for id in &maps {
         for item in ["settings.json", "textures.json", "live/markers.json", "live/players.json"] {
             same_bytes(&mut json, golden, candidate, &format!("maps/{id}/{item}"))?;

@@ -6,7 +6,9 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::blockstate::{BlockStateDef, Variant};
-use crate::color::{BlockColors, BlockColorsConfig, BlockProperties, BlockPropertiesConfig, ColorMaps, ModelProperties};
+use crate::color::{
+    BlockColors, BlockColorsConfig, BlockProperties, BlockPropertiesConfig, ColorMaps, ModelProperties,
+};
 use crate::datapack::DataPack;
 use crate::model::{BakedModel, BakedModels, ModelLibrary};
 use crate::texture::{Atlas, TexturePool, load_textures};
@@ -66,7 +68,13 @@ impl ResourcePack {
     }
 
     /// The variants BlueMap renders for `state` at a position (weighted picks depend on it).
-    pub fn variants<'a>(&'a self, state: &'a BlockState, x: i32, y: i32, z: i32) -> impl Iterator<Item = &'a Variant> + 'a {
+    pub fn variants<'a>(
+        &'a self,
+        state: &'a BlockState,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> impl Iterator<Item = &'a Variant> + 'a {
         self.blockstate(state).into_iter().flat_map(move |def| def.variants_at(state, x, y, z))
     }
 

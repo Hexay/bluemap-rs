@@ -19,15 +19,25 @@ pub(super) fn quads(v: &PrbmView, body: &mut Vec<u8>) {
     stream(body, |out| (0..quads).for_each(|q| out.extend(QV.map(|i| ao[6 * q + i]))));
 
     let normal = v.attrs[NORMAL];
-    exceptions(body, quads, 18, |q, row| row.copy_from_slice(&normal[18 * q..18 * q + 18]), |q, pred| {
-        predict_normals(&pos[72 * q..72 * q + 72], pred)
-    });
+    exceptions(
+        body,
+        quads,
+        18,
+        |q, row| row.copy_from_slice(&normal[18 * q..18 * q + 18]),
+        |q, pred| predict_normals(&pos[72 * q..72 * q + 72], pred),
+    );
 
     let color = v.attrs[COLOR];
     stream(body, |out| (0..3).for_each(|c| out.extend((0..quads).map(|q| color[18 * q + c]))));
-    exceptions(body, quads, 18, |q, row| row.copy_from_slice(&color[18 * q..18 * q + 18]), |q, pred| {
-        pred.as_chunks_mut::<3>().0.iter_mut().for_each(|vert| vert.copy_from_slice(&color[18 * q..18 * q + 3]))
-    });
+    exceptions(
+        body,
+        quads,
+        18,
+        |q, row| row.copy_from_slice(&color[18 * q..18 * q + 18]),
+        |q, pred| {
+            pred.as_chunks_mut::<3>().0.iter_mut().for_each(|vert| vert.copy_from_slice(&color[18 * q..18 * q + 3]))
+        },
+    );
 
     let (block, sun) = (v.attrs[BLOCKLIGHT], v.attrs[SUNLIGHT]);
     stream(body, |out| {

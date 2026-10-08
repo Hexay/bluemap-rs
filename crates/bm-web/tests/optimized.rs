@@ -63,7 +63,8 @@ fn prbm(quads: usize, y: f32) -> Vec<u8> {
     let mut m = TileModel::default();
     for q in 0..quads {
         let (x, z) = ((q % 32) as f32, (q / 32) as f32 + 0.05);
-        for tri in [[[x, y, z], [x, y, z + 1.], [x + 1., y, z + 1.]], [[x, y, z], [x + 1., y, z + 1.], [x + 1., y, z]]] {
+        for tri in [[[x, y, z], [x, y, z + 1.], [x + 1., y, z + 1.]], [[x, y, z], [x + 1., y, z + 1.], [x + 1., y, z]]]
+        {
             tri.iter().for_each(|p| m.position.extend(p));
             m.color.extend([0.5, 0.5, 1.]);
             m.sunlight.push(15);

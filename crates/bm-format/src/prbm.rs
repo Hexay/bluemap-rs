@@ -169,7 +169,8 @@ mod tests {
 
     fn quad(material: u32, y: f32) -> TileModel {
         let mut m = TileModel::default();
-        for (tri, mat) in [([0., y, 0., 0., y, 1., 1., y, 1.], material), ([0., y, 0., 1., y, 1., 1., y, 0.], material)] {
+        for (tri, mat) in [([0., y, 0., 0., y, 1., 1., y, 1.], material), ([0., y, 0., 1., y, 1., 1., y, 0.], material)]
+        {
             m.position.extend(tri);
             m.uv.extend([0., 0., 0., 1., 1., 1.]);
             m.ao.extend([1., 0.75, 0.5]);
@@ -185,7 +186,12 @@ mod tests {
     fn header_attributes_and_groups() {
         let mut m = quad(4, 64.);
         let other = quad(9, 65.);
-        for (a, b) in [(&mut m.position, &other.position), (&mut m.uv, &other.uv), (&mut m.ao, &other.ao), (&mut m.color, &other.color)] {
+        for (a, b) in [
+            (&mut m.position, &other.position),
+            (&mut m.uv, &other.uv),
+            (&mut m.ao, &other.ao),
+            (&mut m.color, &other.color),
+        ] {
             a.extend(b);
         }
         m.sunlight.extend(&other.sunlight);
@@ -196,7 +202,8 @@ mod tests {
         assert_eq!(&out[..8], [1, 7, 12, 0, 0, 0, 0, 0]);
         assert_eq!(&out[8..20], b"position\0\x21\0\0");
         assert_eq!(out.len() % 4, 0);
-        let groups: Vec<i32> = out[out.len() - 28..].chunks(4).map(|b| i32::from_le_bytes(b.try_into().unwrap())).collect();
+        let groups: Vec<i32> =
+            out[out.len() - 28..].chunks(4).map(|b| i32::from_le_bytes(b.try_into().unwrap())).collect();
         assert_eq!(groups, [4, 0, 6, 9, 6, 6, -1]);
     }
 

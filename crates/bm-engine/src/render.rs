@@ -131,7 +131,8 @@ impl RegionRender<'_> {
         self.ctx.storage.delete_grid(GridKey::Hires, tile)?;
         let (x0, z0) = self.ctx.hires_grid.tile_min(tile);
         let [w, d] = self.ctx.hires_grid.size;
-        let columns = (x0..x0 + w).flat_map(|x| (z0..z0 + d).map(move |z| Column { x, z, argb: 0, height: 0, light: 0 }));
+        let columns =
+            (x0..x0 + w).flat_map(|x| (z0..z0 + d).map(move |z| Column { x, z, argb: 0, height: 0, light: 0 }));
         self.send(columns.collect())
     }
 

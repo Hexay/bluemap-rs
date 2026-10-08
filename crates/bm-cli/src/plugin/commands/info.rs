@@ -78,7 +78,8 @@ fn render_threads(core: &Core, s: &Session, enabled: bool, paused: bool, process
 fn map_summary(s: &Session, exclude_running: bool) -> Vec<Vec<Value>> {
     let state = s.state.lock().unwrap_or_else(PoisonError::into_inner).clone();
     let current = s.queue.current_task().map(|t| t.map);
-    let queued: HashSet<String> = current.iter().cloned().chain(s.queue.pending_tasks().into_iter().map(|t| t.map)).collect();
+    let queued: HashSet<String> =
+        current.iter().cloned().chain(s.queue.pending_tasks().into_iter().map(|t| t.map)).collect();
     let (mut pending, mut updated, mut frozen) = (Vec::new(), Vec::new(), Vec::new());
     for m in s.maps.all() {
         if exclude_running && current.as_ref() == Some(&m.id) {
@@ -127,7 +128,8 @@ fn active_task(s: &Session, run: u64, progress: f64) -> Vec<Vec<Value>> {
 /// `VersionCommand`; our build stands where upstream prints its git hash. Memory is the server JVM's max heap.
 pub fn version(core: &Core, say: Say) -> i32 {
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()).to_string();
-    let gib = core.hello.max_memory_mib.map_or("?".into(), |mib| format!("{:?} GiB", (mib as f64 / 102.4).round() / 10.0));
+    let gib =
+        core.hello.max_memory_mib.map_or("?".into(), |mib| format!("{:?} GiB", (mib as f64 / 102.4).round() / 10.0));
     let mut body = text::fill("Version: %", &[(bm_engine::BLUEMAP_VERSION, INFO)], BASE);
     let details = vec![
         vec![text::span(format!("bluemap-rs {CORE_VERSION}"), BASE)],

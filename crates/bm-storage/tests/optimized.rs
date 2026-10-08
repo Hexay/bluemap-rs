@@ -5,8 +5,7 @@ mod common;
 use std::path::Path;
 
 use bm_storage::{
-    Compression, Error, FILE_MARKER, FileStorage, Format, GridKey, SqlConfig, SqlStorage, Storage,
-    convert_file_storage,
+    Compression, Error, FILE_MARKER, FileStorage, Format, GridKey, SqlConfig, SqlStorage, Storage, convert_file_storage,
 };
 use tokio::runtime::Runtime;
 
@@ -20,7 +19,10 @@ fn file_conformance() {
 fn sqlite_conformance() {
     let rt = Runtime::new().unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let config = SqlConfig { format: Format::Optimized, ..SqlConfig::new(format!("sqlite:{}", dir.path().join("o.db").display())) };
+    let config = SqlConfig {
+        format: Format::Optimized,
+        ..SqlConfig::new(format!("sqlite:{}", dir.path().join("o.db").display()))
+    };
     let storage = SqlStorage::connect(&config, rt.handle().clone()).unwrap();
     common::conformance(&storage);
     storage.close();
@@ -33,10 +35,19 @@ fn file_layout_is_bundles_beside_upstream_tiles() {
     common::populate(&storage);
     common::assert_hires(&storage);
     let tree = common::tree(dir.path());
-    let names: Vec<&str> = tree.keys().map(String::as_str).filter(|n| !n.contains("/tiles/1/") && !n.contains("rstate")).collect();
+    let names: Vec<&str> =
+        tree.keys().map(String::as_str).filter(|n| !n.contains("/tiles/1/") && !n.contains("rstate")).collect();
     assert_eq!(
         names,
-        [FILE_MARKER, "m/hires/x-1z0.bmb", "m/hires/x0z0.bmb", "m/hires/x1z-1.bmb", "m/hires/x2z0.bmb", "m/settings.json", "m/textures.json.gz"]
+        [
+            FILE_MARKER,
+            "m/hires/x-1z0.bmb",
+            "m/hires/x0z0.bmb",
+            "m/hires/x1z-1.bmb",
+            "m/hires/x2z0.bmb",
+            "m/settings.json",
+            "m/textures.json.gz"
+        ]
     );
 }
 

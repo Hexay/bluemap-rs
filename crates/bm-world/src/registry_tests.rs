@@ -40,9 +40,8 @@ fn state_strings_parse() {
 #[test]
 fn defaults_first_wins_and_unknown_blocks_have_no_properties() {
     let r = BlockStates::default();
-    let n = r
-        .add_defaults_json(r#"{"minecraft:lever": "minecraft:lever[face=wall,facing=north,powered=false]"}"#)
-        .unwrap();
+    let n =
+        r.add_defaults_json(r#"{"minecraft:lever": "minecraft:lever[face=wall,facing=north,powered=false]"}"#).unwrap();
     assert_eq!(n, 1);
     r.add_default(r.intern("lever", &mut [("face", "floor")]));
     assert_eq!(&*r.get(r.default_state("lever")).key, "minecraft:lever[face=wall,facing=north,powered=false]");

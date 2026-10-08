@@ -132,7 +132,8 @@ pub(super) fn decode(r: &mut Reader, quads: usize, k: usize, g: u8, values: &mut
     let residuals = esc.planes(count)?;
     let mut index: Option<usize> = None;
     for (gap, residual) in gaps.zip(residuals) {
-        let i = index.map_or(Some(gap as usize), |i| i.checked_add(gap as usize)).ok_or(CompactError::Corrupt("escape"))?;
+        let i =
+            index.map_or(Some(gap as usize), |i| i.checked_add(gap as usize)).ok_or(CompactError::Corrupt("escape"))?;
         let slot = values.get_mut(i).ok_or(CompactError::Corrupt("escape index"))?;
         *slot = slot.wrapping_add(residual);
         index = Some(i);

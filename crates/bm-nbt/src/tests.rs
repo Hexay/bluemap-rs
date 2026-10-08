@@ -67,7 +67,8 @@ fn reads_nested_fields_lazily() {
 #[test]
 fn entries_visit_every_field_in_order() {
     let buf = chunk();
-    let names: Vec<_> = read_root(&buf).unwrap().entries().map(|(n, _)| String::from_utf8(n.to_vec()).unwrap()).collect();
+    let names: Vec<_> =
+        read_root(&buf).unwrap().entries().map(|(n, _)| String::from_utf8(n.to_vec()).unwrap()).collect();
     assert_eq!(names, ["DataVersion", "Status", "sections", "Heightmaps", "small"]);
 }
 

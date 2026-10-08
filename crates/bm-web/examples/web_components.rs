@@ -47,13 +47,24 @@ fn main() {
     let settings = std::fs::read(map_dir.join("settings.json")).unwrap();
     let textures_gz = std::fs::read(map_dir.join("textures.json.gz")).unwrap();
     let js = first_file(&webroot.join("assets"), ".js");
-    println!("tile {} B gz, settings {} B, textures {} B gz, js {} B", tile_gz.len(), settings.len(),
-             textures_gz.len(), std::fs::metadata(&js).unwrap().len());
+    println!(
+        "tile {} B gz, settings {} B, textures {} B gz, js {} B",
+        tile_gz.len(),
+        settings.len(),
+        textures_gz.len(),
+        std::fs::metadata(&js).unwrap().len()
+    );
 
     bench("std::fs::read hires tile", 5000, || drop(black_box(std::fs::read(&tile).unwrap())));
-    bench("std::fs::read missing (NotFound)", 5000, || { black_box(std::fs::read(&missing).is_err()); });
-    bench("std::fs::metadata existing", 5000, || { black_box(std::fs::metadata(&tile).unwrap()); });
-    bench("std::fs::metadata missing", 5000, || { black_box(std::fs::metadata(&missing).is_err()); });
+    bench("std::fs::read missing (NotFound)", 5000, || {
+        black_box(std::fs::read(&missing).is_err());
+    });
+    bench("std::fs::metadata existing", 5000, || {
+        black_box(std::fs::metadata(&tile).unwrap());
+    });
+    bench("std::fs::metadata missing", 5000, || {
+        black_box(std::fs::metadata(&missing).is_err());
+    });
     bench("std::fs::File::open existing", 5000, || drop(black_box(std::fs::File::open(&tile).unwrap())));
     bench("MapStorage::read_grid hires (path+read)", 5000, || {
         drop(black_box(map.read_grid(GridKey::Hires, (0, 0)).unwrap()))
@@ -78,7 +89,11 @@ fn main() {
         for _ in 0..20000 {
             tokio::task::spawn_blocking(|| ()).await.unwrap();
         }
-        println!("{:<48} {:>10.2} µs/op", "tokio spawn_blocking no-op (sequential)", t.elapsed().as_secs_f64() * 1e6 / 20000.0);
+        println!(
+            "{:<48} {:>10.2} µs/op",
+            "tokio spawn_blocking no-op (sequential)",
+            t.elapsed().as_secs_f64() * 1e6 / 20000.0
+        );
         let t = Instant::now();
         let n = 20000u32;
         let mut set = tokio::task::JoinSet::new();
@@ -90,7 +105,11 @@ fn main() {
             });
         }
         while set.join_next().await.is_some() {}
-        println!("{:<48} {:>10.2} µs/op (wall, 32 concurrent)", "tokio spawn_blocking no-op", t.elapsed().as_secs_f64() * 1e6 / f64::from(n));
+        println!(
+            "{:<48} {:>10.2} µs/op (wall, 32 concurrent)",
+            "tokio spawn_blocking no-op",
+            t.elapsed().as_secs_f64() * 1e6 / f64::from(n)
+        );
         let t = Instant::now();
         for _ in 0..5000 {
             black_box(tokio::fs::metadata(&tile).await.unwrap());

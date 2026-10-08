@@ -65,7 +65,8 @@ pub fn lowres(golden: &Path, candidate: &Path, id: &str, section: &mut Section) 
                 bad.push(format!("lod {lod} {t:?}: {pixels} pixels differ"));
             }
         }
-        section.check(bad.is_empty(), format!("lod {lod}: {}/{} tiles pixel-identical", all.len() - bad.len(), all.len()));
+        section
+            .check(bad.is_empty(), format!("lod {lod}: {}/{} tiles pixel-identical", all.len() - bad.len(), all.len()));
         bad.iter().take(10).for_each(|b| section.detail(b.clone()));
     }
     Ok(())

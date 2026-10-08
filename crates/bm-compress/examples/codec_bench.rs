@@ -117,7 +117,11 @@ fn main() {
         .collect();
     let stored: usize = tiles.iter().map(|t| t.0).sum();
     let raw: usize = tiles.iter().map(|t| t.1.len()).sum();
-    println!("{} tiles, stored (Java gzip) {stored} B, raw PRBM {raw} B ({:.1}x)", tiles.len(), raw as f64 / stored as f64);
+    println!(
+        "{} tiles, stored (Java gzip) {stored} B, raw PRBM {raw} B ({:.1}x)",
+        tiles.len(),
+        raw as f64 / stored as f64
+    );
     println!("| codec | tiles | bytes | vs Java gz | raw/x | enc ms/tile | enc MB/s | dec ms/tile |");
     println!("|---|---|---|---|---|---|---|---|");
     let mut out = Vec::new();

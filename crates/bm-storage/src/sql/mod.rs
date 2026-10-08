@@ -82,11 +82,12 @@ impl SqlStorage {
                 return Err(e);
             }
         };
-        let checked = format::check(&format!("{} (tables {}*)", redact(&config.url), config.table_prefix), config.format, found)
-            .and_then(|()| match (config.format, found) {
-                (Format::Optimized, None) if !config.read_only => storage.set_marker(true),
-                _ => Ok(()),
-            });
+        let checked =
+            format::check(&format!("{} (tables {}*)", redact(&config.url), config.table_prefix), config.format, found)
+                .and_then(|()| match (config.format, found) {
+                    (Format::Optimized, None) if !config.read_only => storage.set_marker(true),
+                    _ => Ok(()),
+                });
         if let Err(e) = checked {
             storage.close();
             return Err(e);
@@ -169,7 +170,12 @@ impl SqlStorage {
             read_only: config.read_only,
             max_packet,
         };
-        Ok(Self { shared: Arc::new(shared), format: config.format, maps: Mutex::default(), optimized: Mutex::default() })
+        Ok(Self {
+            shared: Arc::new(shared),
+            format: config.format,
+            maps: Mutex::default(),
+            optimized: Mutex::default(),
+        })
     }
 
     pub fn sql_map(&self, map_id: &str) -> Arc<SqlMapStorage> {

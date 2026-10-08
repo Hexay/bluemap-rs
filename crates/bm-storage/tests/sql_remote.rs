@@ -155,10 +155,14 @@ fn reconnects(s: &Server, name: &str) {
             let ids = s.rt.block_on(async {
                 let mut c = sqlx::MySqlConnection::connect(&s.sqlx_url).await.unwrap();
                 let rows = c
-                    .fetch_all("SELECT ID FROM information_schema.PROCESSLIST WHERE DB = DATABASE() AND ID <> CONNECTION_ID()")
+                    .fetch_all(
+                        "SELECT ID FROM information_schema.PROCESSLIST WHERE DB = DATABASE() AND ID <> CONNECTION_ID()",
+                    )
                     .await
                     .unwrap();
-                let id = |r: &sqlx::mysql::MySqlRow| r.try_get::<u64, _>(0).or_else(|_| r.try_get::<i64, _>(0).map(|v| v as u64));
+                let id = |r: &sqlx::mysql::MySqlRow| {
+                    r.try_get::<u64, _>(0).or_else(|_| r.try_get::<i64, _>(0).map(|v| v as u64))
+                };
                 let ids: Vec<u64> = rows.iter().map(|r| id(r).unwrap()).collect();
                 for id in &ids {
                     c.execute(AssertSqlSafe(format!("KILL {id}"))).await.unwrap();
@@ -168,8 +172,10 @@ fn reconnects(s: &Server, name: &str) {
             ids.len() as i64
         }
         _ => s
-            .admin("SELECT COUNT(pg_terminate_backend(pid)) FROM pg_stat_activity \
-                    WHERE datname = current_database() AND pid <> pg_backend_pid()")
+            .admin(
+                "SELECT COUNT(pg_terminate_backend(pid)) FROM pg_stat_activity \
+                    WHERE datname = current_database() AND pid <> pg_backend_pid()",
+            )
             .unwrap_or(0),
     };
     assert!(killed >= 1, "no connection to kill");
@@ -219,14 +225,19 @@ fn tls_large_writes(s: &Server, name: &str) {
 /// A statement stuck behind another session's table lock fails with `Timeout` instead of waiting forever, and its
 /// connection is replaced: the storage works again (even with a single-connection pool) once the lock is gone.
 fn statement_timeout(s: &Server, name: &str) {
-    let cfg = SqlConfig { max_connections: 1, statement_timeout: Duration::from_secs(2), ..s.config(name, Format::Compat) };
+    let cfg =
+        SqlConfig { max_connections: 1, statement_timeout: Duration::from_secs(2), ..s.config(name, Format::Compat) };
     let storage = s.connect(&cfg);
     let map = storage.map("m").unwrap();
     map.write_item(&ItemKey::Settings, b"{}").unwrap();
     let table = format!("{}item_storage_data", cfg.table_prefix);
     let blocked = s.rt.block_on(async {
         let lock = |mysql: bool| {
-            if mysql { format!("LOCK TABLES {table} WRITE") } else { format!("LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE") }
+            if mysql {
+                format!("LOCK TABLES {table} WRITE")
+            } else {
+                format!("LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE")
+            }
         };
         match s.dialect {
             Dialect::MySql => {

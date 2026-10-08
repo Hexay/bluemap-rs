@@ -49,7 +49,9 @@ fn with_format(text: &str, to: Format) -> String {
         })
         .collect();
     if !found {
-        out.push(format!("# bluemap-rs storage layout (compat or optimized), changed by --convert-storage\nformat: {to}"));
+        out.push(format!(
+            "# bluemap-rs storage layout (compat or optimized), changed by --convert-storage\nformat: {to}"
+        ));
     }
     out.join("\n") + "\n"
 }

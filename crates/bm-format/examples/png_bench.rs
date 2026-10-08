@@ -12,7 +12,9 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             walk(&p, out);
-        } else if p.extension().is_some_and(|x| x == "png") && p.to_string_lossy().replace('\\', "/").contains("/tiles/") {
+        } else if p.extension().is_some_and(|x| x == "png")
+            && p.to_string_lossy().replace('\\', "/").contains("/tiles/")
+        {
             out.push(p);
         }
     }
@@ -54,7 +56,11 @@ fn main() {
         tiles.push((bytes.len(), info.width, info.height, rgba, tile));
     }
     let stored: usize = tiles.iter().map(|t| t.0).sum();
-    println!("{} lowres PNGs, stored {stored} B; product decode_png {:.2} ms/tile", tiles.len(), decode_ns as f64 / 1e6 / tiles.len() as f64);
+    println!(
+        "{} lowres PNGs, stored {stored} B; product decode_png {:.2} ms/tile",
+        tiles.len(),
+        decode_ns as f64 / 1e6 / tiles.len() as f64
+    );
 
     let mut out = Vec::new();
     let t = Instant::now();
