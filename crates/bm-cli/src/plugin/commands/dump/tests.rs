@@ -38,8 +38,10 @@ fn configs_use_java_field_names() {
     );
     assert_eq!(fields(&core["log"]), ["file", "append"]);
     assert!(core["log"]["#identity"].as_str().unwrap().starts_with("CoreConfig$LogConfig@"));
-    let mut web = WebserverConfig::default();
-    web.additional_headers = vec![("Cache-Control".into(), "max-age=0".into())];
+    let web = WebserverConfig {
+        additional_headers: vec![("Cache-Control".into(), "max-age=0".into())],
+        ..WebserverConfig::default()
+    };
     let web = config(&mut ids, "W", &web, &[("additionalHeaders", "java.util.LinkedHashMap")]);
     assert_upstream_fields(&web, &["enabled", "webroot", "ip", "port", "sseEnabled", "log", "additionalHeaders"]);
     assert_eq!(web["additionalHeaders"]["size"], 1);
