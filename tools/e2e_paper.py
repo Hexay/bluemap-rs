@@ -12,11 +12,12 @@ plugin jars (or stages a prebuilt `--core`, or tests a given `--jar`), starts Pa
 bots, then checks: the core becomes ready, `/bluemap` commands answer on the console, the webserver serves the
 webapp and a rendered tile, `live/players.json` lists a bot, BlueBorder's markers reach `live/markers.json`,
 `/bluemap reload` works, a killed core is respawned, stopping the server leaves no core process, and neither does
-SIGKILLing the JVM (stdin EOF). Results and
+SIGKILLing the JVM (stdin EOF), and upstream resumes a forced render ours stopped partway (tasks.dat). Results and
 captured files go to work/e2e-paper/out/.
 """
 import argparse
 import json
+import re
 import shutil
 import sys
 import time
@@ -229,6 +230,50 @@ def run_jvm_kill(folder: Path, target: Target) -> None:
     check("core exits after JVM SIGKILL", pid and poll(lambda: not pid_alive(pid), 30), f"pid {pid}")
 
 
+def run_handoff(jar: Path, rs: Path) -> None:
+    """Switching back: ours stops a forced render of `structures` partway (tasks.dat with done regions), then upstream
+    loads that folder and must resume the task where ours left off, not from 0 and not fail on tasks.dat."""
+    folder = E2E / "handoff"
+    if folder.exists():
+        shutil.rmtree(folder)
+    shutil.copytree(rs, folder, ignore=shutil.ignore_patterns("world", "session.lock", "tasks.dat", "*.log*"))
+    shutil.rmtree(folder / "bluemap" / "web" / "maps", ignore_errors=True)
+    core_conf = folder / "plugins" / "BlueMap" / "core.conf"
+    core_conf.write_text(re.sub(r"(?m)^render-thread-count: .*$", "render-thread-count: 1",
+                                core_conf.read_text(encoding="utf-8")), encoding="utf-8")
+    prepare(folder, [jar], False, world_from=fixture_world("structures"))
+    server = Paper(folder)
+    try:
+        server.wait_for(r"\[BlueMap\] Loaded!", 600, since_start=True)
+        map_id = poll(first_map, 30)
+        server.command("bluemap stop", r"Render-Threads are (now|already) stopped", 30)
+        server.command(f"bluemap force-update {map_id}", r"Created new update-task", 60)
+        server.command("bluemap start", r"Render-Threads are (now|already) running", 30)
+        ours = poll(lambda: (p := status_progress(server)) and p > 0 and p, 120, 0.2)
+        server.command("bluemap stop", r"Render-Threads are (now|already) stopped", 30)
+    finally:
+        server.stop()
+    check("tasks.dat with a partly done task", ours and (folder / "bluemap" / "tasks.dat").is_file(), f"{ours}%")
+
+    prepare(folder, [fetch("upstream")], False)
+    server = Paper(folder)
+    try:
+        server.wait_for(r"\[BlueMap\].*Loaded!", 600, since_start=True)
+        failed = re.search(r"Failed to load tasks\.dat", "\n".join(server.history))
+        line = " ".join(server.command_text("bluemap maps", r"BlueMap Maps|Maps", 30))
+    finally:
+        server.stop()
+    theirs = re.search(rf"{re.escape(map_id)}.*?being updated: ([\d.]+)%", line)
+    check("upstream reads our tasks.dat", not failed and theirs, line[:300])
+    check("upstream resumes past our done regions", theirs and float(theirs.group(1)) > 0,
+          f"ours {ours}% at stop, upstream {theirs.group(1) if theirs else '?'}% before rendering")
+
+
+def status_progress(server: Paper) -> float | None:
+    m = server.command("bluemap", r"progress: ([\d.]+)%|render-threads are (idle|paused)", 10)
+    return float(m.group(1)) if m.group(1) else None
+
+
 def run_upstream(world: Path, target: Target) -> None:
     folder = E2E / "upstream"
     target.prepare(folder, [fetch("upstream"), *([fetch("blueborder")] if target.addons else [])], True, world_from=world)
@@ -291,6 +336,8 @@ def main() -> None:
     run_jvm_kill(folder, target)
     if not args.no_upstream:
         run_upstream(folder / "world", target)
+        if target == Target():
+            run_handoff(jar, folder)
     sys.exit(report(OUT))
 
 

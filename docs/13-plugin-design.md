@@ -358,6 +358,8 @@ testbox (linux-x64 static musl jar, `--core`/`--jar` prebuilt from Windows):
   the Linux testbox, upstream comparison included.
 - With every map frozen and the render-threads stopped, the `/bluemap` and `/bluemap maps` console text is identical
   to upstream's.
+- Switching back mid-render: ours stops a forced render of `structures` (31 regions, 1 thread) partway; upstream
+  loaded on that folder reads our `tasks.dat` and lists the task already past our done regions (`/bluemap maps`).
 - Cross-built cores: linux-arm64 and linux-armv7 render `structures` byte-identically to glibc x64 under
   qemu-user; `tasks.dat` encoder byte-identical to BlueNBT 3.5.1 (unit test).
 - Rust tests: framing edge cases (`bm-ipc`), players JSON vs `JsonWriter` (`bm-map`), command spec/parser,

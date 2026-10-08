@@ -113,3 +113,6 @@ The render state and `textures.json` stay in upstream's formats. To return to Ja
 1. Convert every `optimized` storage back with `--to compat`.
 2. Remove the `format` lines (Java BlueMap ignores them anyway).
 3. Swap the jar or binary back.
+
+A render that was still running when you stopped the server is saved in `tasks.dat`, and Java BlueMap picks it up
+where bluemap-rs left off.
