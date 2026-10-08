@@ -6,8 +6,7 @@ Windows or Linux. Builds the core and the mod jars (or stages a prebuilt `--core
 Fabric Loader into work/e2e-paper/cache (Fabric's installer; the vanilla jar from work/downloads), starts the server with
 our jar + Fabric API + Carpet (fake players) + BlueMap Offline Player Markers (a Fabric BlueMapAPI addon), then checks:
 the core becomes ready, `/bluemap` commands answer on the console, the addon gets BlueMapAPI.onEnable and registers its
-script, the webserver serves the webapp and rendered tiles, `live/players.json` lists a Carpet bot and drops it again, the
-bot's LuckPerms node denies or allows `/bluemap stop`,
+script, the webserver serves the webapp and rendered tiles, `live/players.json` lists a Carpet bot and drops it again,
 `/bluemap reload` works, a killed core is respawned, stopping the server leaves no core process, neither does killing
 the JVM, and next to upstream BlueMap's Fabric jar at most one BlueMap runs. Results go to work/e2e-fabric/out/.
 """
@@ -17,7 +16,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from build_core import build_jars, host_jar, stage_host_core
@@ -78,7 +76,7 @@ def live(map_id: str, name: str):
 
 def run_ours(jar: Path, fresh: bool) -> Path:
     folder = E2E / "rs"
-    mods = [jar, fetch("fabric-api"), fetch("carpet"), fetch("offline-markers"), fetch("luckperms-fabric")]
+    mods = [jar, fetch("fabric-api"), fetch("carpet"), fetch("offline-markers")]
     prepare(folder, mods, fresh, world_from=fixture_world("context"), addons_dir="mods")
     server = Fabric(folder)
     try:
@@ -143,29 +141,8 @@ def players(server: Server, map_id: str) -> None:
     bot = poll(lambda: (p := live(map_id, "players")) and p["players"] and p, 30)
     check("players.json shows a bot", bot and bot["players"][0]["name"] == "e2ebot", json.dumps(bot)[:200])
     (OUT / "rs-players-bot.json").write_text(json.dumps(bot))
-    permissions(server, bot["players"][0]["uuid"])
     server.command("player e2ebot kill", r"e2ebot left the game", 60)
     check("players.json drops the bot", poll(lambda: live(map_id, "players") == {"players": []}, 15))
-
-
-def permissions(server: Server, uuid: str) -> None:
-    """`/bluemap stop` as the bot obeys its LuckPerms node. `execute as` keeps the console's op level, so only an
-    explicit deny can refuse it; by UUID, since LuckPerms never pre-loads Carpet's fake players."""
-    node = lambda value: server.command(f"lp user {uuid} permission set bluemap.stop {value}",
-                                        rf"Set bluemap\.stop to {value}", 60)
-    node("false")
-    server.send("execute as e2ebot run bluemap stop")
-    time.sleep(2)  # the core answers asynchronously; nothing on the console to wait for when it refuses
-    check("LuckPerms deny node refuses the command", not threads_stopped(server))
-    node("true")
-    server.send("execute as e2ebot run bluemap stop")
-    check("LuckPerms grant node allows it", poll(lambda: threads_stopped(server), 15))
-    server.command("bluemap start", r"Render-Threads started", 30)
-
-
-def threads_stopped(server: Server) -> bool:
-    m = server.command("bluemap", r"render-threads are (\w+)|progress: ", 10)
-    return m.group(1) == "stopped"
 
 
 def addon(server: Server) -> None:

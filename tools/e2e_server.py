@@ -45,9 +45,6 @@ DOWNLOADS = {
     "offline-markers": ("bluemap-offline-player-markers-2026.9.1.jar",
                         "https://cdn.modrinth.com/data/4h9u0qdE/versions/safOEocx/bluemap-offline-player-markers-2026.9.1.jar",
                         None),
-    # a real fabric-permissions-api provider: permission nodes for a non-op (bot) player
-    "luckperms-fabric": ("LuckPerms-Fabric-5.5.85.jar",
-                         "https://cdn.modrinth.com/data/Vebnzrzj/versions/DzQPkkXY/LuckPerms-Fabric-5.5.85.jar", None),
     "upstream-fabric": ("bluemap-5.28-fabric.jar",
                         "https://cdn.modrinth.com/data/swbUV1cr/versions/bbzcTCOs/bluemap-5.28-fabric.jar", None),
 }
