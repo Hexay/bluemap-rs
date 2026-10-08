@@ -43,7 +43,7 @@ rust-embed = { version = "8", features = ["debug-embed"] }
 socket2 = "0.6"
 tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["catch-panic", "limit", "timeout"] }
+tower-http = { version = "0.7", features = ["catch-panic", "limit", "timeout"] }
 tracing = "0.1"
 # global allocator of the static musl cores only (bm-cli); see docs/13 §5
 mimalloc = { version = "0.1", default-features = false }
