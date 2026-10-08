@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::de::fields;
 
-/// `webserver.conf` (`WebserverConfig.java`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+/// `webserver.conf` (`WebserverConfig.java`); serializes with Java's field names.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct WebserverConfig {
     pub enabled: bool,
     pub webroot: PathBuf,
@@ -23,8 +23,8 @@ pub struct WebserverConfig {
 }
 
 /// `log { file, append, format }`; `file` and `format` are Java `String.format` patterns, passed through verbatim.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct WebserverLogConfig {
     pub file: Option<String>,
     pub append: bool,

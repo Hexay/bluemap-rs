@@ -35,10 +35,11 @@ fn pixels(bytes: &[u8]) -> Vec<[u8; 4]> {
 #[test]
 fn decodes_every_color_type_to_rgba8() {
     use png::{BitDepth::*, ColorType::*};
-    assert_eq!(pixels(&png(2, 1, Grayscale, Eight, &[0, 200], |_| {})), [[0, 0, 0, 255], [200, 200, 200, 255]]);
+    // 8-bit gray is linear gray to Java: getRGB maps it through the sRGB LUT (tests/png_ref.rs covers all of it)
+    assert_eq!(pixels(&png(2, 1, Grayscale, Eight, &[0, 200], |_| {})), [[0, 0, 0, 255], [229, 229, 229, 255]]);
     // 4-bit gray 0b0001_1111: 1*17 and 15*17
     assert_eq!(pixels(&png(2, 1, Grayscale, Four, &[0x1F], |_| {})), [[17, 17, 17, 255], [255, 255, 255, 255]]);
-    assert_eq!(pixels(&png(1, 1, GrayscaleAlpha, Eight, &[9, 128], |_| {})), [[9, 9, 9, 128]]);
+    assert_eq!(pixels(&png(1, 1, GrayscaleAlpha, Eight, &[9, 128], |_| {})), [[53, 53, 53, 128]]);
     assert_eq!(pixels(&png(1, 1, Rgb, Eight, &[1, 2, 3], |_| {})), [[1, 2, 3, 255]]);
     let rgb_trns = png(2, 1, Rgb, Eight, &[1, 2, 3, 4, 5, 6], |e| e.set_trns(vec![0, 1, 0, 2, 0, 3]));
     assert_eq!(pixels(&rgb_trns), [[1, 2, 3, 0], [4, 5, 6, 255]]);
@@ -50,7 +51,7 @@ fn decodes_every_color_type_to_rgba8() {
     let sixteen = png(1, 1, Rgba, Sixteen, &[0xFF, 0xFF, 0x80, 0x00, 0x00, 0x00, 0x7F, 0x7F], |_| {});
     assert_eq!(pixels(&sixteen), [[255, 128, 0, 127]]);
     let gray_trns = png(2, 1, Grayscale, Eight, &[7, 8], |e| e.set_trns(vec![0, 7]));
-    assert_eq!(pixels(&gray_trns), [[7, 7, 7, 0], [8, 8, 8, 255]]);
+    assert_eq!(pixels(&gray_trns), [[46, 46, 46, 0], [50, 50, 50, 255]]);
 }
 
 #[test]

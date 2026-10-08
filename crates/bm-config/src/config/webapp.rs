@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::de::fields;
 
-/// `webapp.conf` (`WebappConfig.java`).
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+/// `webapp.conf` (`WebappConfig.java`); serializes with Java's field names.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct WebappConfig {
     pub enabled: bool,
     pub update_settings_file: bool,

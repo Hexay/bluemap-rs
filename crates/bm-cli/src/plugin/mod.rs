@@ -15,6 +15,7 @@ mod state;
 mod tasks_dat;
 mod text;
 mod timers;
+mod watchers;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

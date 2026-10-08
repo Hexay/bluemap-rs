@@ -27,7 +27,8 @@ chrono.workspace = true
 clap.workspace = true
 rayon.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# debug dump and command components rely on insertion-ordered objects
+serde_json = { workspace = true, features = ["preserve_order"] }
 tokio = { workspace = true, features = ["signal", "sync"] }
 zip.workspace = true
 

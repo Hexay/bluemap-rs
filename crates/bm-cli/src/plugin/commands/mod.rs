@@ -4,6 +4,7 @@
 mod actions;
 mod checks;
 mod debug;
+mod dump;
 mod info;
 pub mod parse;
 mod storages;
@@ -46,7 +47,7 @@ fn run(core: &Core, input: &str, sender: &CommandSender, say: Say) -> i32 {
         return actions::reload(core, m.usage == "reload light", say);
     }
     if m.usage == "debug dump" {
-        return debug::dump(core, say);
+        return dump::dump(core, say);
     }
     if !has_context(m.usage, sender) {
         say(text::one("Unknown or incomplete command!", NEGATIVE));
