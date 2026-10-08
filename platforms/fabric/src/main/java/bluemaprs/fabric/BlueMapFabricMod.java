@@ -18,7 +18,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * The Fabric side of bluemap-rs (docs/14): a dedicated-server entrypoint feeding the loader-neutral {@link ShimCore}.
+ * The Fabric side of bluemap-rs (docs/16): a dedicated-server entrypoint feeding the loader-neutral {@link ShimCore}.
  * Nothing starts before {@code SERVER_STARTED}; {@code SERVER_STOPPING} waits for the core to save and exit.
  */
 public final class BlueMapFabricMod implements DedicatedServerModInitializer {

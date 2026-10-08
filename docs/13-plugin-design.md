@@ -1,6 +1,6 @@
 # 13 — Server plugin: Java shim + Rust core over IPC
 
-Scope: the Paper plugin (Fabric: docs/14; Forge/NeoForge later, same core). Settled in 00 "Decisions": separate process, one
+Scope: the Paper plugin (Fabric: docs/16; Forge/NeoForge later, same core). Settled in 00 "Decisions": separate process, one
 jar with per-OS binaries, Java addons warn-only, drop-in for configs/commands/permissions/BlueMapAPI consumers.
 Upstream refs: BlueMap `v5.28` (`0f3a9fb`; most refs were read at master `84ee993`), BlueMapAPI `bd7a9de` (2.8.x). Prefixes as in 05: `C/` common,
 `CORE/` core, `IMPL/paper/` = `implementations/paper/src/main/java/de/bluecolored/bluemap/bukkit/`, `API/`.
@@ -339,7 +339,7 @@ bStats id; demand-driven live markers; auto-respawn with backoff; armv7-musl if 
 
 Vertical slice done end to end on Windows and Linux: `crates/bm-ipc` (protocol, crate docs = spec), `bluemap
 --plugin-ipc` (`crates/bm-cli/src/plugin/`), the Java shim (`platforms/common` + `platforms/paper`; layout and the
-Fabric mod in docs/14), `tools/e2e_paper.py` and the
+Fabric mod in docs/16), `tools/e2e_paper.py` and the
 per-target builds (`tools/build_core.py`, shared with `.github/workflows/{ci,release}.yml`).
 
 **Verified** by `tools/e2e_paper.py` on Paper 26.3 build 159 (Java 25) with BlueBorder 1.1.2 (marker addon)

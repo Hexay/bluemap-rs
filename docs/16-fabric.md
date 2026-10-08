@@ -1,4 +1,4 @@
-# 14 — Fabric mod and the shared shim (`platforms/`)
+# 16 — Fabric mod and the shared shim (`platforms/`)
 
 Design of the server side: docs/13 (Paper first). This doc covers the split into a loader-neutral shim and the Fabric
 mod. Upstream reference: BlueMap `v5.28` (`0f3a9fb`), `implementations/fabric`.
