@@ -64,7 +64,7 @@ jobs:
           codesign --verify --verbose platforms/natives/${{ matrix.target }}/bluemap-core
       - if: matrix.target == 'macos-arm64'
         run: platforms/natives/macos-arm64/bluemap-core --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: core-${{ matrix.target }}
           path: platforms/natives/${{ matrix.target }}/
@@ -123,12 +123,12 @@ jobs:
             fi
           done
           ls -l dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: plugin-jars
           path: platforms/*/build/libs/bluemap-rs-*.jar
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: cli
           path: dist/*
