@@ -70,6 +70,9 @@ fn main() -> Result<()> {
         rayon::current_num_threads()
     );
     println!("meshing alone: {mesh:.2} thread-seconds, {:.1} tiles/s per thread", tiles.len() as f64 / mesh);
+    let lowres_nanos = AtomicU64::new(0);
+    fx.render_lowres(&area, &tiles, &lowres_nanos)?;
+    println!("lowres-only block pass: {:.2} thread-seconds", lowres_nanos.into_inner() as f64 / 1e9);
     match fx.check_lowres(&rendered) {
         Ok((checked, bad)) => {
             println!("lowres columns vs golden LOD 1: {checked} compared, {} differ", bad.len());

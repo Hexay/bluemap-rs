@@ -21,11 +21,15 @@ pub struct Face {
     pub material: u32,
 }
 
+/// A model renderers either fill, or only count faces in when the lowres columns are all that is wanted
+/// (`Ctx::geometry`). The transforms leave a counted-only model alone.
 pub trait MeshExt {
     fn faces(&self) -> usize;
     /// Room for `count` more faces (`ensureCapacity`).
     fn reserve_faces(&self, count: usize) -> Result<(), CapacityReached>;
     fn push_face(&mut self, f: &Face);
+    /// Faces without geometry: only their count, which the [`MAX_FACES`] cut-off reads.
+    fn count_faces(&mut self, count: usize);
     fn transform_from(&mut self, start: usize, m: &MatrixM4f);
     fn translate_from(&mut self, start: usize, dx: f32, dy: f32, dz: f32);
     fn scale_from(&mut self, start: usize, s: f32);
@@ -40,6 +44,10 @@ impl MeshExt for TileModel {
         if self.faces() + count > MAX_FACES { Err(CapacityReached) } else { Ok(()) }
     }
 
+    fn count_faces(&mut self, count: usize) {
+        self.material.resize(self.material.len() + count, 0);
+    }
+
     fn push_face(&mut self, f: &Face) {
         self.position.extend(f.positions.as_flattened());
         self.uv.extend(f.uvs.as_flattened());
@@ -52,7 +60,7 @@ impl MeshExt for TileModel {
     }
 
     fn transform_from(&mut self, start: usize, t: &MatrixM4f) {
-        for p in self.position[start * 9..].as_chunks_mut::<3>().0 {
+        for p in positions_from(&mut self.position, start) {
             let [x, y, z] = *p;
             *p = [
                 t.m00 * x + t.m01 * y + t.m02 * z + t.m03,
@@ -63,7 +71,7 @@ impl MeshExt for TileModel {
     }
 
     fn translate_from(&mut self, start: usize, dx: f32, dy: f32, dz: f32) {
-        for p in self.position[start * 9..].as_chunks_mut::<3>().0 {
+        for p in positions_from(&mut self.position, start) {
             p[0] += dx;
             p[1] += dy;
             p[2] += dz;
@@ -71,8 +79,13 @@ impl MeshExt for TileModel {
     }
 
     fn scale_from(&mut self, start: usize, s: f32) {
-        self.position[start * 9..].iter_mut().for_each(|v| *v *= s);
+        self.position.get_mut(start * 9..).unwrap_or_default().iter_mut().for_each(|v| *v *= s);
     }
+}
+
+/// The positions of faces `start..`; none in a counted-only model.
+fn positions_from(position: &mut [f32], start: usize) -> &mut [[f32; 3]] {
+    position.get_mut(start * 9..).unwrap_or_default().as_chunks_mut::<3>().0
 }
 
 /// `ArrayTileModel.sort`: faces ordered by material, stable. `out` is overwritten.

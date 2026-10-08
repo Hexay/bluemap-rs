@@ -206,3 +206,38 @@ Structures on testbox, 6 interleaved runs, each commit measured against the prev
 - **Left (compat):** gzip ~38%, block pass ~30% (per-block state/flags/light loads, spread thin), chunk load
   ~8.5% (zlib inflate ~4%, NBT walk ~4%), fill ~6%, face meshing ~8%, lowres persist ~4.6%, sort + PRBM ~6.5%.
   Optimized: BMQ2 encode is now mostly zstd.
+
+## Lowres-only path (`enable-hires: false`)
+
+Maps without hires tiles still meshed every tile and threw the model away (Java does the same). With hires off,
+`render_top_only` is forced too. `HiresRenderer::render_lowres` (`bm-render/src/renderer.rs`) now runs the same
+block pass with `Ctx::geometry` false:
+
+- Faces pass every cull, light and cave test and set the tint and map colour as before. They are then only counted
+  (`MeshExt::count_faces`), so the 1 M-face cut-off truncates at the same column. There are no UVs, AO, vertices,
+  transforms, material sort or PRBM.
+- Top-only walks stop at the first opaque culling block, so the volume starts 4 blocks under the tile's lowest
+  `OCEAN_FLOOR`. A column that walks below that floor returns `Stop::Shallow`, and the tile refills from the bottom
+  (40 of 1153 structures tiles). Masked tiles always fill fully, since masked-out blocks don't stop a walk.
+- Exactness: debug builds render every lowres-only tile the full way as well and assert identical columns and
+  `truncated`. The golden test renders all 6 fixtures lowres-only, with the fixture settings and with
+  `render_top_only`. It compares against the full path and the golden LOD 1 pixels. On structures with hires off, the
+  webroot from master's binary and from this one differ only in rstate.
+
+Structures with `enable-hires: false`, testbox, 5 interleaved runs:
+
+| | CPU | wall | RSS |
+|---|---|---|---|
+| master | 7.03–7.09 s | 1.68–1.81 s | 219–224 MB |
+| no geometry, full volume | 6.33–6.43 s (−10%) | 1.63–1.67 s | 211–214 MB |
+| plus floored volume | 5.48–5.52 s (**−22%**) | 1.57–1.60 s (−9%) | 204–206 MB |
+
+Hires on (6 runs): 20.09–20.27 → 20.23–20.30 s, within noise.
+
+- **Tried and dropped** (each cost hires CPU):
+  - a generic mesh (`impl MeshExt` plus a counting type): +3–6%. The second instantiation of the block pass changed
+    inlining in the first, even with `#[inline(always)]` on the helpers that got outlined.
+  - an enum mesh (`Model(&mut TileModel) | Count`): +5.7%. The `&mut` inside the enum loses `noalias`, so the walk
+    reloads state after every push.
+  - a per-block `y < lowest` check in the walk: +3%. It is now one range bound and one flag per column.
+- **Left (hires off, profiled before the floor):** chunk load ~28%, block pass ~22%, fill ~19%, lowres persist ~14%.

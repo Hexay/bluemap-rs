@@ -86,8 +86,9 @@ impl RegionRender<'_> {
                     self.unrender(job.tile)?;
                     return Ok((Outcome::Skipped, failed));
                 }
-                renderer.render_tile(self.area, self.registry, &self.ctx.hires_grid, job.tile, buf)?;
+                let (states, grid) = (self.registry, &self.ctx.hires_grid);
                 if self.ctx.save_hires() {
+                    renderer.render_tile(self.area, states, grid, job.tile, buf)?;
                     buf.model.write_prbm(prbm)?;
                     if !self.stored_hires_equals(job.tile, prbm, stored) {
                         self.ctx.storage.write_grid(GridKey::Hires, job.tile, prbm)?;
@@ -96,6 +97,8 @@ impl RegionRender<'_> {
                     if let Some(listener) = &self.ctx.tile_listener {
                         listener(job.tile, 0);
                     }
+                } else {
+                    renderer.render_lowres(self.area, states, grid, job.tile, buf)?;
                 }
                 let columns = buf.columns.iter().map(|c| {
                     let mut color = c.color;

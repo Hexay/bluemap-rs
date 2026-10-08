@@ -108,6 +108,21 @@ impl Fixture {
 
     /// Renders `tiles` in parallel; `mesh_nanos` accumulates time spent meshing alone (all threads).
     pub fn render(&self, area: &ChunkArea, tiles: &[Tile], mesh_nanos: &AtomicU64) -> Result<Vec<Rendered>> {
+        self.render_with(area, tiles, mesh_nanos, false)
+    }
+
+    /// [`Self::render`] through `HiresRenderer::render_lowres`: columns only, empty PRBM.
+    pub fn render_lowres(&self, area: &ChunkArea, tiles: &[Tile], mesh_nanos: &AtomicU64) -> Result<Vec<Rendered>> {
+        self.render_with(area, tiles, mesh_nanos, true)
+    }
+
+    fn render_with(
+        &self,
+        area: &ChunkArea,
+        tiles: &[Tile],
+        mesh_nanos: &AtomicU64,
+        lowres_only: bool,
+    ) -> Result<Vec<Rendered>> {
         let cache = StateCache::new(&self.pack, &self.gallery, &self.states);
         let renderer = HiresRenderer {
             pack: &self.pack,
@@ -120,14 +135,21 @@ impl Fixture {
             .par_iter()
             .map_init(TileBuffers::default, |buf, &tile| {
                 let start = Instant::now();
-                renderer.render_tile(area, &self.states, &self.grid, tile, buf)?;
+                if lowres_only {
+                    renderer.render_lowres(area, &self.states, &self.grid, tile, buf)?;
+                } else {
+                    renderer.render_tile(area, &self.states, &self.grid, tile, buf)?;
+                }
                 mesh_nanos.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
                 if buf.truncated {
                     eprintln!("tile {tile:?} reached the face limit");
                 }
                 let mut prbm = Vec::new();
-                buf.model.write_prbm(&mut prbm)?;
-                Ok(Rendered { tile, prbm, faces: buf.model.len(), columns: buf.columns.clone() })
+                if !lowres_only {
+                    buf.model.write_prbm(&mut prbm)?;
+                }
+                let faces = if lowres_only { 0 } else { buf.model.len() };
+                Ok(Rendered { tile, prbm, faces, columns: buf.columns.clone() })
             })
             .collect()
     }
