@@ -12,16 +12,16 @@ use std::sync::atomic::AtomicU64;
 
 use fixture::Fixture;
 
-const WORK: &str = "C:/Users/hexay/bluemap-rs/work";
-
 fn check(fx: &str, dimension: &str) {
-    let world = PathBuf::from(format!("{WORK}/worlds/{fx}/world"));
-    let golden = PathBuf::from(format!("{WORK}/bluemap/{fx}/web"));
-    if !world.is_dir() || !golden.is_dir() || !Path::new(fixture::JAR).is_file() {
+    let work = fixture::work_dir();
+    let world = work.join(format!("worlds/{fx}/world"));
+    let golden = work.join(format!("bluemap/{fx}/web"));
+    let jar = fixture::client_jar();
+    if !world.is_dir() || !golden.is_dir() || !jar.is_file() {
         eprintln!("skipping {fx}: fixture not found");
         return;
     }
-    let f = Fixture::load(&world, dimension, &golden, None, None, Path::new(fixture::JAR), &fixture::extensions_dir())
+    let f = Fixture::load(&world, dimension, &golden, None, None, &jar, &fixture::extensions_dir())
         .unwrap();
     let tiles = f.golden_tiles().unwrap();
     let area = f.load_area(&tiles);

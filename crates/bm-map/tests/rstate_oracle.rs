@@ -9,14 +9,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bm_format::grid::{Tile, parse_tile_path};
 use bm_map::renderstate::{Cell, CellKind, ChunkInfoRegion, RegionInfoRegion, TileInfoRegion, TileState};
 
-const ROOTS: [&str; 2] = ["C:/Users/hexay/bluemap-rs/work/bluemap", "C:/Users/hexay/bluemap_reverse/work/bluemap"];
 /// 2020-01-01: anything older is not a BlueMap 5 timestamp.
 const MIN_TIME: i64 = 1_577_836_800;
 
+/// Golden webroots: this repo's `work/bluemap`, plus a sibling `bluemap_reverse` checkout's when present.
+fn roots() -> Vec<PathBuf> {
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let find = |rel: &str| here.ancestors().map(|a| a.join(rel)).find(|p| p.is_dir());
+    [find("work/bluemap"), find("../bluemap_reverse/work/bluemap")].into_iter().flatten().collect()
+}
+
 fn map_dirs() -> Vec<PathBuf> {
     let mut maps = Vec::new();
-    for root in ROOTS {
-        for fixture in read_dir(Path::new(root)) {
+    for root in roots() {
+        for fixture in read_dir(&root) {
             maps.extend(read_dir(&fixture.join("web/maps")).into_iter().filter(|m| m.join("rstate").is_dir()));
         }
     }

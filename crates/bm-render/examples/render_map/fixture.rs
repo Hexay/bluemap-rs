@@ -23,8 +23,17 @@ use rayon::prelude::*;
 
 use super::conf;
 
-pub const JAR: &str = "C:/Users/hexay/bluemap-rs/work/bluemap/vanilla/data/minecraft-client-26.3.jar";
 const DEFAULTS: &str = include_str!("../../../../assets/resourceExtensions/data/minecraft/defaultBlockstates.json");
+
+/// The repo's `work/` folder (git-ignored), found from a checkout or any worktree inside it.
+pub fn work_dir() -> PathBuf {
+    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+    here.ancestors().map(|a| a.join("work")).find(|w| w.is_dir()).unwrap_or_else(|| here.join("../../work"))
+}
+
+pub fn client_jar() -> PathBuf {
+    work_dir().join("bluemap/vanilla/data/minecraft-client-26.3.jar")
+}
 
 pub fn extensions_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/resourceExtensions")
