@@ -61,7 +61,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   tests: `BM_TEST_MYSQL_URL=… BM_TEST_POSTGRES_URL=… cargo test -p bm-storage --test sql_remote -- --ignored`; vs Java
   over the same DBs: `py -3 tools/accept_sql.py [--servers …]`
 - Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots, upstream compare): `py -3 tools/e2e_paper.py`
-  (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one); Fabric mod e2e (Fabric 26.3 + Carpet bots +
+  (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one; `--server folia`/`--mc 26.2` for other pinned
+  builds, see `e2e_server.SERVERS`); Fabric mod e2e (Fabric 26.3 + Carpet bots +
   a Fabric addon): `py -3 tools/e2e_fabric.py` (same flags)
 - Plugin cores per target (musl via cargo-zigbuild + `pip install ziglang cargo-zigbuild`) + jars, same as CI:
   `py -3 tools/build_core.py [windows-x64 linux-x64 linux-arm64 linux-armv7 …] [--jars]`

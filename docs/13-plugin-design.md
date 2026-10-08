@@ -353,6 +353,11 @@ testbox (linux-x64 static musl jar, `--core`/`--jar` prebuilt from Windows):
 - Against upstream BlueMap 5.28 Paper on a copy of the same world: `live/markers.json` and the empty
   `live/players.json` are byte-identical; console text of `storages`, `storages file`, `debug world <map> 0 64 0`
   identical; all generated configs identical except the deliberate `format: optimized` block in `storages/*.conf`.
+- `--server folia --mc 26.2` (Folia 26.2 build 7; BlueBorder and the bots don't declare `folia-supported`, so no
+  marker/player checks) and `--mc 26.2|26.1.2` on Paper (`context` world from each version's vanilla server) pass on
+  the Linux testbox, upstream comparison included.
+- With every map frozen and the render-threads stopped, the `/bluemap` and `/bluemap maps` console text is identical
+  to upstream's.
 - Cross-built cores: linux-arm64 and linux-armv7 render `structures` byte-identically to glibc x64 under
   qemu-user; `tasks.dat` encoder byte-identical to BlueNBT 3.5.1 (unit test).
 - Rust tests: framing edge cases (`bm-ipc`), players JSON vs `JsonWriter` (`bm-map`), command spec/parser,
@@ -381,7 +386,12 @@ from Windows needs the Apple SDK, so they are unverified locally.
 - Shim compiles against paper-api 1.21.11 for Java 21 (26.x API jars are Java 25 class files) and recompiles
   BlueMapAPI 2.8.1 from its sources jar for the same reason. 1.21.x servers should work too (untested).
 - The core logs one line per finished render task (`Map 'x': N regions, M tiles rendered, …`); upstream is silent.
-- Command output follows upstream's wording and palette but is not component-identical.
+- Command output follows the 5.28 command classes' wording, layout and palette (status, maps, tasks, version, help,
+  start/stop, freeze/unfreeze, purge, update, cancel) without hover/click events. Task refs are a hash of the task,
+  not random; `version` prints `bluemap-rs <version>` where upstream prints its git hash; `start` adds which
+  beyond-parity pause still holds (docs/15).
+- The core retries a `level.dat`/`world_gen_settings.dat` that fails to decompress (5 × 200 ms): Paper writes level
+  data off-thread after the enable-time save, while our core is already loading.
 - `reload light` reloads resources too; the rayon pool keeps the first load's thread count until restart; the
   `RenderStart{threads}` count is ignored.
 - Marker demand: viewers (SSE or `markers.json` read within 30 s), the first 30 s after a load and 30 s before a
@@ -420,8 +430,8 @@ from Windows needs the Apple SDK, so they are unverified locally.
 - musl cores use mimalloc with a 3 ms purge delay (table in §5).
 
 **Left**
-- macOS run on real hardware (CI builds and signs only), Folia run (no Folia 26.3 build yet; scheduler code paths
-  are in place but untested), player-head bytes vs upstream on a real online-mode join (offline bots have no skin),
+- macOS run on real hardware (CI builds and signs only), Folia with players and a marker addon (none of the e2e
+  addons load on Folia), player-head bytes vs upstream on a real online-mode join (offline bots have no skin),
   bStats id.
 - A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
   `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.
