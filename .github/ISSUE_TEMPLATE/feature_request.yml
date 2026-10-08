@@ -1,0 +1,18 @@
+name: Feature request
+description: Something bluemap-rs should do, or a BlueMap feature or addon it doesn't support yet
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you need?
+      description: The problem first, then the solution you have in mind.
+    validations:
+      required: true
+  - type: dropdown
+    id: upstream
+    attributes:
+      label: Does Java BlueMap 5.28 have this?
+      options: ["Yes (parity gap)", "No (new feature)", "Not sure"]
+    validations:
+      required: true

@@ -1,0 +1,45 @@
+name: Bug report
+description: Something is broken, crashes, or renders differently from Java BlueMap
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [CLI, Paper, Folia, Fabric, Other]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: "`bluemap --version` or `/bluemap version`, the Minecraft version, and the OS"
+      placeholder: bluemap-rs 0.1.0, MC 26.3, Paper build 159, Ubuntu 24.04 x64
+    validations:
+      required: true
+  - type: dropdown
+    id: parity
+    attributes:
+      label: Does Java BlueMap 5.28 behave correctly with the same world and config?
+      options: ["Yes, only bluemap-rs is wrong", "No, Java BlueMap has the same problem", "Not tried"]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Screenshots of the map help for render problems (include the coordinates).
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        The relevant part of the server log or CLI output. For servers, `/bluemap debug dump` writes a dump.json
+        that helps a lot; remove anything private (SQL passwords, IPs) before attaching it.
+      render: text

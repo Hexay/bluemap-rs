@@ -2,6 +2,8 @@ webapp/** is the unmodified BlueMap webapp build (Vue + three.js, https://github
 common/webapp), extracted from de/bluecolored/bluemap/webapp.zip in the BlueMap 5.28 CLI release jar
 (bluemap-5.28-cli.jar; webapp.zip sha256 cc7754d1df096f9bfdff7c335bafe59244d3f554e75cc59073ab29def1f32a5f).
 Omitted: assets/index-BhhubAws.js.map (4.9 MB source map, only fetched by browser devtools).
+Added: assets/OFL.txt, the Quicksand font's licence from BlueMap's webapp/src/fonts (its build drops it; OFL 1.1
+requires it next to the font). Bundled libraries: licenses/BUNDLED.txt at the repo root.
 Refresh by extracting webapp.zip from the targeted release jar; keep files byte-identical (.gitattributes: -text).
 
 The MIT License (MIT)

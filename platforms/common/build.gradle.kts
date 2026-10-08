@@ -69,4 +69,6 @@ tasks.processResources {
     from("../../crates/bm-cli/src/plugin/commands.json")
     // MIT: ships upstream-derived code (logger, skins, BlueMapAPI build) — carry both copyright notices
     from("../../LICENSE") { into("META-INF") }
+    // written by tools/notices.py (release builds); local builds without it just skip it
+    from("../../THIRD-PARTY-NOTICES.txt") { into("META-INF") }
 }

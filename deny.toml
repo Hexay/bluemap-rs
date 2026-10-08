@@ -3,6 +3,11 @@ all-features = true
 
 [advisories]
 version = 2
+ignore = [
+    # rsa via sqlx-mysql: only encrypts the password with the MySQL server's public key; the timing leak is in
+    # private-key operations, which bluemap-rs never performs. No fixed release exists.
+    { id = "RUSTSEC-2023-0071", reason = "public-key encryption only (sqlx-mysql auth)" },
+]
 
 [licenses]
 version = 2
@@ -10,6 +15,8 @@ allow = [
     "MIT",
     "Apache-2.0",
     "BSD-3-Clause",
+    "ISC",
+    "CC0-1.0",
     "Unicode-3.0",
     "Zlib",
     "CDLA-Permissive-2.0",

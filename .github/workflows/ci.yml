@@ -28,6 +28,13 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
+  # advisories, licenses (deny.toml allow list), sources
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
   # the static musl cores are cross-built: catch C-dependency breakage before a release
   musl:
     runs-on: ubuntu-latest

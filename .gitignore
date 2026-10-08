@@ -1,4 +1,5 @@
 /work/
 /.claude/worktrees/
 /target/
+/THIRD-PARTY-NOTICES.txt
 __pycache__/

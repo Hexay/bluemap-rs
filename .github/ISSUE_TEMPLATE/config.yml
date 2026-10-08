@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Hexay/bluemap-rs/security/advisories/new
+    about: Report privately, not as an issue (see SECURITY.md).
+  - name: Webapp or BlueMap itself
+    url: https://github.com/BlueMap-Minecraft/BlueMap/issues
+    about: bluemap-rs ships BlueMap's webapp unchanged; bugs that also happen with Java BlueMap belong upstream.

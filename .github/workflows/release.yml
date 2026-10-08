@@ -1,7 +1,8 @@
 name: Release
 
 # Builds the core for every plugin target (tools/build_core.py, as locally), tests, then packs one Paper and one Fabric
-# jar per target plus the universal jars (docs/13 §5, §7.1; docs/16). Tags `v*` publish a draft GitHub release.
+# jar per target plus the universal jars (docs/13 §5, §7.1; docs/16), and a CLI archive per target. Tags `v*` publish a
+# draft GitHub release.
 on:
   push:
     tags: ["v*"]
@@ -96,14 +97,44 @@ jobs:
           ls -lR platforms/natives
       - working-directory: platforms
         run: ./gradlew test --no-daemon --console=plain
+      - uses: dtolnay/rust-toolchain@stable
+      - name: third-party notices
+        run: |
+          cargo install --locked cargo-about
+          python tools/notices.py
       - run: python tools/build_core.py --jars
+      # the core is also the standalone CLI (`bluemap`); archives keep the executable bit
+      - name: pack CLI archives
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          for dir in dl/core-*; do
+            target="${dir#dl/core-}"
+            stage="$(mktemp -d)"
+            cp LICENSE THIRD-PARTY-NOTICES.txt README.md MIGRATING.md "$stage/"
+            if [ -f "$dir/bluemap-core.exe" ]; then
+              cp "$dir/bluemap-core.exe" "$stage/bluemap.exe"
+              (cd "$stage" && zip -q "$OLDPWD/dist/bluemap-rs-$version-$target.zip" *)
+            else
+              install -m 755 "$dir/bluemap-core" "$stage/bluemap"
+              tar -czf "dist/bluemap-rs-$version-$target.tar.gz" -C "$stage" .
+            fi
+          done
+          ls -l dist
       - uses: actions/upload-artifact@v4
         with:
           name: plugin-jars
           path: platforms/*/build/libs/bluemap-rs-*.jar
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: dist/*
+          if-no-files-found: error
       - if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          files: platforms/*/build/libs/bluemap-rs-*.jar
+          files: |
+            platforms/*/build/libs/bluemap-rs-*.jar
+            dist/*
