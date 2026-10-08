@@ -333,11 +333,11 @@ def main() -> None:
     if OUT.exists():
         shutil.rmtree(OUT)
     folder = run_ours(jar, not args.keep, target)
-    run_jvm_kill(folder, target)
     if not args.no_upstream:
-        run_upstream(folder / "world", target)
-        if target == Target():
-            run_handoff(jar, folder)
+        run_upstream(folder / "world", target)  # before the JVM kill: SIGKILL can truncate the world's .dat files
+    run_jvm_kill(folder, target)
+    if not args.no_upstream and target == Target():
+        run_handoff(jar, folder)
     sys.exit(report(OUT))
 
 
