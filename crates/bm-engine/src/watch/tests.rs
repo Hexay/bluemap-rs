@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use super::*;
 use crate::task::Regions;
@@ -84,6 +84,32 @@ fn full_updates_repeat() {
 }
 
 #[test]
+fn first_full_update_follows_the_last_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let queue = Arc::new(RenderQueue::new());
+    let s = WatchSettings { full_update_interval: Duration::from_secs(3600), ..settings() };
+    let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = recorded.clone();
+    let overdue = FullUpdates {
+        last: SystemTime::now() - Duration::from_secs(7200),
+        on_scheduled: Arc::new(move |t| sink.lock().unwrap().push(t)),
+    };
+    let before = SystemTime::now();
+    let service = MapUpdateService::start_with("w", dir.path().to_owned(), queue.clone(), s, quiet(), overdue).unwrap();
+    let task = next_task(&queue, Duration::from_secs(5)).expect("overdue full update runs at once");
+    assert_eq!(task.regions, Regions::All);
+    service.close();
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.len(), 1, "lastFullUpdate recorded once");
+    assert!(recorded[0] >= before);
+
+    let now = Instant::now();
+    let half_done = SystemTime::now() - Duration::from_secs(1800);
+    let at = first_full(now, half_done, Duration::from_secs(3600));
+    assert!(at > now + Duration::from_secs(1790) && at <= now + Duration::from_secs(1800));
+}
+
+#[test]
 fn periodic_rescan_catches_changes_the_watcher_missed() {
     let dir = tempfile::tempdir().unwrap();
     let queue = Arc::new(RenderQueue::new());
@@ -100,6 +126,7 @@ fn periodic_rescan_catches_changes_the_watcher_missed() {
         armed: HashMap::new(),
         last_scheduled: HashMap::new(),
         next_full: None,
+        on_full: FullUpdates::default().on_scheduled,
         next_scan: Some(Instant::now()),
         next_retry: Instant::now() + Duration::from_secs(3600),
     };

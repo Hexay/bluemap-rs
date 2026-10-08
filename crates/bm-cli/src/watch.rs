@@ -6,13 +6,22 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use bm_engine::{
-    LoadedMaps, LogLevel, MapContext, MapUpdateService, RenderQueue, RenderTask, Service, TileUpdateStrategy,
+    LoadedMaps, LogFn, LogLevel, MapContext, MapUpdateService, RenderQueue, RenderTask, Service, TileUpdateStrategy,
     WatchSettings,
 };
 
 use crate::log;
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The watcher's log lines into ours.
+pub fn engine_log() -> LogFn {
+    Arc::new(|level: LogLevel, msg: &str| match level {
+        LogLevel::Info => log::info(msg),
+        LogLevel::Warning => log::warn(msg),
+        LogLevel::Error => log::error(msg),
+    })
+}
 
 pub struct Watchers<'a> {
     service: &'a Service,
@@ -28,13 +37,8 @@ impl<'a> Watchers<'a> {
     }
 
     pub fn start(&self, map: &MapContext) {
-        let log = Arc::new(|level: LogLevel, msg: &str| match level {
-            LogLevel::Info => log::info(msg),
-            LogLevel::Warning => log::warn(msg),
-            LogLevel::Error => log::error(msg),
-        });
         let dir = map.world.region_dir().to_owned();
-        match MapUpdateService::start(&map.id, dir, self.queue.clone(), self.settings, log) {
+        match MapUpdateService::start(&map.id, dir, self.queue.clone(), self.settings, engine_log()) {
             Ok(watcher) => self.running.lock().unwrap_or_else(PoisonError::into_inner).push(watcher),
             Err(e) => log::error(&format!(
                 "Failed to create update-watcher for map: {} (This means the map might not automatically update): {e}",

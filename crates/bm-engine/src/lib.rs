@@ -40,4 +40,4 @@ pub use runner::{LoadedMaps, TaskEvent, run_queue};
 pub use service::{BLUEMAP_VERSION, Service};
 pub use task::{Regions, RenderTask};
 pub use update::{UpdateEvent, UpdateJob, UpdateStats, update_map};
-pub use watch::{LogFn, LogLevel, MapUpdateService, WatchSettings};
+pub use watch::{FullUpdates, LogFn, LogLevel, MapUpdateService, OnFullUpdate, WatchSettings};
