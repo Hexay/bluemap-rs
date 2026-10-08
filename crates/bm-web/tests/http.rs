@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bm_storage::{Compression, FileStorage, GridKey, ItemKey, Storage};
-use bm_web::{AccessLog, Level, LiveMap, LogSink, MapRoute, WebApp, WebOptions};
+use bm_web::{AccessLog, Level, LiveMap, LogSink, MapRegistry, MapRoute, WebApp, WebOptions};
 use common::{Capture, Served, get, gunzip, request};
 
 const CACHE: &str = "public, max-age=86400, stale-if-error=604800";
@@ -17,6 +17,7 @@ struct Fixture {
     _dir: tempfile::TempDir,
     served: Served,
     live: Arc<LiveMap>,
+    maps: MapRegistry,
     log: Capture,
     prbm: Vec<u8>,
 }
@@ -48,7 +49,8 @@ fn fixture() -> Fixture {
     let live = Arc::new(LiveMap::new(true).with_markers());
     app.add_map("world", MapRoute { storage: map.clone(), live: Some(live.clone()) }).unwrap();
     app.add_map("plain", MapRoute { storage: map, live: None }).unwrap();
-    Fixture { _dir: dir, served: Served::start(app), live, log, prbm }
+    let maps = app.maps();
+    Fixture { _dir: dir, served: Served::start(app), live, maps, log, prbm }
 }
 
 #[test]
@@ -192,6 +194,19 @@ fn live_json_and_sse() {
     let split = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
     let body = common::dechunk(&buf[split + 4..]);
     assert_eq!(String::from_utf8_lossy(&body), String::from_utf8_lossy(want));
+}
+
+#[test]
+fn live_routes_of_maps_loaded_later() {
+    let f = fixture();
+    let a = f.served.addr;
+    assert_eq!(get(a, "/maps/plain/live/markers.json", &[]).status, 404, "storage has no markers.json");
+    let late = Arc::new(LiveMap::new(true).with_markers());
+    late.set_markers("{\"late\":{}}");
+    assert!(f.maps.set_live("plain", late));
+    assert_eq!(get(a, "/maps/plain/live/markers.json", &[]).body, b"{\"late\":{}}");
+    assert!(!f.maps.set_live("unknown", Arc::new(LiveMap::new(false))));
+    assert_eq!(get(a, "/maps/world/live/markers.json", &[]).status, 200, "other routes stay");
 }
 
 #[test]

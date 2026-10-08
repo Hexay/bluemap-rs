@@ -276,7 +276,8 @@ storage, 12 threads, 4 interleaved runs, all cross-built with zig; `docs/perf-ex
 
 mimalloc's defaults buy CPU with +60 % RSS, which a core sharing a container with the JVM can't afford; the tuned
 setting beats musl malloc on both axes. `MIMALLOC_*` env vars still override it. Compat-storage renders are
-byte-identical across all variants (optimized `.bmb` bundles differ in entry order between any two runs). The
+byte-identical across all variants (optimized `.bmb` bundles differ in record order between any two renders; see
+"Determinism" in `bm-storage/src/optimized/bundle/mod.rs`). The
 remaining gap to glibc (+27 % wall) is the price of one portable binary; a `gnu.2.17` build is the fallback if it
 matters.
 macOS: binaries need at least an ad-hoc signature on arm64 (rustc/ld does this by default). For quarantine, see
@@ -390,15 +391,24 @@ from Windows needs the Apple SDK, so they are unverified locally.
 - `tasks.dat` (raw BlueNBT, `renderTasks: [{type, data}]`): whole-map tasks are written as `map-update` with their
   region list at save time (upstream writes an unprepared task as `unknown` and loses it); `map-save` entries are
   ignored on load (we save after every task); unreadable files are logged and deleted as upstream.
-- `debug dump` writes our own state (maps, tasks, pluginState, worlds, RSS), not upstream's reflective dump;
-  `storages <s> delete <map>` deletes on the command thread instead of queueing a render task; `debug world` with no
-  map for the sender's world answers "No map found" (upstream loads the world on demand).
+- `debug dump` keeps `StateDumper`'s layout (`system-info`, `registries`, `dump`, `threads`, one-space indent) but
+  can't reflect: `system-info` holds the core process's equivalents (OS, cwd, cores, JVM max memory from `Hello`,
+  RSS), `dump` a fixed `Plugin` (state, render manager, server worlds) and `BlueMapService` (maps, storages)
+  object, `registries`/`threads` stay empty (`commands/debug.rs`). `debug world` with no map for the sender's world
+  answers "No map found" (upstream loads the world on demand).
+- `storages <s> delete <map>` queues `StorageDeleteTask` as a render-queue job (`bm_engine::Job`, ahead of queued
+  map updates, cancellable, progress in `/bluemap`); `purge` still runs on the command thread.
+- Release jars and cores carry one version: `tools/build_core.py` takes `$BLUEMAP_RS_VERSION`, else the `v*` tag
+  (CI) or a `v*` tag on HEAD, else Cargo's, and passes it to cargo (`bluemap --version`, `coreVersion`) and Gradle
+  (`-PreleaseVersion` → `5.28+rs.<version>` in plugin.yml/fabric.mod.json, jar names, natives manifest).
+- Maps load only per (re)load, as upstream, so every loaded map's web routes exist from session start. (The CLI's
+  `-u -w` loads maps whose world appears later; they get live routes through `bm_web::MapRegistry`.)
 - musl cores use mimalloc with a 3 ms purge delay (table in §5).
 
 **Left**
 - macOS run on real hardware (CI builds and signs only), Folia run (no Folia 26.3 build yet; scheduler code paths
   are in place but untested), player-head bytes vs upstream on a real online-mode join (offline bots have no skin),
   hourly watcher restart (our watchers self-heal), persisting `lastFullUpdate` on watcher-driven full updates,
-  bStats id, version stamping of release jars (`coreVersion` from the tag).
+  bStats id, the ETA line of `/bluemap` status (the CLI's progress log has it: `bm-cli/src/eta.rs`).
 - A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
   `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.

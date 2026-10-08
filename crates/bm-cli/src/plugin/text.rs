@@ -2,6 +2,8 @@
 
 use serde_json::{Value, json};
 
+pub use crate::eta::duration;
+
 pub const BASE: &str = "#aaaaaa";
 pub const HIGHLIGHT: &str = "#ffffff";
 pub const TITLE: &str = "#4488ff";
@@ -109,24 +111,6 @@ pub fn details(items: Vec<Vec<Vec<Value>>>, color: &str) -> Vec<Vec<Value>> {
         }
     }
     out
-}
-
-/// `TextFormat.duration`: the largest unit above 1 (days … seconds), one decimal below 2.
-pub fn duration(millis: i64) -> String {
-    let units = [("days", 86_400_000i64), ("hours", 3_600_000), ("minutes", 60_000), ("seconds", 1000)];
-    let (mut name, mut value) = ("seconds", 0.0);
-    for (unit, ms) in units {
-        (name, value) = (unit, millis as f64 / ms as f64);
-        if value > 1.0 {
-            break;
-        }
-    }
-    // Java's %.Nf rounds half up; Rust's formatter rounds half to even
-    if value < 2.0 && name != "seconds" {
-        format!("{:.1} {name}", (value * 10.0).round() / 10.0)
-    } else {
-        format!("{:.0} {name}", value.round())
-    }
 }
 
 /// `durationFormat(Instant.ofEpochSecond(secs))`: time since then.

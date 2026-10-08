@@ -5,6 +5,7 @@
 mod alloc;
 mod args;
 mod convert;
+mod eta;
 mod log;
 mod plugin;
 mod render;
@@ -21,6 +22,12 @@ use bm_config::{BlueMapConfig, ConfigOptions};
 use bm_engine::{ResourceOptions, Service, TileUpdateStrategy};
 use clap::Parser;
 use shutdown::Shutdown;
+
+/// bluemap-rs version: a release build's (`BLUEMAP_RS_VERSION` from `tools/build_core.py`), else Cargo's.
+pub const VERSION: &str = match option_env!("BLUEMAP_RS_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 fn main() -> ExitCode {
     #[cfg(target_env = "musl")]
@@ -74,7 +81,7 @@ fn run(args: &Args) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     if args.version {
-        println!("{}\nbluemap-rs {}", bm_engine::BLUEMAP_VERSION, env!("CARGO_PKG_VERSION"));
+        println!("{}\nbluemap-rs {VERSION}", bm_engine::BLUEMAP_VERSION);
         return Ok(ExitCode::SUCCESS);
     }
     let config_folder = config_folder(args);
@@ -124,7 +131,8 @@ fn run(args: &Args) -> Result<ExitCode> {
         } else {
             TileUpdateStrategy::ForceNone
         };
-        ok = render::run(&service, maps, failed, strategy, args.watch, &shutdown)?;
+        let web = webserver.as_ref().map(web::Webserver::maps);
+        ok = render::run(&service, maps, failed, strategy, args.watch, web, &shutdown)?;
     } else {
         if args.markers {
             update_markers(&service, args.maps.as_deref());

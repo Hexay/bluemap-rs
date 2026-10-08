@@ -1,5 +1,5 @@
 //! The request pipeline: `LoggingRequestHandler` → `BlueMapResponseModifier` → `RoutingRequestHandler`
-//! (`maps/<id>/(.*)` per map, last added wins, else the webroot).
+//! (`maps/<id>/(.*)` per map from the [`MapRegistry`], else the webroot).
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ use crate::WebError;
 use crate::access_log::{AccessLog, FileSink, LogSink, RequestInfo, StdoutSink};
 use crate::map_handler::{self, MapRoute};
 use crate::paths::{decode_path, java_query_string};
+use crate::registry::MapRegistry;
 use crate::response::{ExtraHeaders, finish};
 use crate::static_files::StaticFiles;
 use crate::webapp::WEBAPP_VERSION;
@@ -80,7 +81,7 @@ pub(crate) struct PeerAddr(pub SocketAddr);
 
 pub struct WebApp {
     statics: StaticFiles,
-    maps: Vec<(String, MapRoute)>,
+    maps: MapRegistry,
     server: HeaderValue,
     extra: ExtraHeaders,
     log: AccessLog,
@@ -96,7 +97,7 @@ impl WebApp {
         })?;
         Ok(Self {
             statics: StaticFiles::new(&options.webroot, options.serve_embedded_webapp),
-            maps: Vec::new(),
+            maps: MapRegistry::default(),
             server,
             extra: ExtraHeaders::new(&options.additional_headers)?,
             log: options.access_log,
@@ -105,14 +106,14 @@ impl WebApp {
         })
     }
 
-    /// Serves `maps/<id>/…` from `route`; a later map with the same id replaces the earlier one.
+    /// [`MapRegistry::insert`].
     pub fn add_map(&mut self, id: impl Into<String>, route: MapRoute) -> Result<(), WebError> {
-        let id = id.into();
-        if id.is_empty() || id.contains('/') {
-            return Err(WebError::MapId(id));
-        }
-        self.maps.push((id, route));
-        Ok(())
+        self.maps.insert(id, route)
+    }
+
+    /// The served maps, to change while the server runs.
+    pub fn maps(&self) -> MapRegistry {
+        self.maps.clone()
     }
 
     /// Cancelled on server shutdown so open SSE streams end and graceful shutdown can finish.
@@ -135,7 +136,8 @@ impl WebApp {
     }
 
     async fn route(&self, req: &Parts, route_path: &str, query: &str) -> Response<Body> {
-        for (id, map) in self.maps.iter().rev() {
+        let maps = self.maps.snapshot();
+        for (id, map) in maps.iter() {
             let rest = route_path
                 .strip_prefix("maps/")
                 .and_then(|r| r.strip_prefix(id.as_str()))

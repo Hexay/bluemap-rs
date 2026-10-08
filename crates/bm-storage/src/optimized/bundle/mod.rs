@@ -25,6 +25,16 @@
 //! - Readers validate their cached index on every read against the file's generation and length, rescanning
 //!   only new records, so a separate webserver process sees the renderer's appends. A handle always reads one
 //!   file version, so a concurrent compaction cannot hand a reader a wrong offset.
+//!
+//! # Determinism
+//! The live tiles of a bundle are a function of the input; its bytes are not. Records follow write order, and a
+//! render writes the tiles of a region from parallel workers in completion order. Where the order is ours to
+//! pick, it is fixed: compaction writes live records sorted by local `(x, z)`, and `--convert-storage` writes
+//! each bundle's tiles in `(x, z)` order from one thread, so two conversions of the same storage give the same
+//! records. The header's generation is random on every new file version and stays so: a content-derived one
+//! could repeat after delete + recreate or a compaction back to identical records, and a reader holding the old
+//! version's index would then trust offsets into the new file. Compare bundles by their decoded tiles (or by the
+//! bytes after the 16-byte header of compacted/converted bundles), never whole files.
 
 mod log;
 mod writer;
@@ -69,6 +79,11 @@ pub(crate) struct BundleStore {
 
 fn split((x, z): Tile) -> (Tile, Local) {
     ((x >> SHIFT, z >> SHIFT), ((x & 15) as u8, (z & 15) as u8))
+}
+
+/// The bundle holding `tile`.
+pub(crate) fn bundle_of(tile: Tile) -> Tile {
+    split(tile).0
 }
 
 fn join((bx, bz): Tile, (lx, lz): Local) -> Tile {

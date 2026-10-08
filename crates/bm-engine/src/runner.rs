@@ -7,7 +7,8 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use crate::error::{Error, Result};
 use crate::map::MapContext;
-use crate::queue::RenderQueue;
+use crate::job::JobControl;
+use crate::queue::{Next, RenderQueue};
 use crate::resources::Resources;
 use crate::task::RenderTask;
 use crate::update::{UpdateEvent, UpdateJob, UpdateStats, update_map};
@@ -50,7 +51,15 @@ pub fn run_queue(
     exit_when_idle: bool,
     on_event: &mut dyn FnMut(TaskEvent),
 ) {
-    while let Some(taken) = queue.take(exit_when_idle) {
+    while let Some(next) = queue.take(exit_when_idle) {
+        let taken = match next {
+            Next::Task(taken) => taken,
+            Next::Job(job, cancel) => {
+                // a job reports its own errors; a panic must not take the worker down
+                let _ = catch_unwind(AssertUnwindSafe(|| (job.work)(&JobControl { queue, cancel: &cancel })));
+                continue;
+            }
+        };
         let task = &taken.task;
         on_event(TaskEvent::Started(task));
         let result = match maps.get(&task.map) {

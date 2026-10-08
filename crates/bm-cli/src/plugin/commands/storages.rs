@@ -1,7 +1,11 @@
 //! `StoragesCommand`: list storages, show one, delete an unloaded map from one.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use bm_config::StorageConfig;
+use bm_engine::Job;
+use bm_storage::MapStorage;
 use serde_json::Value;
 
 use super::super::session::Session;
@@ -78,7 +82,7 @@ fn details(s: &Session, id: &str, say: Say) -> Result<Vec<Vec<Value>>> {
     Ok(lines)
 }
 
-/// Upstream schedules a `StorageDeleteTask`; this deletes on the command's thread.
+/// Schedules `StorageDeleteTask` next on the render queue.
 pub fn delete(s: &Session, id: &str, map: &str, say: Say) -> i32 {
     if map_loaded(s, map, id) {
         let purge = format!("/bluemap purge {map}");
@@ -93,7 +97,10 @@ pub fn delete(s: &Session, id: &str, map: &str, say: Say) -> i32 {
         say(text::lines(rest));
         return 0;
     }
-    let storage = match s.service.storage(id) {
+    if !is_loaded(s, id) {
+        say(text::lines(text::fill("Initializing storage '%'...", &[(id, "")], BASE)));
+    }
+    let storage = match s.service.storage(id).and_then(|st| Ok(st.map(map)?)) {
         Ok(storage) => storage,
         Err(e) => {
             log::error(&format!("Failed to load storage '{id}': {e:#}"));
@@ -101,12 +108,23 @@ pub fn delete(s: &Session, id: &str, map: &str, say: Say) -> i32 {
             return 0;
         }
     };
+    s.queue.schedule_job(delete_job(id, map, storage));
     let mut scheduled = text::fill("Scheduled a new task to delete map % from storage %", &[hl(map), hl(id)], POSITIVE);
     scheduled.extend(text::fill("Use % to see the progress", &[hl("/bluemap")], BASE));
     say(text::lines(scheduled));
-    match storage.map(map).and_then(|m| m.delete(&mut |_| true)) {
-        Ok(()) => log::info(&format!("Deleted map '{map}' from storage '{id}'")),
-        Err(e) => log::error(&format!("Failed to delete map '{map}' from storage '{id}': {e}")),
-    }
     1
+}
+
+/// `StorageDeleteTask`: deletes the map's data, reporting progress; cancelling stops the delete.
+fn delete_job(storage_id: &str, map: &str, storage: Arc<dyn MapStorage>) -> Job {
+    let (key, description) = (format!("storage-delete:{storage_id}/{map}"), format!("deleting map '{map}'"));
+    Job::new(key, description, move |control| {
+        let deleted = storage.delete(&mut |progress| {
+            control.set_progress(progress);
+            !control.is_cancelled()
+        });
+        if let Err(e) = deleted {
+            log::error(&format!("Failed to delete map '{}' from its storage: {e}", storage.map_id()));
+        }
+    })
 }

@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tomllib
 from pathlib import Path
 
 from paths import ROOT, WINDOWS, jdk_dir
@@ -68,9 +69,25 @@ def zig_env() -> dict[str, str]:
     return env
 
 
+def release_version() -> str:
+    """bluemap-rs version stamped into the core (`--version`, IPC `coreVersion`) and the jars (`5.28+rs.<this>`):
+    $BLUEMAP_RS_VERSION, else the pushed `v*` tag (CI) or a `v*` tag on HEAD, else Cargo's workspace version."""
+    if version := os.environ.get("BLUEMAP_RS_VERSION"):
+        return version
+    if os.environ.get("GITHUB_REF_TYPE") == "tag":
+        return os.environ["GITHUB_REF_NAME"].removeprefix("v")
+    tag = subprocess.run(["git", "describe", "--tags", "--exact-match", "--match", "v*"], cwd=ROOT,
+                         capture_output=True, text=True)
+    if tag.returncode == 0:
+        return tag.stdout.strip().removeprefix("v")
+    with open(ROOT / "Cargo.toml", "rb") as f:
+        return tomllib.load(f)["workspace"]["package"]["version"]
+
+
 def build(target: str, jobs: int | None) -> Path:
     triple, builder = TARGETS[target]
     env = zig_env() if builder == "zigbuild" else dict(os.environ)
+    env["BLUEMAP_RS_VERSION"] = release_version()
     # line tables stay in the MSVC .pdb but would quadruple an ELF (67 vs ~16 MB); symbols keep backtraces named
     env["CARGO_PROFILE_RELEASE_STRIP"] = "debuginfo"
     if flags := CFLAGS.get(triple):
@@ -90,7 +107,8 @@ def build(target: str, jobs: int | None) -> Path:
 
 def build_jars(shims: tuple[str, ...] = SHIMS) -> list[Path]:
     gradlew = PLATFORMS / ("gradlew.bat" if WINDOWS else "gradlew")
-    cmd = [str(gradlew), *(f":{s}:allJars" for s in shims), "--no-daemon", "--console=plain", "-q", "--max-workers=2"]
+    cmd = [str(gradlew), *(f":{s}:allJars" for s in shims), "--no-daemon", "--console=plain", "-q", "--max-workers=2",
+           f"-PreleaseVersion={release_version()}"]
     env = dict(os.environ)
     if jdk_dir(25).is_dir():
         env["JAVA_HOME"] = str(jdk_dir(25))

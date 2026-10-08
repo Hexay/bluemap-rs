@@ -5,7 +5,8 @@ mod common;
 use std::path::Path;
 
 use bm_storage::{
-    Compression, Error, FILE_MARKER, FileStorage, Format, SqlConfig, SqlStorage, convert_file_storage,
+    Compression, Error, FILE_MARKER, FileStorage, Format, GridKey, SqlConfig, SqlStorage, Storage,
+    convert_file_storage,
 };
 use tokio::runtime::Runtime;
 
@@ -73,6 +74,26 @@ fn file_conversion_round_trips() {
     convert_file_storage(&root, Compression::Gzip, Format::Compat, &common::no_progress).unwrap();
     assert!(!root.join("m/hires").exists() && !root.join(FILE_MARKER).exists());
     common::assert_same_tree_maps(&before, &common::tree(&root));
+}
+
+#[test]
+fn file_conversion_writes_bundle_records_in_tile_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let convert = |name: &str| {
+        let root = dir.path().join(name);
+        let map = FileStorage::new(&root, Compression::Gzip).map("m").unwrap();
+        // four bundles, written in reverse order
+        for i in (0..96).rev() {
+            map.write_grid(GridKey::Hires, (i % 24, i / 24 * 6), &common::prbm(1 + i as usize % 3, i as f32)).unwrap();
+        }
+        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_progress).unwrap();
+        common::tree(&root).into_iter().filter(|(path, _)| path.ends_with(".bmb")).collect::<Vec<_>>()
+    };
+    let (a, b) = (convert("a"), convert("b"));
+    assert_eq!(a.len(), 4);
+    for ((path, x), (_, y)) in a.iter().zip(&b) {
+        assert_eq!(x[16..], y[16..], "{path}: same records after the random generation");
+    }
 }
 
 #[test]

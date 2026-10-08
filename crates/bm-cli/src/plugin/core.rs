@@ -14,7 +14,7 @@ use super::session::{NotReady, Session, world_id};
 use super::tasks_dat;
 use crate::log;
 
-pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CORE_VERSION: &str = crate::VERSION;
 
 pub struct Core {
     pub out: Outbox,
