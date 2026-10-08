@@ -4,7 +4,7 @@ use http::HeaderMap;
 use crate::encoding::{Accepted, Encoded, encode};
 use crate::javafmt::{Arg, JavaFormat};
 use crate::map_handler::parse_tile;
-use crate::paths::{Resolved, java_path_hash, java_query_string, resolve};
+use crate::paths::{Resolved, java_query_string, resolve};
 use crate::http_date::java_http_date;
 use crate::{content_type, java_host_address};
 
@@ -50,6 +50,7 @@ fn webroot_paths_resolve_like_java() {
 #[test]
 #[cfg(windows)]
 fn etag_path_hash_matches_java_windows_path() {
+    use crate::paths::java_path_hash;
     // ETags captured from Java BlueMap 5.28 serving this webroot (hash = middle 8 hex digits)
     let root = std::path::Path::new(r"C:\Users\hexay\bluemap-rs\work\bluemap\vanilla\web");
     assert_eq!(format!("{:x}", java_path_hash(&root.join("index.html"))), "8d85a067");
