@@ -30,6 +30,12 @@ pub fn resident_memory() -> Option<u64> {
     imp::rss()
 }
 
+/// Lowers the calling thread's OS priority (render threads, docs/15): Linux nice +10, macOS QoS utility, Windows
+/// below normal. Never raises it.
+pub fn lower_thread_priority() -> io::Result<()> {
+    imp::lower_thread_priority()
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum LockError {
     #[error("another BlueMap core (pid {pid:?}) is running on this folder")]
@@ -113,6 +119,38 @@ mod imp {
         Some(pages * u64::try_from(page).ok()?)
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn lower_thread_priority() -> io::Result<()> {
+        // Linux nice values are per thread: PRIO_PROCESS with a tid changes only that thread
+        // SAFETY: plain syscalls on the calling thread's own id
+        unsafe {
+            let tid = libc::gettid() as libc::id_t;
+            *libc::__errno_location() = 0;
+            let nice = libc::getpriority(libc::PRIO_PROCESS, tid);
+            if nice == -1 && *libc::__errno_location() != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if libc::setpriority(libc::PRIO_PROCESS, tid, (nice + 10).min(19)) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(target_vendor = "apple")]
+    pub fn lower_thread_priority() -> io::Result<()> {
+        // SAFETY: changes the calling thread's own QoS class
+        match unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0) } {
+            0 => Ok(()),
+            e => Err(io::Error::from_raw_os_error(e)),
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+    pub fn lower_thread_priority() -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::Unsupported))
+    }
+
     pub fn wait_exit(pid: u32) {
         // a dead parent also shows as reparenting
         // SAFETY: getppid has no preconditions
@@ -180,6 +218,23 @@ mod imp {
         (ok != 0).then_some(c.WorkingSetSize as u64)
     }
 
+    pub fn lower_thread_priority() -> io::Result<()> {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, GetThreadPriority, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+        };
+        // SAFETY: the pseudo handle of the calling thread needs no closing
+        unsafe {
+            let thread = GetCurrentThread();
+            if GetThreadPriority(thread) <= THREAD_PRIORITY_BELOW_NORMAL {
+                return Ok(());
+            }
+            if SetThreadPriority(thread, THREAD_PRIORITY_BELOW_NORMAL) == 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    }
+
     pub fn wait_exit(pid: u32) {
         // SAFETY: the handle is checked and closed
         unsafe {
@@ -210,6 +265,12 @@ mod tests {
         assert!(!dir.join(".core.pid").exists());
         drop(CoreLock::acquire(&dir).unwrap());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lowering_thread_priority_succeeds() {
+        let lowered = std::thread::spawn(|| (lower_thread_priority().is_ok(), lower_thread_priority().is_ok()));
+        assert_eq!(lowered.join().unwrap(), (true, true), "lowering twice is fine");
     }
 
     #[test]

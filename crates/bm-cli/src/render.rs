@@ -15,6 +15,7 @@ use bm_web::MapRegistry;
 use crate::eta::{self, ProgressTracker};
 use crate::log;
 use crate::shutdown::Shutdown;
+use crate::throttle;
 use crate::watch::Watchers;
 
 /// BlueMap's CLI reports progress every 10 s.
@@ -93,6 +94,7 @@ pub fn run(
     // dropping the senders stops the helper threads
     let (progress_stop, progress_rx) = channel::<()>();
     let (retry_stop, retry_rx) = channel::<()>();
+    let (memory_stop, memory_rx) = channel::<()>();
     let start = Instant::now();
     let mut report = Report::default();
     let sse = service.config.webserver.sse_enabled;
@@ -106,8 +108,12 @@ pub fn run(
         if watch && !failed.is_empty() {
             s.spawn(|| watchers.retry_failed(failed, &loaded, &prepare, retry_rx));
         }
+        if let Some(limit) = service.config.core.memory_limit {
+            let queue = &queue;
+            s.spawn(move || throttle::memory::monitor(queue, limit, memory_rx));
+        }
         run_queue(&queue, &loaded, resources, !watch, &mut |event| report.on_event(event, &queue, start));
-        drop((progress_stop, retry_stop));
+        drop((progress_stop, retry_stop, memory_stop));
     });
     watchers.close();
     if !shutdown.is_triggered() {

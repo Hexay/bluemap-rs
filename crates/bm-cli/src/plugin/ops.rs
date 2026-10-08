@@ -5,10 +5,12 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use bm_engine::{RenderTask, TileUpdateStrategy};
+use bm_config::PluginConfig;
+use bm_engine::{PauseReason, RenderTask, TileUpdateStrategy};
 
 use super::core::Core;
 use super::session::Session;
+use crate::throttle::load::Transition;
 use crate::{log, web};
 
 /// Freezing stops the map's watcher and drops its tasks; unfreezing restarts the watcher and schedules an update.
@@ -33,31 +35,62 @@ pub fn set_frozen(core: &Core, s: &Session, map: &str, frozen: bool) -> bool {
     true
 }
 
-/// `/bluemap start|stop`, `RenderManager.start/stop`: persisted in plugin state.
+/// `/bluemap start|stop`, `RenderManager.start/stop`: persisted in plugin state. Other pause reasons stay.
 pub fn set_render_threads(core: &Core, s: &Session, running: bool) {
     s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled = running;
-    if running {
-        s.queue.resume();
+    set_paused(core, s, PauseReason::Stopped, !running);
+}
+
+/// Adds or drops one pause reason; tells the shim when the running state changed.
+pub fn set_paused(core: &Core, s: &Session, reason: PauseReason, paused: bool) {
+    let was_paused = s.queue.is_paused();
+    if paused {
+        s.queue.pause(reason);
     } else {
-        s.queue.pause();
+        s.queue.resume(reason);
     }
-    core.state_changed(s);
+    if s.queue.is_paused() != was_paused {
+        core.state_changed(s);
+    }
 }
 
 /// `Plugin.checkPausedByPlayerCount`: pauses at `player-render-limit` players, resumes below it.
 pub fn check_render_limit(core: &Core, s: &Session) {
     let limit = s.service.config.plugin.player_render_limit;
-    let enabled = s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled;
-    let paused = s.queue.is_paused();
-    if limit > 0 && core.live.online_count() >= limit as usize {
-        if !paused {
-            s.queue.pause();
-            core.state_changed(s);
-        }
-    } else if paused && enabled {
-        s.queue.resume();
-        core.state_changed(s);
+    let reached = limit > 0 && core.live.online_count() >= limit as usize;
+    set_paused(core, s, PauseReason::PlayerLimit, reached);
+}
+
+/// A `ServerLoad` sample: pauses while the 10 s average MSPT is above `render-pause-mspt` (docs/15).
+pub fn on_server_load(core: &Core, mspt: f64) {
+    let session = core.session();
+    let plugin = session.as_ref().map_or_else(PluginConfig::default, |s| s.service.config.plugin.clone());
+    let (pause_at, resume_at) = (plugin.render_pause_mspt, plugin.render_resume_mspt);
+    let (first, transition) = {
+        let mut load = core.load.lock().unwrap_or_else(PoisonError::into_inner);
+        (load.first_report(), load.sample(mspt, Instant::now(), pause_at, resume_at))
+    };
+    if first && pause_at > 0.0 {
+        log::info(&format!("Rendering pauses while the server's average tick time is above {pause_at} ms"));
     }
+    match transition {
+        Some(Transition::Pause(avg)) => {
+            log::warn(&format!("The server is lagging (MSPT {avg:.1}, limit {pause_at}): pausing rendering"))
+        }
+        Some(Transition::Resume(avg)) => {
+            log::info(&format!("The server recovered (MSPT {avg:.1}): resuming rendering"))
+        }
+        None => return,
+    }
+    if let Some(s) = session {
+        apply_server_load(core, &s);
+    }
+}
+
+/// Mirrors the server-load state onto `s`'s queue (also for a freshly loaded session).
+pub fn apply_server_load(core: &Core, s: &Session) {
+    let lagging = core.load.lock().unwrap_or_else(PoisonError::into_inner).is_lagging();
+    set_paused(core, s, PauseReason::ServerLoad, lagging);
 }
 
 /// `MapPurgeTask`: deletes all of the map's data, then loads it fresh and (unless frozen) renders it again.

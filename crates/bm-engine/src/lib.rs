@@ -34,7 +34,7 @@ pub use error::{Error, Result};
 pub use job::{Job, JobControl};
 pub use map::{MapContext, TileListener};
 pub use persist::PersistStats;
-pub use queue::RenderQueue;
+pub use queue::{PauseReason, PauseReasons, RenderQueue};
 pub use resources::{ResourceOptions, Resources};
 pub use runner::{LoadedMaps, TaskEvent, run_queue};
 pub use service::{BLUEMAP_VERSION, Service};

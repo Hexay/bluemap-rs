@@ -160,6 +160,26 @@ fn storages() {
 }
 
 #[test]
+fn hidden_throttle_keys() {
+    let core = |src: &str| from_value::<CoreConfig>(&parse(src)).map(|c| c.memory_limit);
+    assert_eq!(core(""), Ok(None));
+    assert_eq!(core("memory-limit: 0"), Ok(None));
+    assert_eq!(core("memory-limit: 1048576"), Ok(Some(1 << 20)));
+    assert_eq!(core("memory-limit: \"1G\""), Ok(Some(1 << 30)));
+    assert_eq!(core("memory-limit: 512MiB"), Ok(Some(512 << 20)));
+    assert_eq!(core("memory-limit: 512 M"), Ok(Some(512 << 20)));
+    let err = core("memory-limit: lots").unwrap_err();
+    assert_eq!(err.key(), "memory-limit");
+    assert!(err.to_string().contains("not a memory size"), "{err}");
+    assert!(core("memory-limit: -5").is_err());
+
+    let plugin = from_value::<PluginConfig>(&parse("")).unwrap();
+    assert_eq!((plugin.render_pause_mspt, plugin.render_resume_mspt), (45.0, 40.0));
+    let plugin = from_value::<PluginConfig>(&parse("render-pause-mspt: 0\nrender-resume-mspt: 30.5")).unwrap();
+    assert_eq!((plugin.render_pause_mspt, plugin.render_resume_mspt), (0.0, 30.5));
+}
+
+#[test]
 fn map_errors_name_the_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("world.conf");

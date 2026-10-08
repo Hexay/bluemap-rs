@@ -2,12 +2,36 @@
 
 use std::sync::PoisonError;
 
+use bm_engine::PauseReason;
+use serde_json::Value;
+
 use super::super::core::{CORE_VERSION, Core};
 use super::super::session::Session;
 use super::super::text::{self, BASE, FROZEN, HIGHLIGHT, INFO, POSITIVE};
 use super::{Say, task_ref};
+use crate::throttle::memory;
 
-pub fn status(s: &Session, say: Say) -> i32 {
+/// Why the render threads are paused, one line per reason other than `Stopped`.
+pub fn pause_lines(core: &Core, s: &Session) -> Vec<Vec<Value>> {
+    let lines = s.queue.pause_reasons().iter().filter_map(|reason| match reason {
+        PauseReason::Stopped => None,
+        PauseReason::PlayerLimit => {
+            let limit = s.service.config.plugin.player_render_limit.to_string();
+            Some(text::format("there are % or more players online", &[&limit]))
+        }
+        PauseReason::Memory => {
+            let limit = s.service.config.core.memory_limit.map_or(0, memory::mib);
+            Some(text::format("core memory is above the memory-limit of %", &[&format!("{limit} MiB")]))
+        }
+        PauseReason::ServerLoad => {
+            let mspt = core.load.lock().unwrap_or_else(PoisonError::into_inner).average().unwrap_or_default();
+            Some(text::format("server is lagging (MSPT %)", &[&format!("{mspt:.1}")]))
+        }
+    });
+    lines.collect()
+}
+
+pub fn status(core: &Core, s: &Session, say: Say) -> i32 {
     let mut body = Vec::new();
     let enabled = s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled;
     if !enabled {
@@ -15,8 +39,7 @@ pub fn status(s: &Session, say: Say) -> i32 {
         body.push(text::format("use % to start rendering", &["/bluemap start"]));
     } else if s.queue.is_paused() {
         body.push(text::format("⌛ render-threads are %", &["paused"]));
-        let limit = s.service.config.plugin.player_render_limit.to_string();
-        body.push(text::format("there are % or more players online", &[&limit]));
+        body.extend(pause_lines(core, s));
     } else if let Some((desc, progress)) = s.queue.current() {
         body.push(text::format("⛏ currently running: %", &[&desc]));
         body.push(text::format("progress: %", &[&format!("{:.3}%", progress * 100.0)]));

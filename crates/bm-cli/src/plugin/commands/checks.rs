@@ -3,12 +3,11 @@
 
 use std::sync::{Arc, PoisonError};
 
-use bm_engine::{MapContext, Regions};
+use bm_engine::{MapContext, PauseReason, Regions};
 use bm_ipc::WorldInfo;
 use bm_map::renderstate::{TileInfo, TileState};
 use serde_json::Value;
 
-use super::super::core::Core;
 use super::super::rstate;
 use super::super::session::{Session, world_id};
 use super::super::text::{self, Arg, BASE, INFO, hl};
@@ -85,21 +84,23 @@ pub fn map_has_correct_world(s: &Session, map: &MapContext, world: &WorldInfo) -
     ])
 }
 
-pub fn render_threads_running(core: &Core, s: &Session) -> Check {
-    if !s.queue.is_paused() {
-        return Ok(());
-    }
-    let limit = s.service.config.plugin.player_render_limit;
-    if limit > 0 && core.live.online_count() >= limit as usize {
+/// The first reason in [`PauseReason::ALL`] order, so a stopped queue reads as stopped.
+pub fn render_threads_running(s: &Session) -> Check {
+    let Some(reason) = s.queue.pause_reasons().iter().next() else { return Ok(()) };
+    let paused = |why: &str, file: &str| {
         fail(vec![
-            plain("⚠ render-threads are paused\nthere are too many players online for rendering", &[]),
-            base("this threshold can be configured in the %", &[hl("plugin.conf")]),
+            plain(&format!("⚠ render-threads are paused\n{why}"), &[]),
+            base("this threshold can be configured in the %", &[hl(file)]),
         ])
-    } else {
-        fail(vec![
+    };
+    match reason {
+        PauseReason::PlayerLimit => paused("there are too many players online for rendering", "plugin.conf"),
+        PauseReason::Memory => paused("the core uses more memory than its memory-limit", "core.conf"),
+        PauseReason::ServerLoad => paused("the server is lagging", "plugin.conf"),
+        PauseReason::Stopped => fail(vec![
             plain("⚠ render-threads are stopped", &[]),
             base("you can use % to start them", &[hl("/bluemap start")]),
-        ])
+        ]),
     }
 }
 

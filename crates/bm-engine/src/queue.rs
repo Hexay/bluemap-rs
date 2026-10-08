@@ -8,6 +8,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use crate::job::Job;
 use crate::task::{Regions, RenderTask};
 
+mod pause;
+pub use pause::{PauseReason, PauseReasons};
+
 #[derive(Default)]
 pub struct RenderQueue {
     state: Mutex<State>,
@@ -20,7 +23,7 @@ struct State {
     jobs: VecDeque<Job>,
     current: Option<Running>,
     stopped: bool,
-    paused: bool,
+    paused: PauseReasons,
     /// Tasks taken so far; numbers the running one for [`RenderQueue::current_run`].
     runs: u64,
 }
@@ -123,15 +126,16 @@ impl RenderQueue {
         self.lock().stopped
     }
 
-    /// `RenderManager.stop()` of a plugin (`/bluemap stop`, player render limit): the running task is cancelled
-    /// and queued again in front, and nothing is taken until [`RenderQueue::resume`]. Finished regions stay done.
-    /// A running job finishes.
-    pub fn pause(&self) {
+    /// `RenderManager.stop()` of a plugin, for `reason`: nothing is taken until every reason is resumed. The first
+    /// reason cancels the running task and queues it again in front; finished regions stay done (a forced task
+    /// starts over). A running job finishes.
+    pub fn pause(&self, reason: PauseReason) {
         let mut s = self.lock();
-        if s.paused {
+        let first = s.paused.is_empty();
+        s.paused.insert(reason);
+        if !first {
             return;
         }
-        s.paused = true;
         if let Some(running) = &s.current
             && let Some(task) = running.task.clone()
         {
@@ -143,13 +147,18 @@ impl RenderQueue {
         self.changed.notify_all();
     }
 
-    pub fn resume(&self) {
-        self.lock().paused = false;
+    /// Drops `reason`; the queue runs again once no reason is left.
+    pub fn resume(&self, reason: PauseReason) {
+        self.lock().paused.remove(reason);
         self.changed.notify_all();
     }
 
-    pub fn is_paused(&self) -> bool {
+    pub fn pause_reasons(&self) -> PauseReasons {
         self.lock().paused
+    }
+
+    pub fn is_paused(&self) -> bool {
+        !self.lock().paused.is_empty()
     }
 
     /// The queued tasks (without the running one and jobs), in order.
@@ -201,8 +210,8 @@ impl RenderQueue {
     }
 
     /// Next job, else next task merged with every queued region update of the same map and strategy (one pass
-    /// over shared tiles instead of one per region). Blocks while the queue is empty, unless `exit_when_idle`;
-    /// `None` once stopped (or idle with `exit_when_idle`).
+    /// over shared tiles instead of one per region). Blocks while the queue is empty or paused, unless
+    /// `exit_when_idle` and nothing is queued; `None` once stopped (or idle with `exit_when_idle`).
     pub(crate) fn take(&self, exit_when_idle: bool) -> Option<Next> {
         let mut s = self.lock();
         s.current = None;
@@ -211,7 +220,7 @@ impl RenderQueue {
             if s.stopped {
                 return None;
             }
-            if !s.paused {
+            if s.paused.is_empty() {
                 let cancel = Arc::new(AtomicBool::new(false));
                 if let Some(job) = s.jobs.pop_front() {
                     s.runs += 1;
@@ -237,7 +246,8 @@ impl RenderQueue {
                     return Some(Next::Task(Taken { task, cancel }));
                 }
             }
-            if exit_when_idle {
+            // a paused queue with work left isn't idle: wait for the resume
+            if exit_when_idle && s.pending.is_empty() && s.jobs.is_empty() {
                 return None;
             }
             s = self.changed.wait(s).unwrap_or_else(PoisonError::into_inner);

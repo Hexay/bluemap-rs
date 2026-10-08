@@ -40,4 +40,9 @@ public interface Platform {
     /** Saves {@code worldId} ({@code WorldInfo.id}, null = all) on the server thread → whether it saved. */
     CompletableFuture<Boolean> saveWorld(String worldId);
 
+    /** The server's average tick time in ms ({@code ServerLoad.mspt}); called off the server thread, 0 = unknown. */
+    default double averageTickMillis() {
+        return 0;
+    }
+
 }

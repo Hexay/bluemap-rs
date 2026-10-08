@@ -4,6 +4,7 @@
 
 pub(crate) mod coerce;
 pub(crate) mod fields;
+pub(crate) mod size;
 mod value;
 
 use serde::de::{self, DeserializeOwned, DeserializeSeed, IntoDeserializer, Visitor};

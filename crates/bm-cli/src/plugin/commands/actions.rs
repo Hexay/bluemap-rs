@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::sync::PoisonError;
 
-use bm_engine::{Regions, RenderTask, TileUpdateStrategy};
+use bm_engine::{PauseReason, Regions, RenderTask, TileUpdateStrategy};
 use bm_ipc::CommandSender;
 
 use super::super::core::Core;
@@ -11,7 +11,7 @@ use super::super::ops;
 use super::super::session::Session;
 use super::super::text::{self, BASE, NEGATIVE, POSITIVE};
 use super::parse::Matched;
-use super::{Say, task_ref};
+use super::{Say, info, task_ref};
 
 /// Region files are 512×512 blocks.
 const REGION_SHIFT: i32 = 9;
@@ -27,17 +27,31 @@ pub fn reload(core: &Core, light: bool, say: Say) -> i32 {
     }
 }
 
+/// `start` clears only `/bluemap stop`; other pause reasons (players, memory, server load) are reported.
 pub fn start_stop(core: &Core, s: &Session, start: bool, say: Say) -> i32 {
     let enabled = s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled;
-    let already = if start { enabled && !s.queue.is_paused() } else { !enabled };
+    let already = if start { enabled && !s.queue.pause_reasons().contains(PauseReason::Stopped) } else { !enabled };
     if already {
-        let msg = if start { "Render-Threads are already running!" } else { "Render-Threads are already stopped!" };
-        say(text::one(msg, NEGATIVE));
+        let reasons = info::pause_lines(core, s);
+        if start && !reasons.is_empty() {
+            say(headed("Render-Threads are paused:", NEGATIVE, reasons));
+        } else {
+            let msg = if start { "Render-Threads are already running!" } else { "Render-Threads are already stopped!" };
+            say(text::one(msg, NEGATIVE));
+        }
         return 0;
     }
     ops::set_render_threads(core, s, start);
     say(text::one(if start { "Render-Threads started!" } else { "Render-Threads stopped!" }, POSITIVE));
+    let still = info::pause_lines(core, s);
+    if start && !still.is_empty() {
+        say(headed("...but they stay paused:", BASE, still));
+    }
     1
+}
+
+fn headed(header: &str, color: &str, lines: Vec<Vec<serde_json::Value>>) -> serde_json::Value {
+    text::lines([vec![text::span(header, color)]].into_iter().chain(lines).collect())
 }
 
 pub fn freeze(core: &Core, s: &Session, map: &str, frozen: bool, say: Say) -> i32 {

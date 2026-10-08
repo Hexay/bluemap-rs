@@ -101,6 +101,51 @@ fn lifecycle_without_resources() {
     assert!(!config.join(".core.pid").exists());
 }
 
+/// Next `Log` line containing `needle`; panics on `Bye` or EOF.
+fn log_containing(r: &mut ChildStdout, needle: &str) -> (bm_ipc::LogLevel, String) {
+    loop {
+        let frame = read_frame(r).unwrap().expect("core closed the stream");
+        match frame.parse::<CoreMsg>().unwrap() {
+            CoreMsg::Log { level, msg, .. } if msg.contains(needle) => return (level, msg),
+            CoreMsg::Bye => panic!("core said Bye before logging '{needle}'"),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn server_load_pauses_and_resumes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut child, mut stdin, mut stdout) = spawn(dir.path());
+    send(&mut stdin, &hello(dir.path()));
+    assert!(matches!(next(&mut stdout), CoreMsg::Welcome { .. }));
+    assert!(matches!(next(&mut stdout), CoreMsg::NotReady { .. }));
+
+    for _ in 0..4 {
+        send(&mut stdin, &ShimMsg::ServerLoad { mspt: 30.0 });
+    }
+    for _ in 0..6 {
+        send(&mut stdin, &ShimMsg::ServerLoad { mspt: 120.0 });
+    }
+    let (level, msg) = log_containing(&mut stdout, "lagging");
+    assert_eq!(level, bm_ipc::LogLevel::Warning);
+    assert!(msg.contains("MSPT 48.0"), "pauses on the 10 s average, at the first sample above 45: {msg}");
+    for _ in 0..40 {
+        send(&mut stdin, &ShimMsg::ServerLoad { mspt: 5.0 });
+    }
+    let (level, msg) = log_containing(&mut stdout, "recovered");
+    assert_eq!(level, bm_ipc::LogLevel::Info);
+    assert!(msg.contains("resuming rendering"), "{msg}");
+
+    send(&mut stdin, &ShimMsg::Shutdown);
+    loop {
+        if matches!(next(&mut stdout), CoreMsg::Bye) {
+            break;
+        }
+    }
+    assert!(child.wait().unwrap().success());
+}
+
 #[test]
 fn incompatible_protocol_and_eof() {
     let dir = tempfile::tempdir().unwrap();

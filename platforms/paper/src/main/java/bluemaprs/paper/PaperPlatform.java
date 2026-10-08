@@ -144,6 +144,12 @@ final class PaperPlatform implements Platform {
         }, Bukkit.getScheduler().getMainThreadExecutor(plugin));
     }
 
+    /** Folia has no global tick: unknown. */
+    @Override
+    public double averageTickMillis() {
+        return IS_FOLIA ? 0 : Bukkit.getServer().getAverageTickTime();
+    }
+
     private static World worldById(String id) {
         NamespacedKey key = NamespacedKey.fromString(id);
         return key == null ? null : Bukkit.getWorld(key);

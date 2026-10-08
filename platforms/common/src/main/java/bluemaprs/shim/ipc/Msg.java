@@ -11,7 +11,7 @@ import java.util.Map;
 public final class Msg {
 
     /** Must equal bm-ipc's {@code PROTOCOL}. */
-    public static final int PROTOCOL = 1;
+    public static final int PROTOCOL = 2;
 
     public static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 

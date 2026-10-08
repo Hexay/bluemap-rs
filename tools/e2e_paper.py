@@ -73,6 +73,8 @@ def run_ours(jar: Path, fresh: bool) -> Path:
 
         server.command("bluemap", r"BlueMap Status|render-threads", 30)
         check("/bluemap status", True)
+        server.wait_for(r"Rendering pauses while the server's average tick time", 30, since_start=True)
+        check("core receives ServerLoad (MSPT)", True)
         server.command("bluemap maps", r"BlueMap Maps", 30)
         check("/bluemap maps", True)
 
