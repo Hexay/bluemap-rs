@@ -241,3 +241,34 @@ Hires on (6 runs): 20.09–20.27 → 20.23–20.30 s, within noise.
     reloads state after every push.
   - a per-block `y < lowest` check in the walk: +3%. It is now one range bound and one flag per column.
 - **Left (hires off, profiled before the floor):** chunk load ~28%, block pass ~22%, fill ~19%, lowres persist ~14%.
+
+## Wall clock (startup, region overlap, tail)
+
+Before this round, structures used 27 s of CPU on 12 threads but took 3.4 s of wall time, where 27/12 would be
+2.25 s. The busy-core timeline (`docs/perf-exp/busy_timeline.sh`) showed three gaps:
+- about 0.45 s of mostly serial startup
+- a dip to 5–7 busy cores at every region boundary
+- a 0.45 s tail at 1–1.5 cores, with the persist thread encoding PNGs alone
+
+| commit | change | wall (median, testbox) |
+|---|---|---|
+| `adfd42e` | `version.json` read from the jar's central directory (no 34k-entry index); empty `datapacks/` reuses the shared datapack | 3.43 → 3.36 s |
+| `987f7e3` | lowres flushes encode their PNGs on 4 scoped threads | 3.37 → 3.18 s |
+| `7561353` | the next region's tile jobs and chunk area are prepared while the current one renders; tiles still recorded in plan order | 3.16 → 3.02 s |
+| `4f2e578` | with `-v`, the local jar's packs load while the version manifest downloads | 3.05 → 2.98 s |
+
+- **Why scoped threads, not rayon:** the PNG encode in `987f7e3` can't run on rayon, whose workers can be blocked
+  sending to the persist thread. That deadlocked.
+- **Why a state snapshot:** the prefetch in `7561353` means each render reads the block states as of loading its
+  area (`RegionRender::registry`), because the shared registry grows while the next region loads.
+- **Result:** rendering now starts at ~0.29 s and holds ~11–11.5 cores with no region-boundary dips. The tail is
+  ~0.3 s at ~2 cores.
+- **Cost:** peak RSS rises with two chunk areas held at once. Combined with the lowres-only commit, against
+  `8bab4ae`: wall 3.28 → 2.63 s (median of the 3 quietest pairs), CPU −3%, peak RSS 379 → 413 MB.
+- **Tried and dropped:**
+  - final flush only on 12 threads: no gain, because the heavy flushes are the ones the last regions trigger
+  - one rayon task per tile with pooled buffers: −4.5% CPU but +30–40 MB RSS
+- **Left:**
+  - startup ~0.29 s: client jar open ~60 ms, then textures, models and the gallery
+  - tail ~0.3 s: the last region's slowest tiles, plus the serial lowres cascade (~95 ms), which could be computed
+    in parallel and applied in order
