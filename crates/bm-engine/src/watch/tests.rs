@@ -40,7 +40,9 @@ fn changed_region_files_are_debounced_into_one_update() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("r.0.0.mca"), b"0").unwrap();
     let queue = Arc::new(RenderQueue::new());
-    let service = MapUpdateService::start("w", dir.path().to_owned(), queue.clone(), settings(), quiet()).unwrap();
+    // a loaded box can stretch the 10 writes (or their OS notifications) past a 100 ms debounce
+    let s = WatchSettings { debounce: Duration::from_millis(750), ..settings() };
+    let service = MapUpdateService::start("w", dir.path().to_owned(), queue.clone(), s, quiet()).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     assert!(queue.take(true).is_none(), "existing files are covered by the initial full update");
     for i in 0..5 {
@@ -49,7 +51,7 @@ fn changed_region_files_are_debounced_into_one_update() {
     }
     let task = next_task(&queue, Duration::from_secs(10)).expect("region update");
     assert_eq!(regions(&task), vec![(0, -1)]);
-    std::thread::sleep(Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(1500));
     assert!(queue.take(true).is_none(), "one update per burst of changes");
     service.close();
 }
