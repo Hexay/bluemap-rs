@@ -146,3 +146,18 @@ fn finished_regions_survive_pause_and_stop() {
     assert_eq!(abandoned.iter().map(|t| t.map.as_str()).collect::<Vec<_>>(), ["w", "n"]);
     assert_eq!(abandoned[0].done, [(0, 0), (1, 0), (2, 0)].into());
 }
+
+#[test]
+fn completed_tasks_keep_the_last_ten() {
+    let q = RenderQueue::new();
+    assert!(q.last_busy().is_none());
+    for x in 0..12 {
+        q.schedule(RenderTask::region("w", (x, 0)));
+        task(q.take(true)).unwrap();
+        q.finish();
+    }
+    let done = q.completed();
+    assert_eq!(done.len(), 10);
+    assert_eq!(done[9], RenderTask::region("w", (11, 0)).description());
+    assert!(q.last_busy().is_some());
+}

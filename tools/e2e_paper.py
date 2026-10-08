@@ -1,7 +1,11 @@
 """End-to-end test of the Paper plugin (docs/13) on a real Paper 26.3 server, plus an optional comparison run with
 upstream BlueMap 5.28 on a copy of the same world.
 
-    py -3 tools/e2e_paper.py [--skip-build | --core BIN | --jar JAR] [--keep] [--no-upstream]
+    py -3 tools/e2e_paper.py [--skip-build | --core BIN | --jar JAR] [--keep] [--no-upstream] [--server folia] [--mc 26.2]
+
+`--server`/`--mc` pick another build from e2e_server.SERVERS; other versions need their fixture world
+(`py -3 tools/make_world.py context --mc <mc>`). Folia loads neither BlueBorder nor the bots (no `folia-supported`),
+so its run skips the marker and player checks.
 
 Windows or Linux (host target from tools/build_core.py; on Linux the static musl core). Builds the core and the
 plugin jars (or stages a prebuilt `--core`, or tests a given `--jar`), starts Paper with our jar + BlueBorder (marker addon) + server-side
@@ -15,13 +19,32 @@ import argparse
 import json
 import shutil
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from build_core import build_jars, host_jar, stage_host_core
-from e2e_server import (E2E, Paper, check, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, report,
-                        rss_mib)
+from e2e_server import (E2E, MC, SERVERS, Paper, check, fetch, fixture_world, get, json_get, kill, pid_alive, poll,
+                        prepare, report, rss_mib)
 
 OUT = E2E / "out"
+
+
+@dataclass(frozen=True)
+class Target:
+    kind: str = "paper"
+    mc: str = MC
+
+    @property
+    def addons(self) -> bool:
+        """BlueBorder and the bots run on Paper only."""
+        return self.kind == "paper"
+
+    def server(self, folder: Path) -> Paper:
+        return Paper(folder, kind=self.kind, mc=self.mc)
+
+    def prepare(self, folder: Path, plugins: list[Path], fresh: bool, world_from: Path | None = None) -> None:
+        prepare(folder, plugins, fresh, world_from=world_from, mc=self.mc)
 
 
 def build(core: Path | None, jobs: int | None) -> Path:
@@ -57,12 +80,13 @@ def save(name: str, data: bytes) -> None:
     (OUT / name).write_bytes(data)
 
 
-def run_ours(jar: Path, fresh: bool) -> Path:
+def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
     folder = E2E / "rs"
     # a world Paper generates itself keeps its spawn chunks unlit on disk for the first sessions, and both BlueMaps
-    # skip unlit chunks; the `context` fixture (vanilla 26.3 server) is lit and small
-    prepare(folder, [jar, fetch("blueborder"), fetch("bots")], fresh, world_from=fixture_world("context"))
-    server = Paper(folder)
+    # skip unlit chunks; the `context` fixture (vanilla server) is lit and small
+    addons = [fetch("blueborder"), fetch("bots")] if target.addons else []
+    target.prepare(folder, [jar, *addons], fresh, world_from=fixture_world("context", target.mc))
+    server = target.server(folder)
     try:
         spawned = server.wait_for(r"\[(\d+:\d+:\d+) .*BlueMap core \S+ started", 600, since_start=True)
         loaded = server.wait_for(r"\[(\d+:\d+:\d+) .*\[BlueMap\] Loaded!", 600, since_start=True)
@@ -73,8 +97,12 @@ def run_ours(jar: Path, fresh: bool) -> Path:
 
         server.command("bluemap", r"BlueMap Status|render-threads", 30)
         check("/bluemap status", True)
-        server.wait_for(r"Rendering pauses while the server's average tick time", 30, since_start=True)
-        check("core receives ServerLoad (MSPT)", True)
+        if target.kind == "folia":
+            # no global tick to average: the shim sends no ServerLoad and MSPT pausing stays off
+            check("Folia detected", server.wait_for(r"Folia detected, enabling folia-support mode", 1, since_start=True))
+        else:
+            server.wait_for(r"Rendering pauses while the server's average tick time", 30, since_start=True)
+            check("core receives ServerLoad (MSPT)", True)
         server.command("bluemap maps", r"BlueMap Maps", 30)
         check("/bluemap maps", True)
 
@@ -87,9 +115,10 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         check("players.json (no players)", players == {"players": []}, json.dumps(players))
         save("rs-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
 
-        markers = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m and m, 60)
-        check("BlueBorder markers in markers.json", markers, str(list(markers or {})))
-        save("rs-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+        if target.addons:
+            markers = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m and m, 60)
+            check("BlueBorder markers in markers.json", markers, str(list(markers or {})))
+            save("rs-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
 
         server.command(f"bluemap force-update {map_id}", r"Created new update-task", 120)
         check("/bluemap force-update", True)
@@ -101,11 +130,12 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         check("hires tile served", hires, str(hires))
         diagnostic_commands(server, folder, map_id)
 
-        server.send("start 1 none")
-        bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
-        check("players.json shows a bot", bot, json.dumps(bot)[:200] if bot else "")
-        save("rs-players-bot.json", get(f"maps/{map_id}/live/players.json")[1])
-        server.send("stress stop")
+        if target.addons:
+            server.send("start 1 none")
+            bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
+            check("players.json shows a bot", bot, json.dumps(bot)[:200] if bot else "")
+            save("rs-players-bot.json", get(f"maps/{map_id}/live/players.json")[1])
+            server.send("stress stop")
 
         pid = core_pid(folder)
         rss = rss_mib(pid) if pid else None
@@ -113,8 +143,9 @@ def run_ours(jar: Path, fresh: bool) -> Path:
 
         server.command("bluemap reload", r"BlueMap reloaded!", 300)
         check("/bluemap reload", True)
-        again = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
-        check("markers back after reload", again)
+        if target.addons:
+            again = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
+            check("markers back after reload", again)
 
         old = core_pid(folder)
         kill(old)
@@ -122,8 +153,10 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         check("killed core respawns", new, f"pid {old} -> {new}")
         back = poll(lambda: get("index.html")[0] == 200, 120)
         check("webserver back after respawn", back)
-        check("markers after respawn",
-              poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 90))
+        if target.addons:
+            check("markers after respawn",
+                  poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 90))
+        save("rs-frozen.json", json.dumps(frozen_texts(server), indent=1, ensure_ascii=False).encode())
     finally:
         last = core_pid(folder)
         code = server.stop()
@@ -161,9 +194,33 @@ def command_texts(server: Paper, map_id: str) -> dict[str, list[str]]:
     return {cmd: server.command_text(cmd.format(map=map_id), header, 30) for cmd, header in STABLE_COMMANDS}
 
 
-def run_jvm_kill(folder: Path) -> None:
+def frozen_texts(server: Paper) -> dict[str, list[str]]:
+    """`/bluemap` and `/bluemap maps` with every map frozen and the render-threads stopped: the queue is empty, so
+    both texts only depend on the maps. Unfreezes and restarts afterwards (a `--keep` run reuses the state)."""
+    maps = json_get("settings.json")["maps"]
+    for map_id in maps:
+        server.command(f"bluemap freeze {map_id}", r"is (now|already) frozen", 30)
+    time.sleep(3)  # upstream drops a cancelled running task only when its render thread next looks at it
+    server.command("bluemap stop", r"Render-Threads are (now|already) stopped", 30)
+    texts = {cmd: server.command_text(cmd, header, 30) for cmd, header in [("bluemap", r"BlueMap Status"),
+                                                                           ("bluemap maps", r"BlueMap Maps")]}
+    for map_id in maps:
+        server.command(f"bluemap unfreeze {map_id}", r"no longer frozen|is not frozen", 30)
+    server.command("bluemap start", r"Render-Threads are (now|already) running", 30)
+    return texts
+
+
+def compare_texts(name: str) -> None:
+    ours, theirs = (json.loads((OUT / f"{side}-{name}").read_text(encoding="utf-8")) for side in ("rs", "upstream"))
+    for cmd, lines in ours.items():
+        other = theirs[cmd]
+        diff = [f"{a!r} vs {b!r}" for a, b in zip(lines, other) if a != b] or len(lines) != len(other)
+        check(f"/{cmd.replace('{map}', '<map>')} text identical to upstream", not diff, str(diff)[:300] if diff else "")
+
+
+def run_jvm_kill(folder: Path, target: Target) -> None:
     """Restart on the same folder, SIGKILL the JVM: the core must exit by itself (stdin EOF / parent watchdog)."""
-    server = Paper(folder)
+    server = target.server(folder)
     try:
         server.wait_for(r"\[BlueMap\] Loaded!", 600, since_start=True)
         pid = poll(lambda: (p := core_pid(folder)) and pid_alive(p) and p, 30)
@@ -172,28 +229,28 @@ def run_jvm_kill(folder: Path) -> None:
     check("core exits after JVM SIGKILL", pid and poll(lambda: not pid_alive(pid), 30), f"pid {pid}")
 
 
-def run_upstream(world: Path) -> None:
+def run_upstream(world: Path, target: Target) -> None:
     folder = E2E / "upstream"
-    prepare(folder, [fetch("upstream"), fetch("blueborder")], True, world_from=world)
-    server = Paper(folder)
+    target.prepare(folder, [fetch("upstream"), *([fetch("blueborder")] if target.addons else [])], True, world_from=world)
+    server = target.server(folder)
     try:
         server.wait_for(r"\[BlueMap\].*Loaded!", 600, since_start=True)
         server.wait_for(r"Done \(", 300, since_start=True)
         map_id = poll(first_map, 30)
         save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
-        poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
-        save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+        if target.addons:
+            poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
+            save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
         texts = command_texts(server, map_id)
         save("upstream-commands.json", json.dumps(texts, indent=1, ensure_ascii=False).encode())
+        save("upstream-frozen.json", json.dumps(frozen_texts(server), indent=1, ensure_ascii=False).encode())
     finally:
         server.stop()
-    for name in ["players-empty.json", "markers.json"]:
+    for name in ["players-empty.json", *(["markers.json"] if target.addons else [])]:
         ours, theirs = (OUT / f"rs-{name}").read_bytes(), (OUT / f"upstream-{name}").read_bytes()
         check(f"{name} byte-identical to upstream", ours == theirs, f"{len(ours)} vs {len(theirs)} B")
-    for cmd, lines in json.loads((OUT / "rs-commands.json").read_text(encoding="utf-8")).items():
-        other = texts[cmd]
-        diff = [f"{a!r} vs {b!r}" for a, b in zip(lines, other) if a != b] or len(lines) != len(other)
-        check(f"/{cmd.replace('{map}', '<map>')} text identical to upstream", not diff, str(diff)[:300] if diff else "")
+    compare_texts("commands.json")
+    compare_texts("frozen.json")
     compare_configs(E2E / "rs" / "plugins" / "BlueMap", folder / "plugins" / "BlueMap")
 
 
@@ -221,14 +278,19 @@ def main() -> None:
     ap.add_argument("--core", type=Path, help="stage this prebuilt core binary instead of building one")
     ap.add_argument("--jar", type=Path, help="test this plugin jar (no build)")
     ap.add_argument("--jobs", "-j", type=int, help="cargo jobs")
+    ap.add_argument("--server", choices=sorted({kind for kind, _ in SERVERS}), default="paper")
+    ap.add_argument("--mc", default=MC)
     args = ap.parse_args()
+    target = Target(args.server, args.mc)
+    if (target.kind, target.mc) not in SERVERS:
+        ap.error(f"no pinned {target.kind} build for {target.mc}; known: {sorted(SERVERS)}")
     jar = args.jar or (plugin_jar() if args.skip_build else build(args.core, args.jobs))
     if OUT.exists():
         shutil.rmtree(OUT)
-    folder = run_ours(jar, fresh=not args.keep)
-    run_jvm_kill(folder)
+    folder = run_ours(jar, not args.keep, target)
+    run_jvm_kill(folder, target)
     if not args.no_upstream:
-        run_upstream(folder / "world")
+        run_upstream(folder / "world", target)
     sys.exit(report(OUT))
 
 
