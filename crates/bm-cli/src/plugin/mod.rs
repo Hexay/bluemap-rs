@@ -9,10 +9,13 @@ mod live;
 mod ops;
 mod outbox;
 mod rpc;
+mod rstate;
 mod session;
 mod state;
+mod tasks_dat;
 mod text;
 mod timers;
+mod watchers;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,14 +48,11 @@ enum Event {
     ParentGone,
 }
 
-/// The global rayon pool can be built once; later loads keep the first thread count.
-pub fn init_render_pool(threads: usize) {
+/// The global rayon pool can be built once; later loads keep the first thread count. Always low OS priority.
+pub fn init_render_pool(core: &bm_config::CoreConfig) {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        let _ = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads.max(1))
-            .thread_name(|i| format!("bluemap-render-{i}"))
-            .build_global();
+        let _ = crate::throttle::build_render_pool(core, true);
     });
 }
 
@@ -204,6 +204,7 @@ fn event_loop(core: &Arc<Core>, rx: &Receiver<Event>) {
             ShimMsg::WorldRemoved { id } => {
                 core.worlds.lock().unwrap_or_else(std::sync::PoisonError::into_inner).retain(|w| w.id != id)
             }
+            ShimMsg::ServerLoad { mspt } => ops::on_server_load(core, mspt),
             ShimMsg::Hello { .. } => log::warn("Ignoring a second Hello"),
             ShimMsg::Command { id, input, sender } => {
                 let core = core.clone();

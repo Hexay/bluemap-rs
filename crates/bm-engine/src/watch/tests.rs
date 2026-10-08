@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use super::*;
 use crate::task::Regions;
@@ -21,7 +21,7 @@ fn next_task(queue: &RenderQueue, timeout: Duration) -> Option<RenderTask> {
     let end = Instant::now() + timeout;
     while Instant::now() < end {
         if let Some(t) = queue.take(true) {
-            return Some(t.task);
+            return Some(t.into_task().task);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -40,7 +40,9 @@ fn changed_region_files_are_debounced_into_one_update() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("r.0.0.mca"), b"0").unwrap();
     let queue = Arc::new(RenderQueue::new());
-    let service = MapUpdateService::start("w", dir.path().to_owned(), queue.clone(), settings(), quiet()).unwrap();
+    // a loaded box can stretch the 10 writes (or their OS notifications) past a 100 ms debounce
+    let s = WatchSettings { debounce: Duration::from_millis(750), ..settings() };
+    let service = MapUpdateService::start("w", dir.path().to_owned(), queue.clone(), s, quiet()).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     assert!(queue.take(true).is_none(), "existing files are covered by the initial full update");
     for i in 0..5 {
@@ -49,7 +51,7 @@ fn changed_region_files_are_debounced_into_one_update() {
     }
     let task = next_task(&queue, Duration::from_secs(10)).expect("region update");
     assert_eq!(regions(&task), vec![(0, -1)]);
-    std::thread::sleep(Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(1500));
     assert!(queue.take(true).is_none(), "one update per burst of changes");
     service.close();
 }
@@ -82,6 +84,32 @@ fn full_updates_repeat() {
 }
 
 #[test]
+fn first_full_update_follows_the_last_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let queue = Arc::new(RenderQueue::new());
+    let s = WatchSettings { full_update_interval: Duration::from_secs(3600), ..settings() };
+    let recorded = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let sink = recorded.clone();
+    let overdue = FullUpdates {
+        last: SystemTime::now() - Duration::from_secs(7200),
+        on_scheduled: Arc::new(move |t| sink.lock().unwrap().push(t)),
+    };
+    let before = SystemTime::now();
+    let service = MapUpdateService::start_with("w", dir.path().to_owned(), queue.clone(), s, quiet(), overdue).unwrap();
+    let task = next_task(&queue, Duration::from_secs(5)).expect("overdue full update runs at once");
+    assert_eq!(task.regions, Regions::All);
+    service.close();
+    let recorded = recorded.lock().unwrap();
+    assert_eq!(recorded.len(), 1, "lastFullUpdate recorded once");
+    assert!(recorded[0] >= before);
+
+    let now = Instant::now();
+    let half_done = SystemTime::now() - Duration::from_secs(1800);
+    let at = first_full(now, half_done, Duration::from_secs(3600));
+    assert!(at > now + Duration::from_secs(1790) && at <= now + Duration::from_secs(1800));
+}
+
+#[test]
 fn periodic_rescan_catches_changes_the_watcher_missed() {
     let dir = tempfile::tempdir().unwrap();
     let queue = Arc::new(RenderQueue::new());
@@ -98,11 +126,12 @@ fn periodic_rescan_catches_changes_the_watcher_missed() {
         armed: HashMap::new(),
         last_scheduled: HashMap::new(),
         next_full: None,
+        on_full: FullUpdates::default().on_scheduled,
         next_scan: Some(Instant::now()),
         next_retry: Instant::now() + Duration::from_secs(3600),
     };
     std::fs::write(dir.path().join("r.1.1.mca"), b"0").unwrap();
     service.on_time(Instant::now());
     service.on_time(Instant::now() + Duration::from_secs(1));
-    assert_eq!(regions(&queue.take(true).unwrap().task), vec![(1, 1)]);
+    assert_eq!(regions(&queue.take(true).unwrap().into_task().task), vec![(1, 1)]);
 }

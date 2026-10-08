@@ -70,14 +70,27 @@ fn lifecycle_without_resources() {
         name: "CONSOLE".into(),
         world: None,
         position: None,
-        permissions: vec!["bluemap.status".into()],
+        permissions: vec!["bluemap.status".into(), "bluemap.debug.dump".into()],
     };
-    send(&mut stdin, &ShimMsg::Command { id: 7, input: "bluemap".into(), sender });
+    send(&mut stdin, &ShimMsg::Command { id: 7, input: "bluemap".into(), sender: sender.clone() });
     match next(&mut stdout) {
         CoreMsg::CommandOutput { id: 7, component } => assert!(component.to_string().contains("not loaded")),
         other => panic!("expected CommandOutput, got {other:?}"),
     }
     assert!(matches!(next(&mut stdout), CoreMsg::CommandDone { id: 7, result: 0 }));
+
+    send(&mut stdin, &ShimMsg::Command { id: 8, input: "bluemap debug dump".into(), sender });
+    assert!(matches!(next(&mut stdout), CoreMsg::CommandOutput { id: 8, .. }));
+    assert!(matches!(next(&mut stdout), CoreMsg::CommandDone { id: 8, result: 1 }));
+    let dump = std::fs::read_to_string(dir.path().join("dump.json")).unwrap();
+    assert!(dump.starts_with("{\n \"system-info\": {\n  \""), "StateDumper's layout and indent: {dump}");
+    let dump: serde_json::Value = serde_json::from_str(&dump).unwrap();
+    assert_eq!(dump["system-info"]["bluemap-version"], "5.28");
+    let plugin = dump["dump"][0]["#identity"].as_str().unwrap();
+    assert!(plugin.starts_with("de.bluecolored.bluemap.common.plugin.Plugin@"), "{plugin}");
+    assert_eq!(dump["dump"][0]["loaded"], false);
+    assert_eq!(dump["registries"].as_array().map(Vec::len), Some(15));
+    assert!(dump["threads"].is_array());
 
     let (mut second, mut stdin2, mut stdout2) = spawn(dir.path());
     send(&mut stdin2, &hello(dir.path()));
@@ -88,6 +101,51 @@ fn lifecycle_without_resources() {
     assert!(matches!(next(&mut stdout), CoreMsg::Bye));
     assert!(child.wait().unwrap().success());
     assert!(!config.join(".core.pid").exists());
+}
+
+/// Next `Log` line containing `needle`; panics on `Bye` or EOF.
+fn log_containing(r: &mut ChildStdout, needle: &str) -> (bm_ipc::LogLevel, String) {
+    loop {
+        let frame = read_frame(r).unwrap().expect("core closed the stream");
+        match frame.parse::<CoreMsg>().unwrap() {
+            CoreMsg::Log { level, msg, .. } if msg.contains(needle) => return (level, msg),
+            CoreMsg::Bye => panic!("core said Bye before logging '{needle}'"),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn server_load_pauses_and_resumes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut child, mut stdin, mut stdout) = spawn(dir.path());
+    send(&mut stdin, &hello(dir.path()));
+    assert!(matches!(next(&mut stdout), CoreMsg::Welcome { .. }));
+    assert!(matches!(next(&mut stdout), CoreMsg::NotReady { .. }));
+
+    for _ in 0..4 {
+        send(&mut stdin, &ShimMsg::ServerLoad { mspt: 30.0 });
+    }
+    for _ in 0..6 {
+        send(&mut stdin, &ShimMsg::ServerLoad { mspt: 120.0 });
+    }
+    let (level, msg) = log_containing(&mut stdout, "lagging");
+    assert_eq!(level, bm_ipc::LogLevel::Warning);
+    assert!(msg.contains("MSPT 48.0"), "pauses on the 10 s average, at the first sample above 45: {msg}");
+    for _ in 0..40 {
+        send(&mut stdin, &ShimMsg::ServerLoad { mspt: 5.0 });
+    }
+    let (level, msg) = log_containing(&mut stdout, "recovered");
+    assert_eq!(level, bm_ipc::LogLevel::Info);
+    assert!(msg.contains("resuming rendering"), "{msg}");
+
+    send(&mut stdin, &ShimMsg::Shutdown);
+    loop {
+        if matches!(next(&mut stdout), CoreMsg::Bye) {
+            break;
+        }
+    }
+    assert!(child.wait().unwrap().success());
 }
 
 #[test]

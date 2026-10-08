@@ -1,11 +1,14 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+use crate::de::size;
 
 /// `core.conf` (`CoreConfig.java`). Defaults are the Java field initialisers, not the template values.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+/// Serializes with Java's field names (`debug dump`).
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct CoreConfig {
     pub accept_download: bool,
     /// > 0: thread count; <= 0: available cores minus this (see [`CoreConfig::resolve_render_thread_count`]).
@@ -21,11 +24,14 @@ pub struct CoreConfig {
     pub data: PathBuf,
     pub scan_for_mod_resources: bool,
     pub log: LogConfig,
+    /// Hidden bluemap-rs key: bytes the core may use (`512M`, `2G`, …); `None` (unset or 0) = no limit (docs/15).
+    #[serde(deserialize_with = "size::opt_memory_size")]
+    pub memory_limit: Option<u64>,
 }
 
 /// `log { file, append }`; `file` is a Java `String.format` pattern (e.g. `%1$tF`), passed through verbatim.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
-#[serde(default, rename_all = "kebab-case")]
+#[derive(Debug, Clone, PartialEq, Default, Deserialize, Serialize)]
+#[serde(default, rename_all(serialize = "camelCase", deserialize = "kebab-case"))]
 pub struct LogConfig {
     pub file: Option<String>,
     pub append: bool,
@@ -44,6 +50,7 @@ impl Default for CoreConfig {
             data: PathBuf::from("bluemap"),
             scan_for_mod_resources: true,
             log: LogConfig::default(),
+            memory_limit: None,
         }
     }
 }

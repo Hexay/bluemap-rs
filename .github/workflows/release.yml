@@ -1,0 +1,109 @@
+name: Release
+
+# Builds the core for every plugin target (tools/build_core.py, as locally), tests, then packs one Paper and one Fabric
+# jar per target plus the universal jars (docs/13 §5, §7.1; docs/16). Tags `v*` publish a draft GitHub release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  ZIGLANG: ziglang==0.16.0
+  CARGO_ZIGBUILD: cargo-zigbuild==0.23.4
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  core:
+    name: core (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: windows-x64, triple: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: linux-x64, triple: x86_64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          - { target: linux-arm64, triple: aarch64-unknown-linux-musl, os: ubuntu-latest, zig: true }
+          - { target: linux-armv7, triple: armv7-unknown-linux-musleabihf, os: ubuntu-latest, zig: true }
+          - { target: macos-x64, triple: x86_64-apple-darwin, os: macos-latest }
+          - { target: macos-arm64, triple: aarch64-apple-darwin, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.triple }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - if: matrix.zig
+        run: pip install "$ZIGLANG" "$CARGO_ZIGBUILD"
+      - run: python tools/build_core.py ${{ matrix.target }}
+      - if: matrix.target == 'linux-x64'
+        name: static binary runs
+        run: |
+          file platforms/natives/linux-x64/bluemap-core | grep -q "statically linked"
+          platforms/natives/linux-x64/bluemap-core --version
+      # arm64 macOS refuses unsigned code; the linker ad-hoc signs, verify nothing stripped the signature
+      - if: startsWith(matrix.target, 'macos')
+        run: codesign --verify --verbose platforms/natives/${{ matrix.target }}/bluemap-core
+      - if: matrix.target == 'macos-arm64'
+        run: platforms/natives/macos-arm64/bluemap-core --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-${{ matrix.target }}
+          path: platforms/natives/${{ matrix.target }}/
+          if-no-files-found: error
+
+  jars:
+    needs: [test, core]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: core-*
+          path: dl
+      - name: stage natives
+        run: |
+          for dir in dl/core-*; do
+            target="${dir#dl/core-}"
+            mkdir -p "platforms/natives/$target"
+            cp "$dir"/* "platforms/natives/$target/"
+          done
+          ls -lR platforms/natives
+      - working-directory: platforms
+        run: ./gradlew test --no-daemon --console=plain
+      - run: python tools/build_core.py --jars
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-jars
+          path: platforms/*/build/libs/bluemap-rs-*.jar
+          if-no-files-found: error
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: platforms/*/build/libs/bluemap-rs-*.jar

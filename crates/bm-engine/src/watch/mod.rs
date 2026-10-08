@@ -1,5 +1,6 @@
 //! `MapUpdateService`: watches a map's region folder and schedules region updates (debounced like Java: at least
-//! 5 s after the last change, `update-cooldown` apart per region) plus a full update every `full-update-interval`.
+//! 5 s after the last change, `update-cooldown` apart per region) plus a full update every `full-update-interval`,
+//! the first one `full-update-interval` after the map's last full update ([`FullUpdates`]).
 //!
 //! Unlike Java, it never stops watching silently (docs/08 "Watchers die silently"): a missing folder is waited
 //! for, watcher errors are logged and the watcher re-created, lost events trigger a fingerprint rescan, and every
@@ -12,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use bm_config::CoreConfig;
 use bm_format::grid::Tile;
@@ -57,6 +58,23 @@ pub enum LogLevel {
 
 pub type LogFn = Arc<dyn Fn(LogLevel, &str) + Send + Sync>;
 
+/// `onFullUpdate`: told the time each periodic full update is scheduled (the plugin's `lastFullUpdate`).
+pub type OnFullUpdate = Arc<dyn Fn(SystemTime) + Send + Sync>;
+
+/// When the periodic full updates start: `lastFullUpdate + full-update-interval`, at once if that has passed.
+#[derive(Clone)]
+pub struct FullUpdates {
+    pub last: SystemTime,
+    pub on_scheduled: OnFullUpdate,
+}
+
+impl Default for FullUpdates {
+    /// BlueMapCLI: `lastFullUpdate(Instant.now())`, nothing recorded.
+    fn default() -> Self {
+        Self { last: SystemTime::now(), on_scheduled: Arc::new(|_| {}) }
+    }
+}
+
 pub struct MapUpdateService {
     tx: Sender<Msg>,
     handle: Option<JoinHandle<()>>,
@@ -69,6 +87,17 @@ impl MapUpdateService {
         queue: Arc<RenderQueue>,
         settings: WatchSettings,
         log: LogFn,
+    ) -> Result<Self> {
+        Self::start_with(map, region_dir, queue, settings, log, FullUpdates::default())
+    }
+
+    pub fn start_with(
+        map: &str,
+        region_dir: PathBuf,
+        queue: Arc<RenderQueue>,
+        settings: WatchSettings,
+        log: LogFn,
+        full: FullUpdates,
     ) -> Result<Self> {
         let (tx, rx) = channel();
         let now = Instant::now();
@@ -83,7 +112,8 @@ impl MapUpdateService {
             files: Fingerprints::default(),
             armed: HashMap::new(),
             last_scheduled: HashMap::new(),
-            next_full: positive(settings.full_update_interval).map(|d| now + d),
+            next_full: positive(settings.full_update_interval).map(|d| first_full(now, full.last, d)),
+            on_full: full.on_scheduled,
             next_scan: positive(settings.scan_interval).map(|d| now + d),
             next_retry: now,
         };
@@ -126,6 +156,10 @@ fn positive(d: Duration) -> Option<Duration> {
     (!d.is_zero()).then_some(d)
 }
 
+fn first_full(now: Instant, last: SystemTime, every: Duration) -> Instant {
+    now + (last + every).duration_since(SystemTime::now()).unwrap_or_default()
+}
+
 struct Service {
     map: String,
     dir: PathBuf,
@@ -139,6 +173,7 @@ struct Service {
     armed: HashMap<Tile, Instant>,
     last_scheduled: HashMap<Tile, Instant>,
     next_full: Option<Instant>,
+    on_full: OnFullUpdate,
     next_scan: Option<Instant>,
     next_retry: Instant,
 }
@@ -193,6 +228,7 @@ impl Service {
             && at <= now
         {
             self.log(LogLevel::Info, &format!("Start updating map '{}'...", self.map));
+            (self.on_full)(SystemTime::now());
             self.queue.schedule_next(RenderTask::full(self.map.clone(), TileUpdateStrategy::ForceNone));
             let mut next = at + every;
             while next <= now {

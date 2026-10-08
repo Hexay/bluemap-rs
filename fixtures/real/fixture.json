@@ -1,0 +1,10 @@
+{
+  "description": "Real-scale vanilla survival world, 4096x4096 blocks (64 regions, 65536 chunks), the vanilla seed: parity and benchmarks at scale. Generated batch by batch by tools/real_world.py gen, not make_world.py",
+  "properties": {
+    "level-type": "minecraft:normal",
+    "generate-structures": "true",
+    "level-seed": "bluemap_reverse",
+    "sync-chunk-writes": "false"
+  },
+  "area": [-2048, -2048, 2047, 2047]
+}

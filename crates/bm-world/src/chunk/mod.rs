@@ -146,7 +146,11 @@ impl Chunk {
             let section = self.section(y);
             match section {
                 Ok(Section { blocks: Blocks::Single(s), .. }) => states.extend(std::iter::repeat_n(*s, n)),
-                Ok(Section { blocks, .. }) => states.extend((y..=end).map(|y| blocks.get(block_index(x, y, z)))),
+                Ok(Section { blocks: Blocks::Paletted { palette, indices }, .. }) => states.extend(
+                    indices
+                        .strided(block_index(x, y, z), 256, n)
+                        .map(|p| palette.get(p as usize).copied().unwrap_or(StateId::MISSING)),
+                ),
                 Err(_) => states.extend(std::iter::repeat_n(StateId::AIR, n)),
             }
             let uniform = match section {
@@ -157,14 +161,41 @@ impl Chunk {
             };
             match (uniform, section) {
                 (Some(l), _) => light.extend(std::iter::repeat_n(l, n)),
-                (None, Ok(s)) => light.extend((y..=end).map(|y| {
+                (None, Ok(s)) => {
                     let i = block_index(x, y, z);
-                    [s.sky_light.as_ref().map_or(0, |l| l.get(i)), s.block_light.as_ref().map_or(0, |l| l.get(i))]
-                })),
+                    let (sky, block) = (Light::column(&s.sky_light, i, n), Light::column(&s.block_light, i, n));
+                    light.extend(sky[..n].iter().zip(&block[..n]).map(|(&s, &b)| [s, b]));
+                }
                 (None, Err(_)) => unreachable!("absent sections have uniform light"),
             }
             y = end + 1;
         }
+    }
+
+    /// Top y of the highest section holding anything but one state `is_air` accepts; every block above it is air.
+    pub fn top_y(&self, is_air: impl Fn(StateId) -> bool) -> Option<i32> {
+        let solid = |s: &Option<Section>| s.as_ref().is_some_and(|s| !matches!(s.blocks, Blocks::Single(id) if is_air(id)));
+        let i = self.sections.iter().rposition(solid)?;
+        Some((self.min_section + i as i32) * 16 + 15)
+    }
+
+    /// The highest [`Chunk::light`] block light of column `x, z` over `y0..=y1`.
+    pub fn max_block_light(&self, x: i32, z: i32, y0: i32, y1: i32) -> u8 {
+        if !self.has_light {
+            return 0;
+        }
+        let mut max = 0;
+        let mut y = y0;
+        while y <= y1 {
+            let end = (y | 15).min(y1);
+            max = max.max(match self.section(y).map(|s| &s.block_light) {
+                Ok(Some(Light::Uniform(v))) => *v,
+                Ok(Some(l)) => (y..=end).map(|y| l.get(block_index(x, y, z))).max().unwrap_or(0),
+                Ok(None) | Err(_) => 0,
+            });
+            y = end + 1;
+        }
+        max
     }
 
     /// Lowest block y with a stored section (light-only padding sections included, as BlueMap).
@@ -214,6 +245,23 @@ impl Light {
             Self::Uniform(v) => *v,
             Self::Nibbles(n) => (n[i >> 1] >> ((i & 1) * 4)) & 15,
         }
+    }
+
+    /// Values `start`, `start + 256`, … (`n` ≤ 16 of them: one column within the section); absent light reads as 0.
+    fn column(light: &Option<Self>, start: usize, n: usize) -> [u8; 16] {
+        let mut out = [0; 16];
+        match light {
+            None => {}
+            Some(Self::Uniform(v)) => out = [*v; 16],
+            Some(Self::Nibbles(nibbles)) => {
+                // a 256 stride keeps the nibble half fixed: 128 bytes apart
+                let shift = (start & 1) * 4;
+                for (k, o) in out[..n].iter_mut().enumerate() {
+                    *o = (nibbles[(start >> 1) + 128 * k] >> shift) & 15;
+                }
+            }
+        }
+        out
     }
 
     /// The one value of a section's light, if it has one; absent light reads as 0.

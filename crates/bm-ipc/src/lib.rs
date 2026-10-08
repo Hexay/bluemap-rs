@@ -1,5 +1,5 @@
 //! The wire protocol between a server-plugin shim (JVM) and the `bluemap` core process (docs/13 §4). This
-//! docstring is the canonical spec; the Java side (`platforms/paper`) mirrors it.
+//! docstring is the canonical spec; the Java side (`platforms/common`) mirrors it.
 //!
 //! # Transport
 //!
@@ -63,6 +63,7 @@
 //! | `AssetRead` | `id, map, name` | | reply value `bool` (found); body = decompressed bytes |
 //! | `AssetExists` / `AssetDelete` | `id, map, name` | | reply value `bool` / null |
 //! | `Reload` | `id, light` | | reply after the new `Ready`/`NotReady` |
+//! | `ServerLoad` | `mspt` | | 1 Hz: the server's average tick time in ms (Paper `getAverageTickTime`, Fabric `getAverageTickTimeNanos`); not sent where unknown (Folia). The core pauses rendering on its 10 s average (`render-pause-mspt`, docs/15) |
 //! | `Shutdown` | | | |
 //! | `Reply` | `id, ok, err?, value?` | | answers a core request |
 //!
@@ -91,7 +92,7 @@
 //! from that file plus the mirrored map/storage ids, and sends the nodes the sender holds in
 //! `CommandSender.permissions`; the core parses the input and checks the node of the usage it matched.
 //!
-//! `Players` and `Markers` are latest-wins on the sender (a stale batch may be dropped); everything else is
+//! `Players`, `Markers` and `ServerLoad` are latest-wins on the sender (a stale batch may be dropped); everything else is
 //! delivered in order. Text is UTF-8 everywhere.
 
 mod frame;
@@ -101,11 +102,12 @@ mod process;
 pub use frame::{Frame, IpcError, MAX_BODY, MAX_HEADER, MarkerAssembler, read_frame, write_frame};
 pub use msg::*;
 pub use process::{
-    CoreLock, LockError, ignore_interrupts, parent_alive, resident_memory, take_stdout, wait_for_parent_exit,
+    CoreLock, LockError, ignore_interrupts, lower_thread_priority, parent_alive, resident_memory, take_stdout,
+    wait_for_parent_exit,
 };
 
-/// Bumped on every incompatible change.
-pub const PROTOCOL: u32 = 1;
+/// Bumped on every incompatible change (2: `ServerLoad`).
+pub const PROTOCOL: u32 = 2;
 
 /// `Markers` bodies are split into frames of at most this size, so player batches aren't held up.
 pub const MARKER_CHUNK: usize = 1 << 20;

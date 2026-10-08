@@ -10,14 +10,15 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use bm_config::generate::{ServerWorld, suggest_render_thread_count};
 use bm_config::{BlueMapConfig, ConfigOptions, Key};
 use bm_engine::{
-    LoadedMaps, LogLevel, MapContext, MapUpdateService, RenderQueue, RenderTask, ResourceOptions, Service, TaskEvent,
-    TileUpdateStrategy, WatchSettings, run_queue,
+    LoadedMaps, MapContext, MapUpdateService, PauseReason, RenderQueue, RenderTask, ResourceOptions, Service,
+    TaskEvent, TileUpdateStrategy, run_queue,
 };
 use bm_ipc::{CoreWorld, WorldInfo};
 use bm_web::LiveMap;
 
 use super::state::{self, PluginState};
 use super::{Hello, blockstates};
+use crate::eta::ProgressTracker;
 use crate::log;
 use crate::web::{self, Webserver};
 
@@ -34,13 +35,15 @@ pub struct Session {
     pub maps: Arc<LoadedMaps>,
     pub queue: Arc<RenderQueue>,
     pub lives: BTreeMap<String, Arc<LiveMap>>,
-    pub state: Mutex<PluginState>,
+    pub state: Arc<Mutex<PluginState>>,
     pub worlds: Vec<CoreWorld>,
     /// Map id → `WorldInfo.id` of the server world it renders (`Server.getServerWorld(World)`).
     pub map_server_world: HashMap<String, Option<String>>,
     pub loaded_at: Instant,
+    /// `RenderManager.progressTracker`, sampled by the plugin timer.
+    pub progress: Mutex<ProgressTracker>,
     worker: Mutex<Option<JoinHandle<()>>>,
-    watchers: Mutex<HashMap<String, MapUpdateService>>,
+    pub(super) watchers: Mutex<HashMap<String, MapUpdateService>>,
     web: Mutex<Option<(Webserver, tokio::sync::oneshot::Sender<()>)>>,
 }
 
@@ -79,6 +82,7 @@ impl Session {
     pub fn load(hello: &Hello, worlds: &[WorldInfo], scripts: (&[String], &[String])) -> Result<Self, NotReady> {
         let packs = hello.config_folder.join("packs");
         let _ = std::fs::create_dir_all(&packs);
+        bm_engine::find_java_addons(&packs).iter().for_each(|a| log::warn(&a.warning()));
         let config = BlueMapConfig::load(&config_options(hello, worlds))
             .map_err(|e| not_ready("config-error", format!("{e}")))?;
         if let Some(file) = &config.core.log.file
@@ -97,8 +101,7 @@ impl Session {
             packs_folder: Some(packs),
             mods_folder: hello.mods_folder.clone().filter(|m| m.is_dir()),
         };
-        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-        super::init_render_pool(config.core.resolve_render_thread_count(cores));
+        super::init_render_pool(&config.core);
         let service = Arc::new(Service::new(config, options));
         if let Err(e) = service.resources() {
             if !matches!(e, bm_engine::Error::MissingResources(_)) {
@@ -132,8 +135,9 @@ impl Session {
             maps,
             queue: Arc::new(RenderQueue::new()),
             lives,
-            state: Mutex::new(plugin_state),
+            state: Arc::new(Mutex::new(plugin_state)),
             loaded_at: Instant::now(),
+            progress: Mutex::default(),
             worker: Mutex::default(),
             watchers: Mutex::default(),
             web: Mutex::default(),
@@ -180,7 +184,7 @@ impl Session {
     /// `RenderManager` with one worker (tiles fan out on the rayon pool); paused while render threads are off.
     fn start_worker(&self) {
         if !self.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled {
-            self.queue.pause();
+            self.queue.pause(PauseReason::Stopped);
             log::info("Render-Threads are STOPPED! Use the command 'bluemap start' to start them.");
         }
         let (queue, maps, service) = (self.queue.clone(), self.maps.clone(), self.service.clone());
@@ -213,40 +217,6 @@ impl Session {
         for map in due.iter().rev() {
             state.map(&map.id).last_full_update = now;
             self.queue.schedule_next(RenderTask::full(map.id.clone(), TileUpdateStrategy::ForceNone));
-        }
-    }
-
-    fn start_watchers(&self) {
-        let ids: Vec<String> = {
-            let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-            self.maps.all().iter().filter(|m| !state.is_frozen(&m.id)).map(|m| m.id.clone()).collect()
-        };
-        ids.iter().for_each(|id| self.start_watching(id));
-    }
-
-    pub fn start_watching(&self, id: &str) {
-        let Some(map) = self.maps.get(id) else { return };
-        let settings = WatchSettings::from_core(&self.service.config.core);
-        let log = Arc::new(|level: LogLevel, msg: &str| match level {
-            LogLevel::Info => log::info(msg),
-            LogLevel::Warning => log::warn(msg),
-            LogLevel::Error => log::error(msg),
-        });
-        self.stop_watching(id);
-        match MapUpdateService::start(id, map.world.region_dir().to_owned(), self.queue.clone(), settings, log) {
-            Ok(w) => {
-                self.watchers.lock().unwrap_or_else(PoisonError::into_inner).insert(id.to_owned(), w);
-            }
-            Err(e) => log::error(&format!(
-                "Failed to create update-watcher for map: {id} (This means the map might not automatically update): {e}"
-            )),
-        }
-    }
-
-    pub fn stop_watching(&self, id: &str) {
-        let removed = self.watchers.lock().unwrap_or_else(PoisonError::into_inner).remove(id);
-        if let Some(w) = removed {
-            w.close();
         }
     }
 

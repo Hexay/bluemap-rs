@@ -153,7 +153,8 @@ def generate(server_dir, spec: dict, commands: list[str], force: bool, tc: Toolc
             server.send(cmd)
         server.query("save-all flush", r"Saved the game", timeout=300)
     finally:
-        code = server.stop()
+        # the final save can take minutes on a busy spinning disk (the testbox)
+        code = server.stop(timeout=900)
     for err in server.errors:
         print(f"ERROR   {err}")
     print(f"world   {server_dir / 'world'} ({len(commands)} commands, {len(server.errors)} errors, exit {code})")

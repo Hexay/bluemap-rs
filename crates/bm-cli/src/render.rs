@@ -6,13 +6,14 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use bm_engine::{
-    LoadedMaps, MapContext, RenderQueue, RenderTask, Service, TaskEvent, TileUpdateStrategy, UpdateEvent, UpdateStats,
-    run_queue,
-};
+use bm_engine::{LoadedMaps, MapContext, RenderQueue, Service, TaskEvent, UpdateEvent, UpdateStats, run_queue};
+use bm_web::MapRegistry;
 
+use crate::eta::{self, ProgressTracker};
 use crate::log;
+use crate::resume::RenderPlan;
 use crate::shutdown::Shutdown;
+use crate::throttle;
 use crate::watch::Watchers;
 
 /// BlueMap's CLI reports progress every 10 s.
@@ -55,13 +56,15 @@ pub fn open_map(service: &Service, id: &str) -> bm_engine::Result<Option<MapCont
     Ok(map)
 }
 
-/// Renders `maps` (and with `watch`, keeps updating them until shutdown). Returns whether no tile failed.
+/// Renders `maps` (and with `watch`, keeps updating them until shutdown). Maps loaded later get live routes on
+/// `web` (the running webserver's maps). Returns whether no tile failed.
 pub fn run(
     service: &Service,
     maps: Vec<MapContext>,
     failed: Vec<String>,
-    strategy: TileUpdateStrategy,
+    mut plan: RenderPlan,
     watch: bool,
+    web: Option<&MapRegistry>,
     shutdown: &Shutdown,
 ) -> Result<bool> {
     let queue = Arc::new(RenderQueue::new());
@@ -70,7 +73,9 @@ pub fn run(
     for map in maps {
         let id = map.id.clone();
         loaded.insert(map);
-        queue.schedule(RenderTask::full(id, strategy));
+        for task in plan.tasks(&id) {
+            queue.schedule(task);
+        }
     }
     let watchers = Watchers::new(service, queue.clone());
     if watch {
@@ -89,17 +94,29 @@ pub fn run(
     // dropping the senders stops the helper threads
     let (progress_stop, progress_rx) = channel::<()>();
     let (retry_stop, retry_rx) = channel::<()>();
+    let (memory_stop, memory_rx) = channel::<()>();
     let start = Instant::now();
     let mut report = Report::default();
+    let sse = service.config.webserver.sse_enabled;
+    let prepare = |map: &mut MapContext| {
+        if let Some(web) = web {
+            crate::web::attach_live(web, map, sse);
+        }
+    };
     std::thread::scope(|s| {
         s.spawn(|| progress_log(&queue, progress_rx));
         if watch && !failed.is_empty() {
-            s.spawn(|| watchers.retry_failed(failed, &loaded, retry_rx));
+            s.spawn(|| watchers.retry_failed(failed, &loaded, &prepare, retry_rx));
+        }
+        if let Some(limit) = service.config.core.memory_limit {
+            let queue = &queue;
+            s.spawn(move || throttle::memory::monitor(queue, limit, memory_rx));
         }
         run_queue(&queue, &loaded, resources, !watch, &mut |event| report.on_event(event, &queue, start));
-        drop((progress_stop, retry_stop));
+        drop((progress_stop, retry_stop, memory_stop));
     });
     watchers.close();
+    plan.save(&queue, &|map| loaded.get(map).and_then(|m| m.world.regions().ok()));
     if !shutdown.is_triggered() {
         log::info("Stopping...");
     }
@@ -146,10 +163,19 @@ impl Report {
     }
 }
 
-/// BlueMapCLI's `updateInfoTask`.
+/// BlueMapCLI's `updateInfoTask`, fed by `RenderManager`'s progress tracker on the same thread.
 fn progress_log(queue: &RenderQueue, stop: Receiver<()>) {
+    let start = Instant::now();
+    let mut tracker = ProgressTracker::default();
+    let mut next_log = PROGRESS_INTERVAL;
     let mut was_idle = false;
-    while let Err(RecvTimeoutError::Timeout) = stop.recv_timeout(PROGRESS_INTERVAL) {
+    while let Err(RecvTimeoutError::Timeout) = stop.recv_timeout(eta::SAMPLE_INTERVAL) {
+        let now = start.elapsed();
+        tracker.sample(queue.current_run(), now.as_millis() as i64);
+        if now < next_log {
+            continue;
+        }
+        next_log += PROGRESS_INTERVAL;
         match queue.current() {
             None => {
                 if !was_idle {
@@ -159,7 +185,8 @@ fn progress_log(queue: &RenderQueue, stop: Receiver<()>) {
             }
             Some((description, progress)) => {
                 was_idle = false;
-                log::info(&format!("{description}: {}%", java_double((progress * 100_000.0).round() / 1000.0)));
+                let percent = java_double((progress * 100_000.0).round() / 1000.0);
+                log::info(&format!("{description}: {percent}%{}", eta::suffix(tracker.remaining_ms(progress))));
             }
         }
     }

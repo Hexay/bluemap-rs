@@ -52,7 +52,7 @@ impl HiresRenderer<'_, '_> {
         let max = [min_x + grid.size[0] - 1, min_z + grid.size[1] - 1];
         let min = [min_x, min_z];
         let masking = Masking::new(self.settings, self.dimension.has_skylight, min, max);
-        out.volume.fill(area, &masking, min, max);
+        out.volume.fill(area, &masking, min, max, |s| self.states.flags(s).is_air());
         let ctx = Ctx {
             pack: self.pack,
             states: self.states,
@@ -62,6 +62,7 @@ impl HiresRenderer<'_, '_> {
         };
         out.unsorted.clear();
         out.columns.clear();
+        out.columns.reserve(grid.size[0] as usize * grid.size[1] as usize);
         // TODO: entity pass (`EntityRenderPass`); core ships no entity models, so BlueMap's output has none either
         out.truncated = block_pass::render(&ctx, min, max, &mut out.unsorted, &mut out.columns).is_err();
         mesh::sort_by_material(&out.unsorted, &mut out.model);

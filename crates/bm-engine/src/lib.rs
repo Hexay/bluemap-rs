@@ -9,9 +9,11 @@
 //! lowres tile is saved once its last contributing region is done.
 
 mod actions;
+mod addons;
 mod convert;
 mod error;
 mod io;
+mod job;
 mod map;
 mod mask;
 mod persist;
@@ -26,14 +28,16 @@ mod task;
 mod update;
 mod watch;
 
+pub use addons::{JavaAddon, find_java_addons};
 pub use bm_map::renderstate::TileUpdateStrategy;
 pub use error::{Error, Result};
+pub use job::{Job, JobControl};
 pub use map::{MapContext, TileListener};
 pub use persist::PersistStats;
-pub use queue::RenderQueue;
+pub use queue::{PauseReason, PauseReasons, RenderQueue};
 pub use resources::{ResourceOptions, Resources};
 pub use runner::{LoadedMaps, TaskEvent, run_queue};
 pub use service::{BLUEMAP_VERSION, Service};
 pub use task::{Regions, RenderTask};
 pub use update::{UpdateEvent, UpdateJob, UpdateStats, update_map};
-pub use watch::{LogFn, LogLevel, MapUpdateService, WatchSettings};
+pub use watch::{FullUpdates, LogFn, LogLevel, MapUpdateService, OnFullUpdate, WatchSettings};

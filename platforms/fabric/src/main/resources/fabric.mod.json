@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "bluemap",
+  "version": "${version}",
+
+  "name": "BlueMap",
+  "description": "A 3d-map of your Minecraft worlds view-able in your browser using three.js (WebGL). bluemap-rs: the BlueMap server mod backed by a native Rust core.",
+  "authors": [
+    "Blue (TBlueF, Lukas Rieger)",
+    "bluemap-rs contributors"
+  ],
+  "contact": {
+    "homepage": "https://github.com/BlueMap-Minecraft"
+  },
+  "license": "MIT",
+
+  "environment": "*",
+  "entrypoints": {
+    "server": ["bluemaprs.fabric.BlueMapFabricMod"],
+    "client": ["bluemaprs.fabric.ClientNotice"]
+  },
+
+  "depends": {
+    "java": ">=25",
+    "minecraft": ">=26.1 <26.4",
+    "fabricloader": ">=${loader}",
+    "fabric-api-base": "*",
+    "fabric-command-api-v2": "*",
+    "fabric-lifecycle-events-v1": "*",
+    "fabric-networking-api-v1": "*"
+  }
+}

@@ -5,15 +5,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
+use bm_engine::PauseReason;
 use bm_ipc::{CoreMsg, MapInfo, PluginInfo, ReadyInfo, StateInfo, WorldInfo};
 
 use super::Hello;
 use super::live::LiveData;
 use super::outbox::Outbox;
 use super::session::{NotReady, Session, world_id};
+use super::tasks_dat;
 use crate::log;
+use crate::throttle::load::LoadMonitor;
 
-pub const CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CORE_VERSION: &str = crate::VERSION;
 
 pub struct Core {
     pub out: Outbox,
@@ -30,6 +33,8 @@ pub struct Core {
     pub settings_due: Mutex<Option<Instant>>,
     /// A join/leave asks for a `player-render-limit` check at this time.
     pub limit_check_at: Mutex<Option<Instant>>,
+    /// The server's tick time; kept across reloads.
+    pub load: Mutex<LoadMonitor>,
 }
 
 impl Core {
@@ -45,6 +50,7 @@ impl Core {
             web_files: Mutex::default(),
             settings_due: Mutex::default(),
             limit_check_at: Mutex::default(),
+            load: Mutex::default(),
         }
     }
 
@@ -78,8 +84,12 @@ impl Core {
         let loaded = match result {
             Ok(session) => {
                 let session = Arc::new(session);
+                if self.load.lock().unwrap_or_else(PoisonError::into_inner).is_lagging() {
+                    session.queue.pause(PauseReason::ServerLoad);
+                }
                 self.live.publish_players(&session);
                 *self.session.write().unwrap_or_else(PoisonError::into_inner) = Some(session.clone());
+                tasks_dat::resume(&session);
                 self.out.send(CoreMsg::Ready(Box::new(self.ready_info(&session))));
                 log::info("Loaded!");
                 true
@@ -107,6 +117,7 @@ impl Core {
         }
         if session.is_loaded() {
             self.live.write_markers(&session);
+            tasks_dat::save(&session);
         }
         session.unload();
         if reloading {
@@ -125,6 +136,7 @@ impl Core {
     pub fn save(&self) {
         if let Some(s) = self.session().filter(|s| s.is_loaded()) {
             s.save_state();
+            tasks_dat::save(&s);
             self.live.write_markers(&s);
         }
     }

@@ -1,13 +1,38 @@
-//! Read-only commands: status, version, help, maps, tasks, storages.
+//! Read-only commands: status, version, help, maps, tasks.
 
 use std::sync::PoisonError;
+
+use bm_engine::PauseReason;
+use serde_json::Value;
 
 use super::super::core::{CORE_VERSION, Core};
 use super::super::session::Session;
 use super::super::text::{self, BASE, FROZEN, HIGHLIGHT, INFO, POSITIVE};
 use super::{Say, task_ref};
+use crate::eta;
+use crate::throttle::memory;
 
-pub fn status(s: &Session, say: Say) -> i32 {
+/// Why the render threads are paused, one line per reason other than `Stopped`.
+pub fn pause_lines(core: &Core, s: &Session) -> Vec<Vec<Value>> {
+    let lines = s.queue.pause_reasons().iter().filter_map(|reason| match reason {
+        PauseReason::Stopped => None,
+        PauseReason::PlayerLimit => {
+            let limit = s.service.config.plugin.player_render_limit.to_string();
+            Some(text::format("there are % or more players online", &[&limit]))
+        }
+        PauseReason::Memory => {
+            let limit = s.service.config.core.memory_limit.map_or(0, memory::mib);
+            Some(text::format("core memory is above the memory-limit of %", &[&format!("{limit} MiB")]))
+        }
+        PauseReason::ServerLoad => {
+            let mspt = core.load.lock().unwrap_or_else(PoisonError::into_inner).average().unwrap_or_default();
+            Some(text::format("server is lagging (MSPT %)", &[&format!("{mspt:.1}")]))
+        }
+    });
+    lines.collect()
+}
+
+pub fn status(core: &Core, s: &Session, say: Say) -> i32 {
     let mut body = Vec::new();
     let enabled = s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled;
     if !enabled {
@@ -15,11 +40,9 @@ pub fn status(s: &Session, say: Say) -> i32 {
         body.push(text::format("use % to start rendering", &["/bluemap start"]));
     } else if s.queue.is_paused() {
         body.push(text::format("⌛ render-threads are %", &["paused"]));
-        let limit = s.service.config.plugin.player_render_limit.to_string();
-        body.push(text::format("there are % or more players online", &[&limit]));
-    } else if let Some((desc, progress)) = s.queue.current() {
-        body.push(text::format("⛏ currently running: %", &[&desc]));
-        body.push(text::format("progress: %", &[&format!("{:.3}%", progress * 100.0)]));
+        body.extend(pause_lines(core, s));
+    } else if let Some((run, progress)) = s.queue.current_run() {
+        body.extend(active_task(s, run, progress));
     } else {
         body.push(text::format("✔ render-threads are %", &["idle"]));
     }
@@ -31,6 +54,26 @@ pub fn status(s: &Session, say: Say) -> i32 {
     body.push(text::format("core memory: %", &[&rss]));
     say(text::paragraph("Status", body));
     1
+}
+
+/// `StatusCommand.activeTask`: what runs, its progress and remaining time, between empty lines.
+fn active_task(s: &Session, run: u64, progress: f64) -> Vec<Vec<Value>> {
+    let mut info = match s.queue.current_task() {
+        Some(task) => text::fill("⛏ map % is currently being updated", &[text::hl(&task.map)], INFO),
+        None => {
+            let desc = s.queue.current().map(|(d, _)| d).unwrap_or_default();
+            text::fill("⛏ currently running: %", &[text::hl(&desc)], INFO)
+        }
+    };
+    let remaining = s.progress.lock().unwrap_or_else(PoisonError::into_inner).remaining_of((run, progress));
+    let mut items = vec![vec![text::format("progress: %", &[&format!("{:.3}%", progress * 100.0)])]];
+    if let Some(eta) = eta::status_remaining(remaining, progress) {
+        items.push(vec![text::format("remaining time: %", &[&eta])]);
+    }
+    info.insert(0, Vec::new());
+    info.extend(text::details(items, BASE));
+    info.push(Vec::new());
+    info
 }
 
 pub fn version(core: &Core, say: Say) -> i32 {
@@ -114,11 +157,5 @@ pub fn tasks(s: &Session, say: Say) -> i32 {
         body.push(text::format("... % more scheduled tasks ...", &[&(pending.len() - 10).to_string()]));
     }
     say(text::paragraph("Tasks", body));
-    1
-}
-
-pub fn storages(s: &Session, say: Say) -> i32 {
-    let body = s.service.config.storages.keys().map(|id| vec![text::span(id.clone(), HIGHLIGHT)]).collect();
-    say(text::paragraph("Storages", body));
     1
 }

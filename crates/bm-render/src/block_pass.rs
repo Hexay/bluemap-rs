@@ -26,15 +26,27 @@ pub(crate) fn render(
     for x in min[0]..=max[0] {
         for z in min[1]..=max[1] {
             let mut max_height = i32::MIN;
-            let mut top_block_light = 0.0f64;
+            let mut top_light = TopLight::new();
             let mut column_color = Color { premultiplied: true, ..Color::default() };
 
             if ctx.view.inside_column(x, z) {
-                let (min_y, max_y) = ctx.view.column_y_range(x, z);
+                let (min_y, column_max_y) = ctx.view.column_y_range(x, z);
+                // all air up there, so only its light reaches the column, as below
+                let max_y = column_max_y.min(ctx.view.solid_top());
+                if max_y < column_max_y {
+                    let above = (max_y + 1..=column_max_y).filter(|&y| ctx.view.inside(x, y, z));
+                    debug_assert!(above.clone().all(|y| ctx.states.flags(ctx.view.state(x, y, z)).is_air()));
+                    let light = ctx.view.max_block_light(x, z, max_y + 1, column_max_y);
+                    debug_assert_eq!(Some(light), above.map(|y| ctx.view.light(x, y, z).1).max().or(Some(0)));
+                    top_light.add(light, &column_color);
+                }
                 // the volume spans every column's y range plus a border, so the whole column is interior or none of it
                 let top = ctx.view.interior_index(x, max_y, z);
-                let mut light_under = |block_light: u8, column: &Color| {
-                    top_block_light = top_block_light.max(f64::from(f32::from(block_light) * (1.0 - column.a)));
+                let s = ctx.settings;
+                let floor = ctx.view.ocean_floor_y(x, z);
+                // `Block::remove_if_cave` for a block that isn't air
+                let cave = |y: i32| {
+                    y < s.remove_caves_below_y && floor.is_none_or(|f| y < f.wrapping_add(s.cave_detection_ocean_floor))
                 };
                 for y in (min_y..=max_y).rev() {
                     if !ctx.view.inside(x, y, z) {
@@ -43,23 +55,24 @@ pub(crate) fn render(
                     let index = top.map(|t| t - (max_y - y) as usize);
                     // air renders nothing and leaves the colour alone; only its light reaches the column
                     if let Some(i) = index.filter(|&i| ctx.states.flags(ctx.view.state_at(i)).is_air()) {
-                        light_under(ctx.view.light_at(i).1, &column_color);
+                        top_light.add(ctx.view.light_at(i).1, &column_color);
                         continue;
                     }
-                    // the same for buried blocks: every cullface culled means no faces and no colour
-                    if let Some(i) = index.filter(|&i| fully_culled(ctx, i)) {
+                    // the same for buried blocks (every cullface culled) and dark cave blocks (every face culled as cave)
+                    if let Some(i) = index.filter(|&i| fully_culled(ctx, i) || (cave(y) && dark(ctx, i))) {
                         debug_assert!(renders_nothing(ctx, &Block::new(ctx, x, y, z, index)));
-                        light_under(ctx.view.light_at(i).1, &column_color);
+                        top_light.add(ctx.view.light_at(i).1, &column_color);
                         continue;
                     }
                     let block = Block::new(ctx, x, y, z, index);
                     let start = out.faces();
                     render_block(ctx, &block, out, &mut block_color)?;
-                    light_under(block.block_light, &column_color);
+                    top_light.add(block.block_light, &column_color);
                     out.translate_from(start, (x - min[0]) as f32, y as f32, (z - min[1]) as f32);
 
                     if block_color.a > 0.0 {
                         max_height = max_height.max(y);
+                        top_light.flush(&column_color);
                         column_color.underlay(block_color.premultiplied());
                     }
                     if ctx.settings.render_top_only && f64::from(block_color.a) > 0.999 && block.info.props.culling {
@@ -69,10 +82,52 @@ pub(crate) fn render(
             }
 
             let height = if max_height == i32::MIN { 0 } else { max_height };
-            columns.push(ColumnMeta { x, z, color: column_color, height, block_light: top_block_light as i32 });
+            let block_light = top_light.finish(&column_color) as i32;
+            columns.push(ColumnMeta { x, z, color: column_color, height, block_light });
         }
     }
     Ok(())
+}
+
+/// `max(block light × (1 − column alpha))` over a column, top down. The product is monotonic in the light while
+/// the alpha stays put, so only the lightest and darkest light since the alpha last changed are kept.
+struct TopLight {
+    top: f64,
+    lo: u8,
+    hi: u8,
+    /// The per-block maximum, for debug builds to check against.
+    each: f64,
+}
+
+impl TopLight {
+    fn new() -> Self {
+        Self { top: 0.0, lo: u8::MAX, hi: 0, each: 0.0 }
+    }
+
+    fn product(light: u8, column: &Color) -> f64 {
+        f64::from(f32::from(light) * (1.0 - column.a))
+    }
+
+    fn add(&mut self, light: u8, column: &Color) {
+        (self.lo, self.hi) = (self.lo.min(light), self.hi.max(light));
+        if cfg!(debug_assertions) {
+            self.each = self.each.max(Self::product(light, column));
+        }
+    }
+
+    /// Call before the column alpha changes.
+    fn flush(&mut self, column: &Color) {
+        if self.lo <= self.hi {
+            self.top = self.top.max(Self::product(self.hi, column)).max(Self::product(self.lo, column));
+            (self.lo, self.hi) = (u8::MAX, 0);
+        }
+    }
+
+    fn finish(&mut self, column: &Color) -> f64 {
+        self.flush(column);
+        debug_assert_eq!(self.top, self.each);
+        self.top
+    }
 }
 
 /// Whether the interior block at volume index `i` is [`Hidden`] by its neighbours.
@@ -99,7 +154,28 @@ fn fully_culled(ctx: &Ctx, i: usize) -> bool {
     }
 }
 
-/// The full render of a block [`fully_culled`] skips, for debug builds to check it adds nothing.
+/// Whether the interior block at `i` and every neighbour its faces take light from have no light the cave test
+/// counts, so a block removed as cave culls all its faces.
+fn dark(ctx: &Ctx, i: usize) -> bool {
+    let Some(mut slots) = ctx.states.get(ctx.view.state_at(i)).light_slots else { return false };
+    let dark_at = |i: usize| {
+        let (sky, block) = ctx.view.light_at(i);
+        sky == 0 && (block == 0 || !ctx.settings.cave_detection_uses_block_light)
+    };
+    if !dark_at(i) {
+        return false;
+    }
+    while slots != 0 {
+        let slot = slots.trailing_zeros() as u8;
+        slots &= slots - 1;
+        if !dark_at(ctx.view.step(i, slot)) {
+            return false;
+        }
+    }
+    true
+}
+
+/// The full render of a block [`fully_culled`] or [`dark`] skips, for debug builds to check it adds nothing.
 fn renders_nothing(ctx: &Ctx, block: &Block) -> bool {
     let (mut out, mut color) = (TileModel::default(), Color::default());
     render_block(ctx, block, &mut out, &mut color).is_ok() && out.faces() == 0 && color.a == 0.0

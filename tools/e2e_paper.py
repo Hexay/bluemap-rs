@@ -1,55 +1,38 @@
 """End-to-end test of the Paper plugin (docs/13) on a real Paper 26.3 server, plus an optional comparison run with
 upstream BlueMap 5.28 on a copy of the same world.
 
-    py -3 tools/e2e_paper.py [--skip-build] [--keep] [--no-upstream]
+    py -3 tools/e2e_paper.py [--skip-build | --core BIN | --jar JAR] [--keep] [--no-upstream]
 
-Builds the core (release) and the plugin jars, starts Paper with our jar + BlueBorder (marker addon) + server-side
+Windows or Linux (host target from tools/build_core.py; on Linux the static musl core). Builds the core and the
+plugin jars (or stages a prebuilt `--core`, or tests a given `--jar`), starts Paper with our jar + BlueBorder (marker addon) + server-side
 bots, then checks: the core becomes ready, `/bluemap` commands answer on the console, the webserver serves the
 webapp and a rendered tile, `live/players.json` lists a bot, BlueBorder's markers reach `live/markers.json`,
-`/bluemap reload` works, a killed core is respawned, and stopping the server leaves no core process. Results and
+`/bluemap reload` works, a killed core is respawned, stopping the server leaves no core process, and neither does
+SIGKILLing the JVM (stdin EOF). Results and
 captured files go to work/e2e-paper/out/.
 """
 import argparse
 import json
-import os
 import shutil
-import subprocess
 import sys
-import time
 from pathlib import Path
 
-from paper_server import E2E, Paper, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, rss_mib
-from paths import EXE, ROOT, WINDOWS, jdk_dir
+from build_core import build_jars, host_jar, stage_host_core
+from e2e_server import (E2E, Paper, check, fetch, fixture_world, get, json_get, kill, pid_alive, poll, prepare, report,
+                        rss_mib)
 
-PLATFORM = ROOT / "platforms" / "paper"
-TARGET = "windows-x64" if WINDOWS else "linux-x64"
 OUT = E2E / "out"
-RESULTS: list[tuple[str, bool, str]] = []
 
 
-def check(name: str, ok, detail: str = "") -> bool:
-    RESULTS.append((name, bool(ok), detail))
-    print(f"[{'PASS' if ok else 'FAIL'}] {name} {detail}", flush=True)
-    return bool(ok)
-
-
-def build() -> Path:
-    subprocess.run(["cargo", "build", "--release", "-p", "bm-cli"], cwd=ROOT, check=True)
-    native = PLATFORM / "natives" / TARGET / f"bluemap-core{EXE}"
-    native.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "target" / "release" / f"bluemap{EXE}", native)
-    gradlew = PLATFORM / ("gradlew.bat" if WINDOWS else "gradlew")
-    env = {**os.environ, "JAVA_HOME": str(jdk_dir(21))}
-    subprocess.run([str(gradlew), "build", "--no-daemon", "--console=plain", "-q", "-Dorg.gradle.jvmargs=-Xmx1g"],
-                   cwd=PLATFORM, check=True, env=env)
+def build(core: Path | None, jobs: int | None) -> Path:
+    """Stages the core (built here via tools/build_core.py, or a prebuilt `core`) and builds the plugin jars."""
+    stage_host_core(core, jobs)
+    build_jars(("paper",))
     return plugin_jar()
 
 
 def plugin_jar() -> Path:
-    jars = sorted((PLATFORM / "build" / "libs").glob(f"*-{TARGET}.jar"))
-    if not jars:
-        sys.exit(f"no {TARGET} plugin jar in {PLATFORM / 'build' / 'libs'}; run without --skip-build")
-    return jars[-1]
+    return host_jar("paper")
 
 
 def clock(m) -> int:
@@ -90,6 +73,8 @@ def run_ours(jar: Path, fresh: bool) -> Path:
 
         server.command("bluemap", r"BlueMap Status|render-threads", 30)
         check("/bluemap status", True)
+        server.wait_for(r"Rendering pauses while the server's average tick time", 30, since_start=True)
+        check("core receives ServerLoad (MSPT)", True)
         server.command("bluemap maps", r"BlueMap Maps", 30)
         check("/bluemap maps", True)
 
@@ -114,6 +99,7 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         around = [f"maps/{map_id}/tiles/0/x{x}/z{z}.prbm" for x in range(-9, 10) for z in range(-9, 10)]
         hires = poll(lambda: next((p for p in around if get(p)[0] == 200), None), 300, 5)
         check("hires tile served", hires, str(hires))
+        diagnostic_commands(server, folder, map_id)
 
         server.send("start 1 none")
         bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
@@ -144,7 +130,46 @@ def run_ours(jar: Path, fresh: bool) -> Path:
         check("server stopped", code == 0, f"exit {code}")
         if last:
             check("no orphan core process", poll(lambda: not pid_alive(last), 30), f"pid {last}")
+    check("tasks.dat written on stop", any((folder / "bluemap").rglob("tasks.dat")))
     return folder
+
+
+def diagnostic_commands(server: Paper, folder: Path, map_id: str) -> None:
+    """troubleshoot / debug / storages from the console (no sender world, so only the explicit-argument forms)."""
+    server.command("bluemap troubleshoot", r"Troubleshooting", 30)
+    check("/bluemap troubleshoot", True)
+    server.command(f"bluemap troubleshoot {map_id} 0 0", r"Troubleshooting", 30)
+    check("/bluemap troubleshoot <map> <x> <z>", True)
+    server.command(f"bluemap debug world {map_id} 0 64 0", r"World-Info \(debug\)", 30)
+    check("/bluemap debug world <map> <x> <y> <z>", server.wait_for(r"block: minecraft:", 10))
+    server.command(f"bluemap debug map {map_id} 0 0", r"Map-Info \(debug\)", 30)
+    check("/bluemap debug map <map> <x> <z>", server.wait_for(r"state: ", 10))
+    server.command("bluemap debug dump", r"created at: ", 30)
+    check("/bluemap debug dump", any(folder.rglob("dump.json")))
+    texts = command_texts(server, map_id)
+    check("/bluemap storages", texts["bluemap storages"])
+    check("/bluemap storages <storage>", any("Type: bluemap:file" in l for l in texts["bluemap storages file"]))
+    save("rs-commands.json", json.dumps(texts, indent=1, ensure_ascii=False).encode())
+
+
+# console output that only depends on configs and the world on disk, compared verbatim with upstream
+STABLE_COMMANDS = [("bluemap storages", r"BlueMap Storages"), ("bluemap storages file", r"BlueMap Storage 'file'"),
+                   ("bluemap debug world {map} 0 64 0", r"World-Info \(debug\)")]
+
+
+def command_texts(server: Paper, map_id: str) -> dict[str, list[str]]:
+    return {cmd: server.command_text(cmd.format(map=map_id), header, 30) for cmd, header in STABLE_COMMANDS}
+
+
+def run_jvm_kill(folder: Path) -> None:
+    """Restart on the same folder, SIGKILL the JVM: the core must exit by itself (stdin EOF / parent watchdog)."""
+    server = Paper(folder)
+    try:
+        server.wait_for(r"\[BlueMap\] Loaded!", 600, since_start=True)
+        pid = poll(lambda: (p := core_pid(folder)) and pid_alive(p) and p, 30)
+    finally:
+        server.kill()
+    check("core exits after JVM SIGKILL", pid and poll(lambda: not pid_alive(pid), 30), f"pid {pid}")
 
 
 def run_upstream(world: Path) -> None:
@@ -158,11 +183,17 @@ def run_upstream(world: Path) -> None:
         save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
         poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
         save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+        texts = command_texts(server, map_id)
+        save("upstream-commands.json", json.dumps(texts, indent=1, ensure_ascii=False).encode())
     finally:
         server.stop()
     for name in ["players-empty.json", "markers.json"]:
         ours, theirs = (OUT / f"rs-{name}").read_bytes(), (OUT / f"upstream-{name}").read_bytes()
         check(f"{name} byte-identical to upstream", ours == theirs, f"{len(ours)} vs {len(theirs)} B")
+    for cmd, lines in json.loads((OUT / "rs-commands.json").read_text(encoding="utf-8")).items():
+        other = texts[cmd]
+        diff = [f"{a!r} vs {b!r}" for a, b in zip(lines, other) if a != b] or len(lines) != len(other)
+        check(f"/{cmd.replace('{map}', '<map>')} text identical to upstream", not diff, str(diff)[:300] if diff else "")
     compare_configs(E2E / "rs" / "plugins" / "BlueMap", folder / "plugins" / "BlueMap")
 
 
@@ -187,17 +218,18 @@ def main() -> None:
     ap.add_argument("--skip-build", action="store_true")
     ap.add_argument("--keep", action="store_true", help="reuse the server folder (world, configs) of the last run")
     ap.add_argument("--no-upstream", action="store_true")
+    ap.add_argument("--core", type=Path, help="stage this prebuilt core binary instead of building one")
+    ap.add_argument("--jar", type=Path, help="test this plugin jar (no build)")
+    ap.add_argument("--jobs", "-j", type=int, help="cargo jobs")
     args = ap.parse_args()
-    jar = plugin_jar() if args.skip_build else build()
+    jar = args.jar or (plugin_jar() if args.skip_build else build(args.core, args.jobs))
     if OUT.exists():
         shutil.rmtree(OUT)
     folder = run_ours(jar, fresh=not args.keep)
+    run_jvm_kill(folder)
     if not args.no_upstream:
         run_upstream(folder / "world")
-    failed = [r for r in RESULTS if not r[1]]
-    print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
-    (OUT / "results.json").write_text(json.dumps(RESULTS, indent=1))
-    sys.exit(1 if failed else 0)
+    sys.exit(report(OUT))
 
 
 if __name__ == "__main__":

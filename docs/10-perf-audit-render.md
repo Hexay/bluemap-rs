@@ -15,6 +15,36 @@ The profile evidence came from the coordinator, for a 22-thread render:
 
 Every one of these has a source-level cause below.
 
+## Measured (2026-10-06, BlueMap 5.27, JDK 25, `structures` fixture: 31 regions, 22-thread machine)
+
+Scripts are in `docs/perf-exp/`: `java_bench.py` runs a clean force-render, and `agg.py`, `incl.py` and `park.py` aggregate JFR stacks. Each configuration was run once, on a machine that was not idle.
+
+| threads | wall | CPU | avg busy cores | peak RSS |
+|---|---|---|---|---|
+| 22 | 307 s | 1108 s | 3.6 | 1067 MB |
+| 4 | 285 s | 882 s | 3.1 | 858 MB |
+
+- **Adding threads buys nothing past about 4.** This is the #1 convoy below.
+- Render-thread monitor-enter time in JFR was 1307 thread-s:
+  - 983 s at `RenderManager.doWork` `synchronized(renderTasks)`;
+  - 120 s at `BmMap.save` called from `complete()`;
+  - about 150 s at `hasMoreWork`.
+- Inclusive CPU by category (first matching frame from the leaf):
+
+  | Category | Share |
+  |---|---|
+  | Caffeine lookups | 38% |
+  | Model render | 18% |
+  | Neighbourhood/block access | 13% |
+  | PRBM write | 11% |
+  | `getChunk` | 7.6% |
+  | Lowres | 6.7% |
+  | Region read/decompress/NBT | **1.7%** |
+
+  World I/O is not the bottleneck.
+- G1 live set after GC was about 380–440 MB, and the heap peaked around 840 MB.
+- The output is deterministic: md5 matches across runs.
+
 ## Ranked summary
 
 | # | Finding | Where | Est. impact | Kind |

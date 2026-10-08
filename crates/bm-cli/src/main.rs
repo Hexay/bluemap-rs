@@ -1,12 +1,18 @@
 //! `bluemap`: drop-in for `java -jar bluemap-cli.jar` (`BlueMapCLI.main`): same options, config folder handling and
 //! exit codes (1 configuration/IO error, 2 missing resources).
 
+#[cfg(target_env = "musl")]
+mod alloc;
 mod args;
 mod convert;
+mod eta;
 mod log;
 mod plugin;
 mod render;
+mod resume;
 mod shutdown;
+mod tasks_dat;
+mod throttle;
 mod watch;
 mod web;
 
@@ -20,7 +26,15 @@ use bm_engine::{ResourceOptions, Service, TileUpdateStrategy};
 use clap::Parser;
 use shutdown::Shutdown;
 
+/// bluemap-rs version: a release build's (`BLUEMAP_RS_VERSION` from `tools/build_core.py`), else Cargo's.
+pub const VERSION: &str = match option_env!("BLUEMAP_RS_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 fn main() -> ExitCode {
+    #[cfg(target_env = "musl")]
+    alloc::tune();
     let args = match Args::try_parse() {
         Ok(args) => args,
         Err(e) => {
@@ -70,7 +84,7 @@ fn run(args: &Args) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     if args.version {
-        println!("{}\nbluemap-rs {}", bm_engine::BLUEMAP_VERSION, env!("CARGO_PKG_VERSION"));
+        println!("{}\nbluemap-rs {VERSION}", bm_engine::BLUEMAP_VERSION);
         return Ok(ExitCode::SUCCESS);
     }
     let config_folder = config_folder(args);
@@ -82,17 +96,13 @@ fn run(args: &Args) -> Result<ExitCode> {
     }
     let packs = config_folder.join("packs");
     std::fs::create_dir_all(&packs).with_context(|| format!("create {}", packs.display()))?;
+    bm_engine::find_java_addons(&packs).iter().for_each(|a| log::warn(&a.warning()));
 
     let config = BlueMapConfig::load(&ConfigOptions::cli(&config_folder))?;
     if let Some(file) = &config.core.log.file {
         log::add_formatted_file(file, config.core.log.append).with_context(|| format!("log file {file}"))?;
     }
-    let threads = config.core.resolve_render_thread_count(std::thread::available_parallelism().map_or(1, |n| n.get()));
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("bluemap-render-{i}"))
-        .build_global()
-        .context("start render threads")?;
+    throttle::build_render_pool(&config.core, false).context("start render threads")?;
     let options = ResourceOptions {
         minecraft_version: args.mc_version.clone(),
         packs_folder: Some(packs),
@@ -119,7 +129,9 @@ fn run(args: &Args) -> Result<ExitCode> {
         } else {
             TileUpdateStrategy::ForceNone
         };
-        ok = render::run(&service, maps, failed, strategy, args.watch, &shutdown)?;
+        let plan = resume::RenderPlan::new(strategy, &service.config.core.data, args.restart);
+        let web = webserver.as_ref().map(web::Webserver::maps);
+        ok = render::run(&service, maps, failed, plan, args.watch, web, &shutdown)?;
     } else {
         if args.markers {
             update_markers(&service, args.maps.as_deref());
