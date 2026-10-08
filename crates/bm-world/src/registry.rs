@@ -37,7 +37,7 @@ impl BlockState {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct StatesInner {
     by_key: FxHashMap<Box<str>, StateId>,
     states: Vec<Arc<BlockState>>,
@@ -59,6 +59,11 @@ impl Default for BlockStates {
 }
 
 impl BlockStates {
+    /// A copy of the registry as it is now; ids stay the same, later interning goes to `self` only.
+    pub fn snapshot(&self) -> Self {
+        Self { inner: RwLock::new(self.inner.read().unwrap().clone()) }
+    }
+
     /// Id of `name` with `properties` (any order; sorted in place). A name without namespace gets `minecraft:`.
     pub fn intern(&self, name: &str, properties: &mut [(&str, &str)]) -> StateId {
         properties.sort_unstable_by_key(|&(k, _)| k);

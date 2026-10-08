@@ -20,8 +20,7 @@ fn check(fx: &str, dimension: &str) {
         eprintln!("skipping {fx}: fixture not found");
         return;
     }
-    let f = Fixture::load(&world, dimension, &golden, None, None, &jar, &fixture::extensions_dir())
-        .unwrap();
+    let mut f = Fixture::load(&world, dimension, &golden, None, None, &jar, &fixture::extensions_dir()).unwrap();
     let tiles = f.golden_tiles().unwrap();
     let area = f.load_area(&tiles);
     let rendered = f.render(&area, &tiles, &AtomicU64::new(0)).unwrap();
@@ -41,6 +40,23 @@ fn check(fx: &str, dimension: &str) {
         bad.len(),
         bad[..bad.len().min(10)].join("\n")
     );
+
+    // the lowres-only path (maps without hires), with the fixture's settings and with the top-only ones it runs under
+    let lowres = f.render_lowres(&area, &tiles, &AtomicU64::new(0)).unwrap();
+    assert_same_columns(fx, &rendered, &lowres);
+    let (checked, bad) = f.check_lowres(&lowres).unwrap();
+    assert!(bad.is_empty(), "{fx}: lowres-only: {} of {checked} lowres columns differ", bad.len());
+    f.settings.render_top_only = true;
+    let full = f.render(&area, &tiles, &AtomicU64::new(0)).unwrap();
+    let lowres = f.render_lowres(&area, &tiles, &AtomicU64::new(0)).unwrap();
+    assert_same_columns(fx, &full, &lowres);
+}
+
+fn assert_same_columns(fx: &str, full: &[fixture::Rendered], lowres: &[fixture::Rendered]) {
+    assert_eq!(full.len(), lowres.len());
+    for (a, b) in full.iter().zip(lowres) {
+        assert!(a.tile == b.tile && a.columns == b.columns, "{fx}: lowres-only columns differ in {:?}", a.tile);
+    }
 }
 
 #[test]

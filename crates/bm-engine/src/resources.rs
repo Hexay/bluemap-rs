@@ -34,34 +34,36 @@ pub struct Resources {
 }
 
 impl Resources {
+    /// The version manifest download is network-bound (~0.2 s), so with a configured version the packs of its local
+    /// jar are loaded meanwhile, without side effects, and kept when the manifest selects that same jar.
     pub fn load(config: &BlueMapConfig, options: &ResourceOptions) -> Result<Self> {
         let data = &config.core.data;
         std::fs::create_dir_all(data).map_err(io("create", data))?;
-        let minecraft =
-            MinecraftVersion::load(options.minecraft_version.as_deref(), data, config.core.accept_download)
-                .map_err(|e| match e {
-                    e @ bm_resources::Error::DownloadNotAccepted(_) => Error::MissingResources(e),
-                    e => Error::Resources(e),
-                })?;
-        if let Some(packs) = &options.packs_folder {
-            std::fs::create_dir_all(packs).map_err(io("create", packs))?;
-        }
         let roots = PackRootsConfig {
             packs_folder: options.packs_folder.clone(),
             mods_folder: options.mods_folder.clone(),
             scan_for_mod_resources: config.core.scan_for_mod_resources,
             data_root: data.clone(),
-            resource_extensions: write_resource_extensions(data)?,
+            resource_extensions: data.join("resourceExtensions.zip"),
         };
-        let resource_roots = pack_roots(&roots, &[], &minecraft.resource_pack).map_err(io("list packs in", data))?;
-        let mut opened = OpenedRoots::default();
-        let resource_packs = load_order_in(&mut opened, &resource_roots, minecraft.resource_pack_version);
-        let data_roots = pack_roots(&roots, &[], &minecraft.data_pack).map_err(io("list packs in", data))?;
-        let data_packs = load_order_in(&mut opened, &data_roots, minecraft.data_pack_version);
-        let pack = ResourcePack::load(&resource_packs, &data_packs);
-
-        let states = Arc::new(BlockStates::default());
-        load_default_states(&states, &resource_packs);
+        let id = options.minecraft_version.as_deref();
+        let (minecraft, guess) = std::thread::scope(|s| {
+            let fetch = s.spawn(|| MinecraftVersion::load(id, data, config.core.accept_download));
+            let guess = id.and_then(|id| guess_packs(&roots, id));
+            (fetch.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)), guess)
+        });
+        let minecraft = minecraft.map_err(|e| match e {
+            e @ bm_resources::Error::DownloadNotAccepted(_) => Error::MissingResources(e),
+            e => Error::Resources(e),
+        })?;
+        if let Some(packs) = &options.packs_folder {
+            std::fs::create_dir_all(packs).map_err(io("create", packs))?;
+        }
+        write_resource_extensions(&roots.resource_extensions)?;
+        let (pack, states) = match guess {
+            Some((guessed, loaded)) if guessed == minecraft => loaded,
+            _ => load_packs(&roots, &minecraft).map_err(io("list packs in", data))?,
+        };
         Ok(Self { minecraft, pack, states, biomes: Arc::new(Biomes::default()), roots })
     }
 
@@ -76,15 +78,51 @@ impl Resources {
             .filter_map(|e| e.ok().map(|e| e.path()))
             .collect();
         world_packs.sort();
+        // no extra roots: the shared pack roots, so the shared datapack (reloading costs ~60 ms, mostly the jar)
+        if world_packs.is_empty() {
+            return Ok(self.pack.datapack.clone());
+        }
         let roots = pack_roots(&self.roots, &world_packs, &self.minecraft.data_pack).map_err(io("list", &folder))?;
         Ok(DataPack::load(&load_order(&roots, self.minecraft.data_pack_version)).0)
     }
 }
 
-fn write_resource_extensions(data: &Path) -> Result<PathBuf> {
-    let file = data.join("resourceExtensions.zip");
-    std::fs::write(&file, RESOURCE_EXTENSIONS).map_err(io("write", &file))?;
-    Ok(file)
+fn write_resource_extensions(file: &Path) -> Result<()> {
+    std::fs::write(file, RESOURCE_EXTENSIONS).map_err(io("write", file))
+}
+
+/// The packs `minecraft` selects, baked, and the block-state registry with their default states. The bundled pack
+/// is opened from memory: the same bytes and origin as the file [`write_resource_extensions`] writes.
+fn load_packs(roots: &PackRootsConfig, minecraft: &MinecraftVersion) -> std::io::Result<(ResourcePack, Arc<BlockStates>)> {
+    let resource_roots = pack_roots(roots, &[], &minecraft.resource_pack)?;
+    let data_roots = pack_roots(roots, &[], &minecraft.data_pack)?;
+    let mut opened = OpenedRoots::default();
+    let extensions = &roots.resource_extensions;
+    if let Ok(pack) = Pack::zip(RESOURCE_EXTENSIONS.into(), extensions.display().to_string().into()) {
+        opened.insert(extensions.clone(), pack);
+    }
+    let resource_packs = load_order_in(&mut opened, &resource_roots, minecraft.resource_pack_version);
+    let data_packs = load_order_in(&mut opened, &data_roots, minecraft.data_pack_version);
+    let pack = ResourcePack::load(&resource_packs, &data_packs);
+    let states = Arc::new(BlockStates::default());
+    load_default_states(&states, &resource_packs);
+    Ok((pack, states))
+}
+
+/// [`load_packs`] for the local jar of version `id`, as the manifest selects it for any version since 1.19.4 (or
+/// without a manifest); `None` when that jar isn't there yet.
+fn guess_packs(roots: &PackRootsConfig, id: &str) -> Option<(MinecraftVersion, (ResourcePack, Arc<BlockStates>))> {
+    let jar = bm_resources::client_jar::client_jar_path(&roots.data_root, id).ok().filter(|j| j.is_file())?;
+    let versions = bm_resources::client_jar::PackVersions::read(&jar).ok()?;
+    let minecraft = MinecraftVersion {
+        id: id.to_owned(),
+        resource_pack: jar.clone(),
+        resource_pack_version: versions.resource,
+        data_pack: jar,
+        data_pack_version: versions.data,
+    };
+    let loaded = load_packs(roots, &minecraft).ok()?;
+    Some((minecraft, loaded))
 }
 
 /// `data/<namespace>/defaultBlockstates.json` of every pack; higher-priority packs come first and win.

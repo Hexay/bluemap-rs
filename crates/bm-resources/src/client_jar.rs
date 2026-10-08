@@ -59,6 +59,9 @@ impl PackVersions {
 
 /// One entry of a zip on disk, reading only its directory and that entry (a client jar is ~40 MB).
 fn zip_entry_string(zip: &Path, name: &str) -> Result<Option<String>> {
+    if let Some(s) = crate::zip_scan::entry_string(zip, name) {
+        return Ok(Some(s));
+    }
     let file = std::io::BufReader::new(std::fs::File::open(zip)?);
     let mut archive = zip::ZipArchive::new(file).map_err(|e| Error::Pack(format!("{}: {e}", zip.display())))?;
     let Ok(mut entry) = archive.by_name(name) else { return Ok(None) };

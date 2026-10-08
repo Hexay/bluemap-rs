@@ -1,8 +1,10 @@
 //! BlueMap's hires mesher (`core/map/hires`, docs/03-rendering.md §2): renders a hires tile from a loaded
 //! [`bm_world::ChunkArea`] into a [`bm_format::prbm::TileModel`], and reports the per-column colour, height and light
 //! BlueMap feeds its lowres layer. Arithmetic follows Java's float/double/cast order so tiles match BlueMap's.
+//! Maps without hires tiles get the columns alone from [`HiresRenderer::render_lowres`], with no geometry built.
 
 mod block_pass;
+mod bounds;
 mod context;
 mod flags;
 mod liquid;

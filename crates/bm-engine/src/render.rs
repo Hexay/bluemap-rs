@@ -8,7 +8,7 @@ use bm_format::grid::Tile;
 use bm_map::renderstate::{Action, TileState};
 use bm_render::{HiresRenderer, StateCache, TileBuffers};
 use bm_storage::GridKey;
-use bm_world::{ChunkArea, ChunkSlot};
+use bm_world::{BlockStates, ChunkArea, ChunkSlot};
 use rayon::prelude::*;
 
 use crate::actions::{TileJob, chunk_range};
@@ -37,6 +37,8 @@ pub(crate) struct RegionRender<'a> {
     pub resources: &'a Resources,
     pub cache: &'a StateCache<'a>,
     pub area: &'a ChunkArea,
+    /// The block states as of loading `area`: the shared registry grows while the next region loads.
+    pub registry: &'a BlockStates,
     pub queue: &'a SyncSender<Msg>,
 }
 
@@ -84,8 +86,9 @@ impl RegionRender<'_> {
                     self.unrender(job.tile)?;
                     return Ok((Outcome::Skipped, failed));
                 }
-                renderer.render_tile(self.area, &self.resources.states, &self.ctx.hires_grid, job.tile, buf)?;
+                let (states, grid) = (self.registry, &self.ctx.hires_grid);
                 if self.ctx.save_hires() {
+                    renderer.render_tile(self.area, states, grid, job.tile, buf)?;
                     buf.model.write_prbm(prbm)?;
                     if !self.stored_hires_equals(job.tile, prbm, stored) {
                         self.ctx.storage.write_grid(GridKey::Hires, job.tile, prbm)?;
@@ -94,6 +97,8 @@ impl RegionRender<'_> {
                     if let Some(listener) = &self.ctx.tile_listener {
                         listener(job.tile, 0);
                     }
+                } else {
+                    renderer.render_lowres(self.area, states, grid, job.tile, buf)?;
                 }
                 let columns = buf.columns.iter().map(|c| {
                     let mut color = c.color;

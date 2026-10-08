@@ -122,18 +122,36 @@ impl<S: LowresStore> LowresTileManager<S> {
 
     /// Saves the dirty tiles of `lod` that `select` picks, in tile order, and writes each one's downsampled core into
     /// `lod + 1`, where it stays dirty. Saved tiles leave memory; a later write reloads them from the store.
-    /// A tile whose save or cascade fails stays dirty, so a later flush retries it.
+    /// A tile whose save or cascade fails stays dirty, so a later flush retries it; the first failure is returned.
     pub fn flush_lod(&mut self, lod: u32, mut select: impl FnMut(Tile) -> bool) -> Result<(), S> {
         let mut tiles: Vec<Tile> = self.dirty_tiles(lod).filter(|&t| select(t)).collect();
         tiles.sort_unstable();
-        for tile in tiles {
-            let dirty = self.layers[lod as usize - 1].remove(&tile).expect("listed as dirty");
-            if let Err(e) = self.save_and_cascade(lod, tile, &dirty) {
-                self.layers[lod as usize - 1].insert(tile, dirty);
-                return Err(e);
+        let layer = &mut self.layers[lod as usize - 1];
+        let dirty: Vec<(Tile, Dirty, bool)> = tiles
+            .into_iter()
+            .map(|t| {
+                let d = layer.remove(&t).expect("listed as dirty");
+                let unchanged = d.loaded == Some(pixel_hash(&d.data));
+                (t, d, unchanged)
+            })
+            .collect();
+        let changed: Vec<(Tile, &LowresTile)> =
+            dirty.iter().filter(|(.., unchanged)| !unchanged).map(|(t, d, _)| (*t, &d.data)).collect();
+        let mut saved = self.store.save_all(lod, &changed).into_iter();
+        let mut first_err = None;
+        for (tile, d, unchanged) in dirty {
+            let result = if unchanged {
+                self.store.unchanged(lod, tile);
+                Ok(())
+            } else {
+                saved.next().expect("one result per changed tile").map_err(|source| LowresLayerError::Save { lod, tile, source })
+            };
+            if let Err(e) = result.and_then(|()| self.cascade(lod, tile, &d.data)) {
+                self.layers[lod as usize - 1].insert(tile, d);
+                first_err.get_or_insert(e);
             }
         }
-        Ok(())
+        first_err.map_or(Ok(()), Err)
     }
 
     /// Drops every unsaved change (`LowresTileManager.discard`, used by map purges).
@@ -141,12 +159,8 @@ impl<S: LowresStore> LowresTileManager<S> {
         self.layers.iter_mut().for_each(FxHashMap::clear);
     }
 
-    fn save_and_cascade(&mut self, lod: u32, tile: Tile, Dirty { data, loaded }: &Dirty) -> Result<(), S> {
-        if *loaded == Some(pixel_hash(data)) {
-            self.store.unchanged(lod, tile);
-        } else {
-            self.store.save(lod, tile, data).map_err(|source| LowresLayerError::Save { lod, tile, source })?;
-        }
+    /// Writes a saved tile's downsampled core into `lod + 1`.
+    fn cascade(&mut self, lod: u32, tile: Tile, data: &LowresTile) -> Result<(), S> {
         if lod == self.lod_count() {
             return Ok(());
         }
