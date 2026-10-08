@@ -52,7 +52,10 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
 - Acceptance (our CLI on Java's fixture configs, webroot vs Java's, incremental, drop-in): `py -3 tools/accept.py`
-  (`--watch <fx>` for `-u`); optimized storage: `py -3 tools/accept_optimized.py`. A hung command times out and
+  (`--watch <fx>` for `-u`); optimized storage: `py -3 tools/accept_optimized.py`
+- Real-scale world (4096², testbox, under `flock ~/bench.lock`): `py -3 tools/real_world.py gen|edit|render|update|compare`
+  (docs/14)
+- Older MC versions (world per version's server, Java 5.28 vs ours): `py -3 tools/accept_versions.py [mc …]`. A hung command times out and
   is minidumped with its stacks (`tools/hangdump.py`, any pid: `py -3 tools/hangdump.py <pid>`)
 - SQL servers (portable MariaDB/MySQL/PostgreSQL in `work/db`): `py -3 tools/dbs.py start|stop|status [mariadb mysql postgres]`;
   tests: `BM_TEST_MYSQL_URL=… BM_TEST_POSTGRES_URL=… cargo test -p bm-storage --test sql_remote -- --ignored`; vs Java
