@@ -1,8 +1,11 @@
-//! `javax.imageio` PNG round trip: the `BufferedImage` model `PNGImageReader` builds from a PNG, and the exact
-//! bytes `ImageIO.write(image, "png", out)` (`PNGImageWriter`, default params and metadata) produces for it.
+//! `javax.imageio` PNG round trip: the `BufferedImage` model `PNGImageReader` builds from a PNG (and its `getRGB`),
+//! and the exact bytes `ImageIO.write(image, "png", out)` (`PNGImageWriter`, default params and metadata) produces
+//! for it.
 //! BlueMap embeds those bytes in `textures.json`, so they must match byte for byte.
 
+mod gray_lut;
 mod read;
+mod rgb;
 mod write;
 mod zlib;
 

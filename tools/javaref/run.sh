@@ -1,5 +1,5 @@
 #!/bin/sh
-# Regenerates bm-java/bm-math/bm-resources/bm-map test data from the real Java code.
+# Regenerates bm-java/bm-math/bm-resources/bm-map test data (and bm-java's gray LUTs) from the real Java code.
 # Usage: sh tools/javaref/run.sh <BlueMap checkout> <flow-math 1.0.3 sources (unpacked -sources.jar)>
 # flow-math sources: https://repo1.maven.org/maven2/com/flowpowered/flow-math/1.0.3/flow-math-1.0.3-sources.jar
 set -e
@@ -21,6 +21,9 @@ MODEL_REF="$ROOT/crates/bm-resources/src/model/java_ref.rs"
 # Double/Float.toString and (Concurrent)HashMap order (plain JDK)
 "$J/javac" -nowarn -d "$OUT" "$ROOT/tools/javaref/JdkRef.java"
 "$J/java" -cp "$OUT" JdkRef "$ROOT/crates/bm-java/tests/data"
+# PNG corpus (every colour type / bit depth) through ImageIO.read + getRGB + ImageIO.write, and the gray LUTs
+"$J/javac" -nowarn -d "$OUT" "$ROOT/tools/javaref/PngRef.java"
+"$J/java" -cp "$OUT" PngRef "$ROOT/crates/bm-resources/tests/data" "$ROOT/crates/bm-java/src/png"
 # render masks: the shipped 5.28 classes (sources need lombok); own out dir so no source-compiled class shadows the jar
 CLI=$ROOT/work/downloads/bluemap-5.28-cli.jar
 mkdir -p "$OUT/mask" "$ROOT/crates/bm-map/tests/data"

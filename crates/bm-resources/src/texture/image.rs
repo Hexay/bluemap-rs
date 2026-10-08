@@ -3,7 +3,7 @@
 
 use std::io::Cursor;
 
-use bm_java::png::{JavaImage, Model, RawPng};
+use bm_java::png::{JavaImage, RawPng};
 use bm_math::Color;
 
 use super::Error;
@@ -53,7 +53,8 @@ pub fn decode_png(bytes: &[u8]) -> Result<DecodedPng, Error> {
 
 impl DecodedPng {
     pub fn new(java: JavaImage) -> Self {
-        Self { image: rgb_of(&java), java }
+        let image = RgbaImage { width: java.width, height: java.height, pixels: java.rgba8() };
+        Self { image, java }
     }
 
     /// A `TYPE_INT_ARGB` image.
@@ -73,40 +74,6 @@ impl DecodedPng {
         self.java.write_png_into(&mut out);
         out
     }
-}
-
-/// `getRGB` of every pixel.
-fn rgb_of(java: &JavaImage) -> RgbaImage {
-    let bits = java.model.bits();
-    let to8 = |s: u16| if bits == 16 { sixteen_to_eight(s) } else { s as u8 };
-    let s = &java.samples;
-    let pixels = match &java.model {
-        Model::Indexed { rgb, alpha, .. } => s
-            .iter()
-            .flat_map(|&i| {
-                let [r, g, b] = rgb[i as usize];
-                [r, g, b, alpha.as_ref().map_or(255, |a| a[i as usize])]
-            })
-            .collect(),
-        Model::Gray { bits } => {
-            // sub-byte gray is an IndexColorModel ramp i*255/(2^bits-1)
-            let max = (1u32 << bits) - 1;
-            let gray = |v: u16| if *bits < 8 { (v as u32 * 255 / max) as u8 } else { to8(v) };
-            s.iter().flat_map(|&v| [gray(v); 3].into_iter().chain([255])).collect()
-        }
-        Model::GrayAlpha { .. } => {
-            s.as_chunks::<2>().0.iter().flat_map(|&[v, a]| [to8(v); 3].into_iter().chain([to8(a)])).collect()
-        }
-        Model::Rgb { .. } => s.as_chunks::<3>().0.iter().flat_map(|&[r, g, b]| [to8(r), to8(g), to8(b), 255]).collect(),
-        Model::Rgba { .. } => s.iter().map(|&v| to8(v)).collect(),
-    };
-    RgbaImage { width: java.width, height: java.height, pixels }
-}
-
-/// `ComponentColorModel` scaling a 16-bit sample to 8 bits. 16-bit gray goes through Java's linear-gray
-/// colour space upstream (JDK bug 5051418); that conversion is not replicated.
-fn sixteen_to_eight(v: u16) -> u8 {
-    (v as f32 * (255.0f32 / 65535.0f32) + 0.5) as u8
 }
 
 impl RgbaImage {
