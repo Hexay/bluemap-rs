@@ -9,8 +9,8 @@ use bm_engine::{PauseReason, RenderQueue, RenderTask, TileUpdateStrategy};
 use crate::log;
 
 /// Measured peak RSS on fixture `structures`, rounded up (docs/15 §memory: command and numbers).
-pub const BASE_BYTES: u64 = 400 << 20;
-pub const PER_THREAD_BYTES: u64 = 40 << 20;
+pub const BASE_BYTES: u64 = 160 << 20;
+pub const PER_THREAD_BYTES: u64 = 24 << 20;
 
 pub const CHECK_INTERVAL: Duration = Duration::from_secs(1);
 /// Paused, nothing running and still above the limit this long: the limit is below the idle footprint.
