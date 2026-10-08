@@ -49,7 +49,7 @@ dependencies {
     compileOnly("com.google.code.gson:gson:2.11.0")
     compileOnly("com.flowpowered:flow-math:1.0.3")
     compileOnly("com.mojang:brigadier:1.3.10")
-    compileOnly("org.slf4j:slf4j-api:2.0.17")
+    compileOnly("org.slf4j:slf4j-api:2.0.20")
 
     testImplementation(platform("org.junit:junit-bom:5.13.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
