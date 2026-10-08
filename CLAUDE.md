@@ -38,6 +38,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`); musl builds
   use tuned mimalloc (`src/alloc.rs`)
 - `bm-ipc` — shim↔core wire protocol (stdin/stdout frames, JSON headers); crate docs are the canonical spec
+- Beyond parity (pause reasons, `memory-limit`, MSPT pausing, low-priority render threads): `docs/15`,
+  `crates/bm-cli/src/throttle/`
 - `platforms/` — one Gradle build (run on JDK 25): `common` (loader-neutral shim `bluemaprs.shim`, Java 21, BlueMapAPI
   2.8.1 proxy), `paper` (Java 21), `fabric` (Java 25, no-remap Loom, dedicated servers only; docs/14); jars bundle the
   core from `platforms/natives/<target>/`; version `5.28+rs.<crate>`

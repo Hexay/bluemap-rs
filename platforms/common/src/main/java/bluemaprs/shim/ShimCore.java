@@ -11,6 +11,7 @@ import bluemaprs.shim.ipc.Frame;
 import bluemaprs.shim.ipc.Msg;
 import bluemaprs.shim.ipc.Proto;
 import bluemaprs.shim.ipc.Proto.ReadyInfo;
+import bluemaprs.shim.load.ServerLoadReporter;
 import bluemaprs.shim.markers.MarkerPusher;
 import bluemaprs.shim.players.PlayerRegistry;
 import bluemaprs.shim.skins.PlayerSkinUpdater;
@@ -37,6 +38,7 @@ public final class ShimCore<S> {
     private final MarkerPusher markers;
     private final CommandBridge<S> commands;
     private final PlayerSkinUpdater skins;
+    private final ServerLoadReporter load;
     // not final: constructor lambdas capture them before they are assigned
     private ShimBackend backend;
     private CoreSupervisor supervisor;
@@ -66,6 +68,7 @@ public final class ShimCore<S> {
                 this::hello, this::ready);
         skins = new PlayerSkinUpdater(backend);
         players.setJoinListener(skins::onPlayerJoin);
+        load = new ServerLoadReporter(link, platform::averageTickMillis, log);
     }
 
     public PlayerRegistry players() {
@@ -92,12 +95,14 @@ public final class ShimCore<S> {
     public void start() {
         players.start();
         markers.start();
+        load.start();
         supervisor.start();
     }
 
     /** Server stop: blocks up to ~35 s while the core saves and exits. */
     public void stop() {
         players.stop();
+        load.stop();
         supervisor.stop();
         markers.stop();
         skins.stop();

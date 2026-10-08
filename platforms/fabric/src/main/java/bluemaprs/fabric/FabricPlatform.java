@@ -135,6 +135,13 @@ final class FabricPlatform implements Platform {
         return Msg.GSON.toJson(states).getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Average over the last 100 ticks, as {@code /tick query} shows it. */
+    @Override
+    public double averageTickMillis() {
+        MinecraftServer s = server;
+        return s == null || stopping ? 0 : s.getAverageTickTimeNanos() / 1_000_000.0;
+    }
+
     /** Upstream {@code FabricWorld.persistWorldChanges}: {@code level.save} on the server thread. */
     @Override
     public CompletableFuture<Boolean> saveWorld(String worldId) {

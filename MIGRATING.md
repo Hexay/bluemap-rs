@@ -36,6 +36,10 @@ for, then its own version.
 Requires Java 21 or newer. Built against the Paper 1.21.11 API and verified on Paper 26.3; older 1.21.x servers
 should work but are untested. Folia is wired up but not yet tested.
 
+Unlike upstream, rendering pauses while the server lags: when the average tick time over 10 s goes above 45 ms, and
+resumes below 40 ms. Change this with `render-pause-mspt` / `render-resume-mspt` in `plugin.conf` (`0` turns it off).
+Render threads also run at low OS priority. On Folia only the low priority applies.
+
 ## Fabric mod
 
 1. Stop the server and remove upstream's BlueMap jar from `mods/`. Both are mod `bluemap`, so Fabric would load only
@@ -46,6 +50,7 @@ should work but are untested. Folia is wired up but not yet tested.
 Dedicated servers only, Minecraft 26.1–26.3, Java 25. In singleplayer or on a LAN world the mod does nothing (it logs
 one line), so a modpack can keep it on the client side too. Fabric addons that `depend` on `bluemap` keep working.
 Permission nodes go through fabric-permissions-api (LuckPerms etc.); without one, `/bluemap` needs operator status (the "moderators" level, as upstream).
+Rendering pauses on server lag as on Paper (`render-pause-mspt` / `render-resume-mspt` in `plugin.conf`).
 
 ## Memory and thread limits (Pterodactyl, Pelican and other panels)
 
@@ -53,6 +58,10 @@ The core runs outside the Java heap, so the container's memory limit now covers 
 stock Paper egg starts Java with `-XX:MaxRAMPercentage=95.0`, which leaves the core almost nothing; the host may
 then kill the whole server. Lower the percentage so the core keeps some headroom. How much it needs grows with
 render threads and map size.
+
+To cap the core itself, add `memory-limit: "1G"` (any size like `512M`, `2GiB`) to `core.conf`. The core then
+starts fewer render threads to fit, and pauses rendering while it is above the limit (the map keeps being served).
+See docs/15-beyond-parity.md.
 
 Panels also cap the number of threads per container (default 512 on Pterodactyl), and the JVM and the core share
 that cap. If you hit the cap, lower `render-thread-count` in `core.conf`.

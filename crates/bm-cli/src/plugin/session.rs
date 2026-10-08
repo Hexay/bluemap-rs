@@ -10,8 +10,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use bm_config::generate::{ServerWorld, suggest_render_thread_count};
 use bm_config::{BlueMapConfig, ConfigOptions, Key};
 use bm_engine::{
-    LoadedMaps, LogLevel, MapContext, MapUpdateService, RenderQueue, RenderTask, ResourceOptions, Service, TaskEvent,
-    TileUpdateStrategy, WatchSettings, run_queue,
+    LoadedMaps, LogLevel, MapContext, MapUpdateService, PauseReason, RenderQueue, RenderTask, ResourceOptions, Service,
+    TaskEvent, TileUpdateStrategy, WatchSettings, run_queue,
 };
 use bm_ipc::{CoreWorld, WorldInfo};
 use bm_web::LiveMap;
@@ -98,8 +98,7 @@ impl Session {
             packs_folder: Some(packs),
             mods_folder: hello.mods_folder.clone().filter(|m| m.is_dir()),
         };
-        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-        super::init_render_pool(config.core.resolve_render_thread_count(cores));
+        super::init_render_pool(&config.core);
         let service = Arc::new(Service::new(config, options));
         if let Err(e) = service.resources() {
             if !matches!(e, bm_engine::Error::MissingResources(_)) {
@@ -181,7 +180,7 @@ impl Session {
     /// `RenderManager` with one worker (tiles fan out on the rayon pool); paused while render threads are off.
     fn start_worker(&self) {
         if !self.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled {
-            self.queue.pause();
+            self.queue.pause(PauseReason::Stopped);
             log::info("Render-Threads are STOPPED! Use the command 'bluemap start' to start them.");
         }
         let (queue, maps, service) = (self.queue.clone(), self.maps.clone(), self.service.clone());

@@ -1,5 +1,6 @@
 //! `BlueMap-Plugin-Timer`: periodic save (10 min), `write-markers-interval`, `write-players-interval`, the
-//! debounced settings.json rewrite, delayed `player-render-limit` checks and marker demand, on one 1 Hz thread.
+//! debounced settings.json rewrite, delayed `player-render-limit` checks, marker demand and the `memory-limit`
+//! guard, on one 1 Hz thread.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError};
@@ -10,6 +11,7 @@ use bm_ipc::CoreMsg;
 use super::core::Core;
 use super::live::{marker_demand, next_due};
 use super::ops;
+use crate::throttle::memory::MemoryGuard;
 
 const SAVE_EVERY: Duration = Duration::from_secs(600);
 const SETTINGS_DEBOUNCE: Duration = Duration::from_secs(1);
@@ -27,6 +29,7 @@ pub fn spawn(core: Arc<Core>, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<
             let (mut last_markers, mut last_players) = (Instant::now(), Instant::now());
             let mut demand: Option<Vec<String>> = None;
             let mut session_seen = std::ptr::null();
+            let mut memory: Option<MemoryGuard> = None;
             while !stop.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_secs(1));
                 let Some(s) = core.session() else { continue };
@@ -34,6 +37,14 @@ pub fn spawn(core: Arc<Core>, stop: Arc<AtomicBool>) -> std::thread::JoinHandle<
                 if !std::ptr::eq(Arc::as_ptr(&s), session_seen) {
                     session_seen = Arc::as_ptr(&s);
                     demand = None;
+                    memory = s.service.config.core.memory_limit.map(MemoryGuard::new);
+                }
+                if let (Some(guard), Some(rss)) = (&mut memory, bm_ipc::resident_memory()) {
+                    let was_paused = s.queue.is_paused();
+                    guard.check(rss, &s.queue, Instant::now());
+                    if s.queue.is_paused() != was_paused {
+                        core.state_changed(&s);
+                    }
                 }
                 let config = &s.service.config.plugin;
                 let (markers_every, players_every) =

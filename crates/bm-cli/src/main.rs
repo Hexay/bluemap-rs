@@ -10,6 +10,7 @@ mod log;
 mod plugin;
 mod render;
 mod shutdown;
+mod throttle;
 mod watch;
 mod web;
 
@@ -99,12 +100,7 @@ fn run(args: &Args) -> Result<ExitCode> {
     if let Some(file) = &config.core.log.file {
         log::add_formatted_file(file, config.core.log.append).with_context(|| format!("log file {file}"))?;
     }
-    let threads = config.core.resolve_render_thread_count(std::thread::available_parallelism().map_or(1, |n| n.get()));
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("bluemap-render-{i}"))
-        .build_global()
-        .context("start render threads")?;
+    throttle::build_render_pool(&config.core, false).context("start render threads")?;
     let options = ResourceOptions {
         minecraft_version: args.mc_version.clone(),
         packs_folder: Some(packs),

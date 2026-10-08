@@ -18,11 +18,11 @@ pub fn run(core: &Core, s: &Session, m: &Matched, sender: &CommandSender) -> Lin
     // `position.toVector2(true).toInt()` truncates towards zero
     let sender_pos = sender.position.map(|[x, _, z]| (x as i32, z as i32));
     let result = match (m.get("map").and_then(|id| s.maps.get(id)), m.int("x"), m.int("z")) {
-        (Some(map), Some(x), Some(z)) => troubleshoot(core, s, &[map], Some((x, z))),
+        (Some(map), Some(x), Some(z)) => troubleshoot(s, &[map], Some((x, z))),
         (Some(map), _, _) => world
             .as_ref()
             .map_or(Ok(()), |w| checks::map_has_correct_world(s, &map, w))
-            .and_then(|()| troubleshoot(core, s, &[map], sender_pos)),
+            .and_then(|()| troubleshoot(s, &[map], sender_pos)),
         _ => {
             let maps = match &world {
                 Some(w) => {
@@ -37,7 +37,7 @@ pub fn run(core: &Core, s: &Session, m: &Matched, sender: &CommandSender) -> Lin
                 }
                 None => Ok(s.maps.all()),
             };
-            maps.and_then(|maps| troubleshoot(core, s, &maps, sender_pos))
+            maps.and_then(|maps| troubleshoot(s, &maps, sender_pos))
         }
     };
     match result {
@@ -72,8 +72,8 @@ fn recolor(lines: Lines) -> Lines {
         .collect()
 }
 
-fn troubleshoot(core: &Core, s: &Session, maps: &[Arc<MapContext>], pos: Option<(i32, i32)>) -> Check {
-    checks::render_threads_running(core, s)?;
+fn troubleshoot(s: &Session, maps: &[Arc<MapContext>], pos: Option<(i32, i32)>) -> Check {
+    checks::render_threads_running(s)?;
     if let Some(pos) = pos {
         for map in maps {
             tile_at(s, map, pos)?;

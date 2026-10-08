@@ -396,6 +396,8 @@ from Windows needs the Apple SDK, so they are unverified locally.
   RSS), `dump` a fixed `Plugin` (state, render manager, server worlds) and `BlueMapService` (maps, storages)
   object, `registries`/`threads` stay empty (`commands/debug.rs`). `debug world` with no map for the sender's world
   answers "No map found" (upstream loads the world on demand).
+- Beyond upstream: render pausing per reason (stop, players, `memory-limit`, server MSPT via `ServerLoad`, protocol
+  2) and low-priority render threads; see docs/15.
 - `storages <s> delete <map>` queues `StorageDeleteTask` as a render-queue job (`bm_engine::Job`, ahead of queued
   map updates, cancellable, progress in `/bluemap`); `purge` still runs on the command thread.
 - Release jars and cores carry one version: `tools/build_core.py` takes `$BLUEMAP_RS_VERSION`, else the `v*` tag

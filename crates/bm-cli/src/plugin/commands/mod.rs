@@ -63,7 +63,7 @@ fn dispatch(core: &Core, s: &Session, m: &Matched, sender: &CommandSender, say: 
     let usage = m.usage;
     let first = usage.split_whitespace().next().unwrap_or("");
     match first {
-        "" => info::status(s, say),
+        "" => info::status(core, s, say),
         "version" => info::version(core, say),
         "help" => info::help(say),
         "maps" => info::maps(s, say),

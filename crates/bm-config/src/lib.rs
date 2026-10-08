@@ -16,6 +16,7 @@ pub mod template;
 mod value;
 
 pub use config::*;
+pub use de::size::{MemorySizeError, parse_memory_size};
 pub use de::{DeError, from_value};
 pub use error::{ConfigError, ParseError};
 pub use key::Key;
