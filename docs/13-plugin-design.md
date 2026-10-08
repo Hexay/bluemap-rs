@@ -391,11 +391,23 @@ from Windows needs the Apple SDK, so they are unverified locally.
 - `tasks.dat` (raw BlueNBT, `renderTasks: [{type, data}]`): whole-map tasks are written as `map-update` with their
   region list at save time (upstream writes an unprepared task as `unknown` and loses it); `map-save` entries are
   ignored on load (we save after every task); unreadable files are logged and deleted as upstream.
-- `debug dump` keeps `StateDumper`'s layout (`system-info`, `registries`, `dump`, `threads`, one-space indent) but
-  can't reflect: `system-info` holds the core process's equivalents (OS, cwd, cores, JVM max memory from `Hello`,
-  RSS), `dump` a fixed `Plugin` (state, render manager, server worlds) and `BlueMapService` (maps, storages)
-  object, `registries`/`threads` stay empty (`commands/debug.rs`). `debug world` with no map for the sender's world
+- `debug dump` (`commands/dump/`) writes `StateDumper`'s keys, nesting and Java shapes (`#identity` class names,
+  `{size, entries}` collections, `<<identity>>` back-references) for what the core holds, checked against an
+  upstream 5.28 Paper dump: `system-info` (version, 5.28 `git-hash`, `properties` `os.name`/`user.dir`/
+  `file.separator`, cores, max-memory from `Hello`, time), all 15 `registries` with upstream's keys,
+  `BlueMapService` (`config` with every core/webserver/webapp/plugin/map/storage config field under its Java
+  name, `webFilesManager`, `minecraftVersion`, `worlds`, `maps`, `storages`) and `Plugin` (`pluginState`,
+  `renderManager` with tasks and progress tracker, `mapUpdateServices`). JVM-only, so absent: the `java.*`/
+  `os.version` properties, `total-`/`free-memory`, `threads` (stack traces), and the reflective depth below
+  (resource pack, caches, render state cells, API objects, lambdas). Extras: `bluemap-rs-version`,
+  `resident-memory`, our hidden config keys, pause reasons. `debug world` with no map for the sender's world
   answers "No map found" (upstream loads the world on demand).
+- Hourly watcher restart (`Plugin.java` `fileWatcherRestartTask`): not done. Upstream closes and recreates every
+  `MapUpdateService`; that only drops debounced region updates, resets the update-cooldown cache and leaks the old
+  full-update timer, and the new `WatchService` does not rescan. Our watchers already re-create a failed watcher,
+  rescan on lost events and every `region-file-check-interval`, so nothing observable is lost.
+- Watcher full updates start `full-update-interval` after the map's `lastFullUpdate` (not after load) and record
+  the time in `pluginState.json` (next save), as `MapUpdateService.onFullUpdate`; the CLI anchors them at start.
 - Beyond upstream: render pausing per reason (stop, players, `memory-limit`, server MSPT via `ServerLoad`, protocol
   2) and low-priority render threads; see docs/15.
 - `storages <s> delete <map>` queues `StorageDeleteTask` as a render-queue job (`bm_engine::Job`, ahead of queued
@@ -410,7 +422,6 @@ from Windows needs the Apple SDK, so they are unverified locally.
 **Left**
 - macOS run on real hardware (CI builds and signs only), Folia run (no Folia 26.3 build yet; scheduler code paths
   are in place but untested), player-head bytes vs upstream on a real online-mode join (offline bots have no skin),
-  hourly watcher restart (our watchers self-heal), persisting `lastFullUpdate` on watcher-driven full updates,
-  bStats id, the ETA line of `/bluemap` status (the CLI's progress log has it: `bm-cli/src/eta.rs`).
+  bStats id.
 - A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
   `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.
