@@ -9,6 +9,7 @@ use std::cell::Cell;
 use bm_math::Color;
 use bm_world::{BiomeId, Chunk, ChunkArea, StateId};
 
+use crate::bounds::Bounds;
 use crate::settings::{RenderMask, RenderSettings};
 use crate::tints::UniformTints;
 
@@ -37,6 +38,11 @@ impl<'a> Masking<'a> {
 
     pub fn inside(&self, x: i32, y: i32, z: i32) -> bool {
         self.mask.is_none_or(|m| m.test(x, y, z))
+    }
+
+    /// No block of the tile is masked out.
+    pub fn unmasked(&self) -> bool {
+        self.mask.is_none()
     }
 
     pub fn inside_column(&self, x: i32, z: i32) -> bool {
@@ -75,6 +81,8 @@ pub(crate) struct Volume {
     /// `[sky, block]`.
     light: Vec<[u8; 2]>,
     solid_top: i32,
+    /// The lowest y a column walk may reach; above `i32::MIN` only when filled from a floor.
+    lowest: i32,
     /// Biome ids, read on first use: only tinted blocks need them, 75 each (`BLEND`).
     biome_bounds: Bounds,
     biomes: Vec<Cell<u16>>,
@@ -87,49 +95,17 @@ pub(crate) struct Volume {
 const BLEND: i32 = 2;
 const UNREAD: u16 = u16::MAX;
 
-#[derive(Default)]
-struct Bounds {
-    origin: [i32; 3],
-    size: [i32; 3],
-}
-
-impl Bounds {
-    fn new(min: [i32; 3], max: [i32; 3]) -> Self {
-        Self { origin: min, size: [max[0] - min[0] + 1, max[1] - min[1] + 1, max[2] - min[2] + 1] }
-    }
-
-    fn len(&self) -> usize {
-        self.size.iter().map(|&s| s as usize).product()
-    }
-
-    /// Columns are contiguous in y.
-    fn index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
-        let [ox, oy, oz] = self.origin;
-        let [w, h, d] = self.size;
-        let (dx, dy, dz) = (x.wrapping_sub(ox), y.wrapping_sub(oy), z.wrapping_sub(oz));
-        let inside = (dx as u32) < w as u32 && (dy as u32) < h as u32 && (dz as u32) < d as u32;
-        inside.then(|| ((dx * d + dz) * h + dy) as usize)
-    }
-
-    /// [`Bounds::index`] for positions whose 26 neighbours are inside as well.
-    fn interior_index(&self, x: i32, y: i32, z: i32) -> Option<usize> {
-        let [ox, oy, oz] = self.origin;
-        let [w, h, d] = self.size;
-        let (dx, dy, dz) = (x.wrapping_sub(ox), y.wrapping_sub(oy), z.wrapping_sub(oz));
-        let interior = |p: i32, s: i32| p >= 1 && p < s - 1;
-        (interior(dx, w) && interior(dy, h) && interior(dz, d)).then(|| ((dx * d + dz) * h + dy) as usize)
-    }
-}
-
 impl Volume {
     /// Fills the volume for blocks x in `min[0]..=max[0]`, z in `min[1]..=max[1]` plus the border.
-    /// Above the highest block that isn't `is_air`, only up to the border: see [`View::solid_top`].
+    /// Above the highest block that isn't `is_air`, only up to the border: see [`View::solid_top`]. With a `floor`,
+    /// nothing below it: see [`View::lowest`].
     pub fn fill(
         &mut self,
         area: &ChunkArea,
         masking: &Masking,
         min: [i32; 2],
         max: [i32; 2],
+        floor: Option<i32>,
         is_air: impl Fn(StateId) -> bool,
     ) {
         let (x0, z0) = (min[0] - BORDER, min[1] - BORDER);
@@ -140,6 +116,8 @@ impl Volume {
             (y0, y1) = (y0.min(lo - BORDER), y1.max(hi + BORDER));
             top = top.max(area.chunk(cx, cz).and_then(|c| c.top_y(&is_air)).unwrap_or(i32::MIN));
         }
+        let y0 = floor.map_or(y0, |f| y0.max(f));
+        self.lowest = if floor.is_some() { y0 + BORDER } else { i32::MIN };
         self.solid_top = top.max(y0);
         let y1 = y1.min(self.solid_top + BORDER);
         self.bounds = Bounds::new([x0, y0, z0], [x1, y1, z1]);
@@ -274,6 +252,11 @@ impl<'a> View<'a> {
     /// Every block of the tile above this y is air; the dense copy ends one block above it.
     pub fn solid_top(&self) -> i32 {
         self.volume.solid_top
+    }
+
+    /// Blocks below this aren't interior to the volume: a block pass reaching one must refill without a floor.
+    pub fn lowest(&self) -> i32 {
+        self.volume.lowest
     }
 
     /// The highest block light over the blocks of column `x, z` in `y0..=y1` inside the mask.

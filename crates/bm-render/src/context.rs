@@ -17,6 +17,9 @@ pub(crate) struct Ctx<'r, 'a> {
     pub settings: &'r RenderSettings,
     pub biomes: &'r BiomeTable,
     pub view: View<'r>,
+    /// False when only the lowres columns are wanted: faces are counted (`MeshExt::count_faces`), not built.
+    // a flag, not a generic mesh: a second instantiation of the block pass costs the hires one ~5% (worse inlining)
+    pub geometry: bool,
 }
 
 impl<'r, 'a> Ctx<'r, 'a> {

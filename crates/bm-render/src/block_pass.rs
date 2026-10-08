@@ -21,8 +21,9 @@ pub(crate) fn render(
     max: [i32; 2],
     out: &mut TileModel,
     columns: &mut Vec<ColumnMeta>,
-) -> Result<(), CapacityReached> {
+) -> Result<(), Stop> {
     let mut block_color = Color::default();
+    let lowest = ctx.view.lowest();
     for x in min[0]..=max[0] {
         for z in min[1]..=max[1] {
             let mut max_height = i32::MIN;
@@ -48,7 +49,10 @@ pub(crate) fn render(
                 let cave = |y: i32| {
                     y < s.remove_caves_below_y && floor.is_none_or(|f| y < f.wrapping_add(s.cave_detection_ocean_floor))
                 };
-                for y in (min_y..=max_y).rev() {
+                // a walk the volume's floor cuts short is `Stop::Shallow` (a check per block costs hires CPU 3%)
+                let bottom = min_y.max(lowest);
+                let mut cut = bottom > min_y;
+                for y in (bottom..=max_y).rev() {
                     if !ctx.view.inside(x, y, z) {
                         continue;
                     }
@@ -76,8 +80,12 @@ pub(crate) fn render(
                         column_color.underlay(block_color.premultiplied());
                     }
                     if ctx.settings.render_top_only && f64::from(block_color.a) > 0.999 && block.info.props.culling {
+                        cut = false;
                         break;
                     }
+                }
+                if cut {
+                    return Err(Stop::Shallow);
                 }
             }
 
@@ -87,6 +95,20 @@ pub(crate) fn render(
         }
     }
     Ok(())
+}
+
+/// Why [`render`] stopped before the last column.
+pub(crate) enum Stop {
+    /// The model is full: the tile is cut here, as BlueMap does.
+    Full,
+    /// A column walked below [`crate::view::View::lowest`]; the volume must be filled deeper.
+    Shallow,
+}
+
+impl From<CapacityReached> for Stop {
+    fn from(_: CapacityReached) -> Self {
+        Self::Full
+    }
 }
 
 /// `max(block light × (1 − column alpha))` over a column, top down. The product is monotonic in the light while

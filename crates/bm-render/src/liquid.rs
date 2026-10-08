@@ -154,6 +154,10 @@ impl Liquid<'_, '_, '_> {
             return Ok(false);
         }
         out.reserve_faces(2)?;
+        if !ctx.geometry {
+            out.count_faces(2);
+            return Ok(true);
+        }
         let tint = self.tint(tint);
 
         let mut uvs =

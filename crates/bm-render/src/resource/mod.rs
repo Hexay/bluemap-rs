@@ -118,6 +118,22 @@ impl Renderer<'_, '_, '_> {
 
         out.reserve_faces(2)?;
         let material = self.v.materials[element_index][dir.index()];
+        let tint = if face.tinted {
+            let t = *self.tint.get_or_insert_with(|| ctx.tint(block.id, block.info, block.x, block.y, block.z));
+            [t.r, t.g, t.b]
+        } else {
+            [1.0; 3]
+        };
+        // the map colour only reads the tint just set, so it can come before the geometry
+        if f64::from(facing.y) > 0.01
+            && let Some(texture) = material.color
+        {
+            self.add_map_color(texture, sun, block_light, color);
+        }
+        if !ctx.geometry {
+            out.count_faces(2);
+            return Ok(());
+        }
 
         let [u0, v0, u1, v1] = face.uv.map(|c| c / 16.0);
         let raw = [VectorM2f::new(u0, v1), VectorM2f::new(u1, v1), VectorM2f::new(u1, v0), VectorM2f::new(u0, v0)];
@@ -131,13 +147,6 @@ impl Renderer<'_, '_, '_> {
                 uv.translate(-0.5, -0.5).rotate(cos, sin).translate(0.5, 0.5);
             }
         }
-
-        let tint = if face.tinted {
-            let t = *self.tint.get_or_insert_with(|| ctx.tint(block.id, block.info, block.x, block.y, block.z));
-            [t.r, t.g, t.b]
-        } else {
-            [1.0; 3]
-        };
         let blocklight = i32::from(block_light).max(e.light_emission);
 
         let ao = if self.model.ambient_occlusion { c.map(|corner| self.ao(corner, dir)) } else { [1.0; 4] };
@@ -154,12 +163,6 @@ impl Renderer<'_, '_, '_> {
         let (first, second) = (tri(0, 1, 2), tri(0, 2, 3));
         out.push_face(&first);
         out.push_face(&second);
-
-        if f64::from(facing.y) > 0.01
-            && let Some(texture) = material.color
-        {
-            self.add_map_color(texture, sun, block_light, color);
-        }
         Ok(())
     }
 
