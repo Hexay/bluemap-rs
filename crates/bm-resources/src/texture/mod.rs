@@ -85,10 +85,11 @@ impl Texture {
         let mut url = String::with_capacity(DATA_URL_PREFIX.len() + png.len().div_ceil(3) * 4);
         url.push_str(DATA_URL_PREFIX);
         base64::engine::general_purpose::STANDARD.encode_string(&png, &mut url);
+        let pixels = image.read_pixels();
         Self {
             key,
-            color: *image.image.average_color().straight(),
-            half_transparent: image.image.half_transparent(),
+            color: *pixels.average_color().straight(),
+            half_transparent: pixels.half_transparent(),
             texture: Some(url.into()),
             animation,
         }

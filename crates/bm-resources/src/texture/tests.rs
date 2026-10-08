@@ -91,6 +91,19 @@ fn average_color_is_the_premultiplied_mean_stored_straight() {
 }
 
 #[test]
+fn eight_bit_gray_textures_are_analysed_from_raw_samples() {
+    use png::{BitDepth::*, ColorType::*};
+    let gray = decode_png(&png(2, 1, Grayscale, Eight, &[0, 200], |_| {})).unwrap();
+    assert_eq!(gray.image.pixels[4], 229, "getRGB goes through the linear-gray LUT");
+    assert_eq!(gray.read_pixels().pixels, [0, 0, 0, 255, 200, 200, 200, 255]);
+    assert_eq!(Texture::from_image(ResourcePath::key("a"), &gray, None).color.r, 100.0 / 255.0);
+    let gray_alpha = decode_png(&png(1, 1, GrayscaleAlpha, Eight, &[9, 128], |_| {})).unwrap();
+    assert_eq!(gray_alpha.read_pixels().pixels, [9, 9, 9, 128]);
+    let four_bit = decode_png(&png(2, 1, Grayscale, Four, &[0x1F], |_| {})).unwrap();
+    assert_eq!(four_bit.read_pixels().pixels, four_bit.image.pixels, "sub-byte gray is an IndexColorModel");
+}
+
+#[test]
 fn animation_meta() {
     let src = br#"{"animation": {"interpolate": true, "frametime": 2.9, "width": "3",
         "frames": [1, {"index": 2, "time": 7}, {"index": 3}]}, "other": [1]}"#;

@@ -1,9 +1,10 @@
 //! PNG images as `ImageIO.read` + `BufferedImage.getRGB` see them, and `BufferedImageUtil`'s analysis
 //! (`core/.../util/BufferedImageUtil.java`).
 
+use std::borrow::Cow;
 use std::io::Cursor;
 
-use bm_java::png::{JavaImage, RawPng};
+use bm_java::png::{JavaImage, Model, RawPng};
 use bm_math::Color;
 
 use super::Error;
@@ -55,6 +56,19 @@ impl DecodedPng {
     pub fn new(java: JavaImage) -> Self {
         let image = RgbaImage { width: java.width, height: java.height, pixels: java.rgba8() };
         Self { image, java }
+    }
+
+    /// `BufferedImageUtil.readPixel` of every pixel: `getRGB`, except 8-bit gray (`TYPE_BYTE_GRAY`, or gray+alpha
+    /// as `TYPE_CUSTOM`), whose raster samples upstream reads directly to dodge JDK bug 5051418's linear-gray LUT.
+    pub fn read_pixels(&self) -> Cow<'_, RgbaImage> {
+        let rgba = |v: u16, a: u16| [v as u8, v as u8, v as u8, a as u8];
+        let s = &self.java.samples;
+        let pixels: Vec<u8> = match self.java.model {
+            Model::Gray { bits: 8 } => s.iter().flat_map(|&v| rgba(v, 255)).collect(),
+            Model::GrayAlpha { bits: 8 } => s.as_chunks::<2>().0.iter().flat_map(|&[v, a]| rgba(v, a)).collect(),
+            _ => return Cow::Borrowed(&self.image),
+        };
+        Cow::Owned(RgbaImage { width: self.image.width, height: self.image.height, pixels })
     }
 
     /// A `TYPE_INT_ARGB` image.

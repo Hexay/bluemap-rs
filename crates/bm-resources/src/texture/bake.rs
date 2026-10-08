@@ -46,7 +46,7 @@ pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images,
                     continue;
                 }
                 let Some((values, _)) = input(value_key, pool, images) else { return };
-                if let Some(palette) = PaletteMap::new(&key_palette.image, &values.image) {
+                if let Some(palette) = PaletteMap::new(&key_palette.read_pixels(), &values.read_pixels()) {
                     palettes.push((suffix, palette));
                 }
             }
@@ -62,7 +62,7 @@ pub(super) fn bake(source: &Source, pool: &mut TexturePool, images: &mut Images,
                     if pool.contains_key(&sprite) || !used(&sprite) {
                         continue;
                     }
-                    let recoloured = DecodedPng::from_rgba(palette.apply_to(&image.image));
+                    let recoloured = DecodedPng::from_rgba(palette.apply_to(&image.read_pixels()));
                     put(sprite, recoloured, animation.clone(), pool, images);
                 }
             }
