@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         &golden,
         flags.get("map").map(String::as_str),
         path("config").as_deref(),
-        &path("jar").unwrap_or_else(|| fixture::JAR.into()),
+        &path("jar").unwrap_or_else(fixture::client_jar),
         &path("extensions").unwrap_or_else(fixture::extensions_dir),
     )?;
     println!("resources loaded in {:.2}s", start.elapsed().as_secs_f64());

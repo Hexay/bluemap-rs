@@ -1,7 +1,8 @@
-# 07 — Reusing bluemap_reverse (`C:/Users/hexay/bluemap_reverse`)
+# 07 — Reusing bluemap_reverse
 
-Assessed 2026-10-06 at commit `3e6b791` (2026-10-02, 55 commits). Paths below are relative to that repo
-(`crates/bmr-x/...` → `C:/Users/hexay/bluemap_reverse/crates/bmr-x/...`). Same author, `MIT OR Apache-2.0`.
+Assessed 2026-10-06 at commit `3e6b791` (2026-10-02, 55 commits) of bluemap_reverse, the author's earlier
+tiles→world project, checked out next to this repo. Paths below are relative to that repo. Same author,
+`MIT OR Apache-2.0`.
 
 ## Summary verdict
 

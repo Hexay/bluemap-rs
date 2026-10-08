@@ -12,7 +12,7 @@ Subsystem deep-dives:
 | 04 | [04-storage-web.md](04-storage-web.md) | File/SQL storage, compression, HTTP server, **webapp contract**, live/SSE |
 | 05 | [05-orchestration-platforms.md](05-orchestration-platforms.md) | Lifecycle, render manager, configs, CLI, platform layers, API, addons |
 | 06 | [06-prior-art-and-ecosystem.md](06-prior-art-and-ecosystem.md) | Known perf pain, Rust crates, format drift, JVM interop, license |
-| 07 | [07-bluemap-reverse-reuse.md](07-bluemap-reverse-reuse.md) | What to take from `C:/Users/hexay/bluemap_reverse` (golden harness, diff oracle, lz4-java, Java Random) |
+| 07 | [07-bluemap-reverse-reuse.md](07-bluemap-reverse-reuse.md) | What to take from the earlier `bluemap_reverse` project (golden harness, diff oracle, lz4-java, Java Random) |
 | 08 | [08-github-issues.md](08-github-issues.md) | All 628 upstream issues categorised: real pain points, bugs not to copy, behaviour to keep |
 | 09 | [09-storage-experiment.md](09-storage-experiment.md) | Measured PRBM codecs: compact quads + zstd ≈7.5× smaller, lossless |
 | 10 | [10-perf-audit-render.md](10-perf-audit-render.md) | Profiled Java render: lock convoy caps at ~4 cores, CPU hotspots, fixes, port implications |
@@ -200,10 +200,8 @@ Settled by the drop-in goal:
   fallback, map data via custom storage-backed handlers.
 - MC range — **all chunk formats 1.13.2–26.x** (current worlds still hold never-reloaded old chunks, e.g. #521);
   build 1.18+ first (harness coverage), add 1.13–1.17 before first release.
-
-Still open:
-- **Public name** — working name `bluemap-rs`, crates `bm-*`. "BlueMap" is not covered by the MIT license; pick a
-  distinct name before release; `provides: BlueMap` keeps plugin deps working; keep MIT notices.
+- Public name — **`bluemap-rs`** (2026-10-08) (crates `bm-*`). "BlueMap" is not covered by the MIT
+  license, so the README says "not affiliated"; `provides: BlueMap` keeps plugin deps working; keep MIT notices.
 
 ## Risks
 

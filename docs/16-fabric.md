@@ -83,12 +83,15 @@ Carpet 26.3 (fake players), BlueMap Offline Player Markers 2026.9.1 (a Fabric Bl
 gets `onEnable` and registers its script; webapp, lowres and hires tiles served; a bot appears in and leaves
 `live/players.json`; a killed core respawns; stop leaves no core and writes `tasks.dat`; killing the JVM ends the
 core; with upstream's Fabric jar next to ours no core spawns (23/23). `py -3 tools/e2e_paper.py` still passes 43/43.
+Linux (testbox, linux-x64 musl jar): same checks pass; there the loader picked our jar and `Coexistence` stood down.
 
 ## 6. Left
 
 - Singleplayer / LAN (integrated server): per-session `ShimCore`, firewall prompt for a versioned exe, bind address.
-- Permission nodes with a real permissions mod (LuckPerms Fabric) and as a non-op player: untested (no client in e2e).
-- 26.1 and 26.2 runtime (compiled against 26.1, e2e runs 26.3 only); Linux run of the Fabric e2e.
-- Our `Coexistence` stand-down path: in the e2e the loader always picked upstream, so it never ran.
+- Permission nodes with a real permissions mod (LuckPerms Fabric) and as a non-op player: untested, needs a real
+  client. Carpet bots can't stand in: LuckPerms attaches a player's data at login, which fake players skip
+  ("doesn't currently have data pre-loaded"), so their nodes are UNDEFINED and fall back to op level, and
+  `execute as` keeps the console's level.
+- 26.1 and 26.2 runtime (compiled against 26.1, e2e runs 26.3 only).
 - Carpet bots can't exercise the addon's offline marker (no `DISCONNECT`, no saved player data).
 - NeoForge: ModDevGradle + `jarJar`, a `neoforge/` module on `common` (commands: moderator level, as upstream).

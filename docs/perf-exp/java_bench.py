@@ -17,7 +17,7 @@ from pathlib import Path
 
 import psutil
 
-DL = Path("C:/Users/hexay/bluemap_reverse/work/downloads")
+DL = Path(__file__).resolve().parents[2] / "work" / "downloads"
 
 
 def tiles_md5(maps: Path) -> str:

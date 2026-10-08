@@ -6,7 +6,7 @@ import struct
 
 import numpy as np
 
-ROOT = "C:/Users/hexay/bluemap_reverse/work/bluemap"
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "work", "bluemap")
 ATTRS = [  # name, flag byte, dtype, cardinality
     ("position", 0x21, "<f4", 3),
     ("normal", 0x63, "i1", 3),
