@@ -3,13 +3,13 @@
 use std::collections::BTreeSet;
 use std::sync::PoisonError;
 
-use bm_engine::{PauseReason, Regions, RenderTask, TileUpdateStrategy};
+use bm_engine::{Regions, RenderTask, TileUpdateStrategy};
 use bm_ipc::CommandSender;
 
 use super::super::core::Core;
 use super::super::ops;
 use super::super::session::Session;
-use super::super::text::{self, BASE, NEGATIVE, POSITIVE};
+use super::super::text::{self, BASE, FROZEN, INFO, NEGATIVE, POSITIVE};
 use super::parse::Matched;
 use super::{Say, info, task_ref};
 
@@ -17,7 +17,7 @@ use super::{Say, info, task_ref};
 const REGION_SHIFT: i32 = 9;
 
 pub fn reload(core: &Core, light: bool, say: Say) -> i32 {
-    say(text::one("Reloading BlueMap...", BASE));
+    say(text::one("Reloading BlueMap...", INFO));
     if core.reload(light) {
         say(text::one("BlueMap reloaded!", POSITIVE));
         1
@@ -27,66 +27,60 @@ pub fn reload(core: &Core, light: bool, say: Say) -> i32 {
     }
 }
 
-/// `start` clears `/bluemap stop` and the player limit (upstream); memory and server-load pauses are reported.
+/// `StartCommand` / `StopCommand`; a start that stays paused by a beyond-parity reason (docs/15) says why.
 pub fn start_stop(core: &Core, s: &Session, start: bool, say: Say) -> i32 {
     let enabled = s.state.lock().unwrap_or_else(PoisonError::into_inner).render_threads_enabled;
-    let reasons = s.queue.pause_reasons();
-    let upstream_paused = reasons.contains(PauseReason::Stopped) || reasons.contains(PauseReason::PlayerLimit);
-    let already = if start { enabled && !upstream_paused } else { !enabled };
-    if already {
-        let reasons = info::pause_lines(core, s);
-        if start && !reasons.is_empty() {
-            say(headed("Render-Threads are paused:", NEGATIVE, reasons));
-        } else {
-            let msg = if start { "Render-Threads are already running!" } else { "Render-Threads are already stopped!" };
-            say(text::one(msg, NEGATIVE));
-        }
-        return 0;
-    }
+    let template = if enabled == start { "% Render-Threads are already %" } else { "% Render-Threads are now %" };
     ops::set_render_threads(core, s, start);
-    say(text::one(if start { "Render-Threads started!" } else { "Render-Threads stopped!" }, POSITIVE));
+    let (icon, word, color) = if start { ("⛏", "running", POSITIVE) } else { ("❌", "stopped", NEGATIVE) };
+    say(text::lines(text::fill(template, &[(icon, color), (word, color)], BASE)));
     let still = info::pause_lines(core, s);
     if start && !still.is_empty() {
-        say(headed("...but they stay paused:", BASE, still));
+        let lines = [vec![text::span("...but they stay paused:", BASE)]].into_iter().chain(still).collect();
+        say(text::lines(lines));
     }
     1
 }
 
-fn headed(header: &str, color: &str, lines: Vec<Vec<serde_json::Value>>) -> serde_json::Value {
-    text::lines([vec![text::span(header, color)]].into_iter().chain(lines).collect())
+/// `FreezeCommand` / `UnfreezeCommand`: no "already" case upstream.
+pub fn freeze(core: &Core, s: &Session, map: &str, frozen: bool, say: Say) -> i32 {
+    ops::set_frozen(core, s, map, frozen);
+    let (template, icon) = if frozen {
+        (
+            "% Map % is now % and will no longer automatically update\n\
+             Any currently scheduled updates for this map have been cancelled",
+            ("❄", FROZEN),
+        )
+    } else {
+        ("% Map % is no longer % and will update automatically", ("⛏", INFO))
+    };
+    say(text::lines(text::fill(template, &[icon, text::hl(map), ("frozen", FROZEN)], BASE)));
+    1
 }
 
-pub fn freeze(core: &Core, s: &Session, map: &str, frozen: bool, say: Say) -> i32 {
-    if !ops::set_frozen(core, s, map, frozen) {
-        let msg = if frozen { "Map % is already frozen" } else { "Map % is not frozen" };
-        say(text::lines(vec![text::format(msg, &[map])]));
+/// `PurgeCommand`'s messages; the purge itself runs before the command returns.
+pub fn purge(s: &Session, map: &str, say: Say) -> i32 {
+    let update = !s.state.lock().unwrap_or_else(PoisonError::into_inner).is_frozen(map);
+    let mut lines = text::fill("Scheduled a new task to purge map %", &[text::hl(map)], POSITIVE);
+    lines.push(text::format("Use % to see the progress", &["/bluemap"]));
+    if update {
+        lines.push(Vec::new());
+        let freeze = format!("/bluemap freeze {map}");
+        lines.extend(text::fill(
+            "BlueMap will automatically start rendering the map again once the purge is done\n\
+             If you don't want this, use % before purging",
+            &[text::hl(&freeze)],
+            BASE,
+        ));
+    }
+    say(text::lines(lines));
+    if let Err(e) = ops::purge(s, map) {
+        crate::log::error(&format!("Failed to purge map '{map}': {e:#}"));
+        let msg = "There was an error trying to purge %, see console for details.";
+        say(text::lines(text::fill(msg, &[text::hl(map)], NEGATIVE)));
         return 0;
     }
-    let msg = if frozen {
-        "Map % is now frozen and will no longer be automatically updated"
-    } else {
-        "Map % is no longer frozen and will update automatically"
-    };
-    say(text::lines(vec![text::format(msg, &[map])]));
     1
-}
-
-pub fn purge(s: &Session, map: &str, say: Say) -> i32 {
-    say(text::lines(vec![text::format("Scheduled a new task to purge map %", &[map])]));
-    match ops::purge(s, map) {
-        Ok(()) => {
-            say(text::lines(vec![text::format("Map % has been purged and will be rendered again", &[map])]));
-            1
-        }
-        Err(e) => {
-            crate::log::error(&format!("Failed to purge map '{map}': {e:#}"));
-            say(text::lines(vec![text::format(
-                "There was an error trying to purge %, see console for details.",
-                &[map],
-            )]));
-            0
-        }
-    }
 }
 
 pub fn cancel_tasks(s: &Session, task: Option<&str>, say: Say) -> i32 {
@@ -94,13 +88,14 @@ pub fn cancel_tasks(s: &Session, task: Option<&str>, say: Say) -> i32 {
         None => s.queue.remove_where(|_| true),
         Some(r) => s.queue.remove_where(|t| task_ref(t) == r),
     };
-    let msg = match (task, removed) {
-        (None, _) => "All tasks cancelled",
-        (Some(_), 0) => "Task is not pending or already completed",
-        (Some(_), _) => "Task cancelled",
+    let (msg, ok) = match (task, removed) {
+        (None, 0) => ("There are no scheduled tasks", false),
+        (None, _) => ("All tasks cancelled", true),
+        (Some(_), 0) => ("Task is not pending or already completed", false),
+        (Some(_), _) => ("Task cancelled", true),
     };
-    say(text::one(msg, if removed > 0 || task.is_none() { POSITIVE } else { NEGATIVE }));
-    i32::from(removed > 0)
+    say(text::one(msg, if ok { POSITIVE } else { NEGATIVE }));
+    i32::from(ok)
 }
 
 /// `UpdateCommand`: whole maps, or the regions within `radius` around a point (the sender's position by default).
@@ -138,7 +133,7 @@ pub fn update(core: &Core, s: &Session, m: &Matched, sender: &CommandSender, say
                 .filter(|(_, w)| w.is_some() && *w == &sender.world)
                 .map(|(id, _)| id.clone())
                 .collect();
-            ids.sort();
+            ids.sort_by_key(|id| s.maps.get(id).map(|m| m.config.sorting));
             ids
         }
     };
@@ -146,18 +141,21 @@ pub fn update(core: &Core, s: &Session, m: &Matched, sender: &CommandSender, say
         say(text::one("No map has been found for this world that could be updated!", NEGATIVE));
         return 0;
     }
-    say(text::one("Creating update-tasks ...", BASE));
+    say(text::one("Creating update-tasks ...", INFO));
     let worlds: BTreeSet<String> = maps.iter().filter_map(|id| s.map_server_world.get(id).cloned().flatten()).collect();
     for world in worlds {
         core.save_world(Some(world));
     }
+    let regions = match (center, radius) {
+        (Some((x, z)), Some(r)) => Regions::Only(regions_around(x, z, r)),
+        _ => Regions::All,
+    };
+    // `scheduleRenderTasksNext`: ahead of the queue, in map order
+    for map in maps.iter().rev() {
+        s.queue.schedule_next(RenderTask::new(map.clone(), regions.clone(), strategy));
+    }
     for map in &maps {
-        let regions = match (center, radius) {
-            (Some((x, z)), Some(r)) => Regions::Only(regions_around(x, z, r)),
-            _ => Regions::All,
-        };
-        s.queue.schedule(RenderTask::new(map.clone(), regions, strategy));
-        say(text::lines(vec![text::format("Created new update-task for map %", &[map])]));
+        say(text::lines(text::fill("Created new update-task for map %", &[text::hl(map)], POSITIVE)));
     }
     say(text::lines(vec![text::format("Use % to see the progress", &["/bluemap"])]));
     1

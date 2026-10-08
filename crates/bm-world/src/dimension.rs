@@ -8,6 +8,8 @@ use bm_nbt::{Compound, Tag};
 use crate::Result;
 
 const DAT_LIMIT: usize = 64 << 20;
+const DAT_RETRIES: u32 = 50;
+const DAT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Where a dimension's `region/` lives: `dimensions/<ns>/<path>` (26.1+ and modded), else the legacy layout
 /// (world root, `DIM-1`, `DIM1`) if it has a `region/` folder, else the new path (it may be created later).
@@ -57,11 +59,19 @@ pub fn load_dimension_type(
 }
 
 fn read_dat(path: &Path) -> Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(Compression::Gzip.decompress(&bytes, DAT_LIMIT)?)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.into()),
+    // a server can be rewriting it while a plugin core loads (Paper saves level data off-thread at enable, seconds under load)
+    for _ in 0..DAT_RETRIES {
+        match std::fs::read(path) {
+            Ok(bytes) => match Compression::Gzip.decompress(&bytes, DAT_LIMIT) {
+                Ok(nbt) => return Ok(Some(nbt)),
+                Err(_) => std::thread::sleep(DAT_RETRY_DELAY),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        }
     }
+    let bytes = std::fs::read(path)?;
+    Ok(Some(Compression::Gzip.decompress(&bytes, DAT_LIMIT)?))
 }
 
 #[derive(Clone, Debug, PartialEq)]

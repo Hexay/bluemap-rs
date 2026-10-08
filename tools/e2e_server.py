@@ -20,11 +20,17 @@ MC = "26.3"
 HTTP = "http://127.0.0.1:8100"
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
+FILL = "https://fill-data.papermc.io/v1/objects"
+# (kind, mc) -> server build; Folia trails Paper, its newest is 26.2
+SERVERS = {("paper", "26.3"): "paper-26.3-159.jar:2224a0b2b6b096ff4c429ad926e97977213e4f633e90cb3a49b5eeb82f94bab0",
+           ("paper", "26.2"): "paper-26.2-132.jar:5ab560a769c1ab413cb7f637dd0dc697974571f2db0a667cfbac511422e51b26",
+           ("paper", "26.1.2"): "paper-26.1.2-74.jar:1d70b1dab9cf4a6de615209a536f3a45a2186240253c428213ce2188ab95e5f7",
+           ("folia", "26.2"): "folia-26.2-7.jar:128a634192261cd38bb4a5dc54075018a0f896fd6c6f529e37dca6e99e32b3b3"}
+
 # (file name, url, sha256 or None)
 DOWNLOADS = {
-    "paper": ("paper-26.3-159.jar",
-              "https://fill-data.papermc.io/v1/objects/2224a0b2b6b096ff4c429ad926e97977213e4f633e90cb3a49b5eeb82f94bab0/paper-26.3-159.jar",
-              "2224a0b2b6b096ff4c429ad926e97977213e4f633e90cb3a49b5eeb82f94bab0"),
+    **{f"{kind}-{mc}": (name, f"{FILL}/{sha}/{name}", sha)
+       for (kind, mc), build in SERVERS.items() for name, sha in [build.split(":")]},
     # marker-only addon from docs/13's survey: one world-border shape per world, zero config
     "blueborder": ("BlueBorder-1.1.2.jar",
                    "https://github.com/pop4959/BlueBorder/releases/download/1.1.2/BlueBorder-1.1.2.jar", None),
@@ -94,24 +100,33 @@ def _work_dirs() -> list[Path]:
     return [WORK, *[d / "work" for d in WORK.parent.parents]]
 
 
-def client_jar() -> Path | None:
-    """A cached 26.3 client jar, so neither BlueMap has to download it."""
+def _version_work(work: Path, mc: str) -> Path:
+    return work if mc == MC else work / "v" / mc
+
+
+def client_jar(mc: str = MC) -> Path:
+    """The `mc` client jar, so neither BlueMap has to download it: a fixture's cached one, else Mojang's."""
     for work in _work_dirs():
-        for p in (work / "bluemap").glob(f"*/data/minecraft-client-{MC}.jar"):
+        for p in (_version_work(work, mc) / "bluemap").glob(f"*/data/minecraft-client-{mc}.jar"):
             return p
-    return None
+    from setup import download, version_json  # lazy: only versions without a fixture render download
+    path = CACHE / f"minecraft-client-{mc}.jar"
+    client = version_json(mc)["downloads"]["client"]
+    CACHE.mkdir(parents=True, exist_ok=True)
+    download(client["url"], path, client["sha1"])
+    return path
 
 
-def fixture_world(name: str) -> Path:
-    """A world made by tools/make_world.py (vanilla 26.3 server)."""
+def fixture_world(name: str, mc: str = MC) -> Path:
+    """A world made by tools/make_world.py (vanilla `mc` server)."""
     for work in _work_dirs():
-        if (world := work / "worlds" / name / "world").is_dir():
+        if (world := _version_work(work, mc) / "worlds" / name / "world").is_dir():
             return world
-    raise FileNotFoundError(f"fixture world '{name}' missing: run py -3 tools/make_world.py {name}")
+    raise FileNotFoundError(f"fixture world '{name}' missing: run py -3 tools/make_world.py {name} --mc {mc}")
 
 
 def prepare(folder: Path, plugins: list[Path], fresh: bool, world_from: Path | None = None,
-            addons_dir: str = "plugins") -> None:
+            addons_dir: str = "plugins", mc: str = MC) -> None:
     """A server folder with exactly `plugins` in `addons_dir` (`mods` on Fabric)."""
     if fresh and folder.exists():
         shutil.rmtree(folder)
@@ -125,9 +140,9 @@ def prepare(folder: Path, plugins: list[Path], fresh: bool, world_from: Path | N
         shutil.copy2(p, addons / p.name)
     if world_from and not (folder / "world").exists():
         shutil.copytree(world_from, folder / "world", ignore=shutil.ignore_patterns("session.lock"))
-    if jar := client_jar():
-        (folder / "bluemap").mkdir(exist_ok=True)
-        shutil.copy2(jar, folder / "bluemap" / jar.name)
+    jar = client_jar(mc)
+    (folder / "bluemap").mkdir(exist_ok=True)
+    shutil.copy2(jar, folder / "bluemap" / jar.name)
 
 
 class Server:
@@ -221,8 +236,10 @@ class Server:
 
 
 class Paper(Server):
-    def __init__(self, folder: Path, heap: str = "2G"):
-        super().__init__(folder, fetch("paper"), heap)
+    """Paper or Folia (`kind`) for Minecraft `mc`, one of SERVERS."""
+
+    def __init__(self, folder: Path, heap: str = "2G", kind: str = "paper", mc: str = MC):
+        super().__init__(folder, fetch(f"{kind}-{mc}"), heap)
 
 
 def get(path: str, timeout: float = 10) -> tuple[int, bytes]:

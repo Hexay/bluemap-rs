@@ -4,6 +4,7 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 use bm_format::grid::Tile;
 
@@ -30,7 +31,14 @@ struct State {
     runs: u64,
     /// What [`RenderQueue::stop`] interrupted: the running task (with its done regions) first, then the queue.
     abandoned: Vec<RenderTask>,
+    /// When the last task or job ended (`RenderManager.getLastTimeBusy`).
+    last_busy: Option<Instant>,
+    /// Descriptions of the last finished (or cancelled) tasks and jobs, oldest first (`getCompletedTasks`).
+    completed: VecDeque<String>,
 }
+
+/// `RenderManager.completedTasks` keeps the last 10.
+const COMPLETED_KEPT: usize = 10;
 
 struct Running {
     /// `None` while a [`Job`] runs.
@@ -209,6 +217,16 @@ impl RenderQueue {
         s.current.as_ref().map(|r| (s.runs, r.progress))
     }
 
+    /// Descriptions of the last finished tasks and jobs, oldest first.
+    pub fn completed(&self) -> Vec<String> {
+        self.lock().completed.iter().cloned().collect()
+    }
+
+    /// When a task or job last ended; `None` if none ever ran.
+    pub fn last_busy(&self) -> Option<Instant> {
+        self.lock().last_busy
+    }
+
     pub fn pending(&self) -> usize {
         let s = self.lock();
         s.pending.len() + s.jobs.len()
@@ -287,11 +305,21 @@ impl RenderQueue {
 }
 
 fn retire_current(s: &mut State) {
-    let Some(Running { task: Some(task), requeue, .. }) = s.current.take() else { return };
-    if s.stopped {
-        s.abandoned.insert(0, task);
-    } else if requeue && !s.pending.iter().any(|t| t.contains(&task)) {
-        s.pending.push_front(task);
+    let Some(running) = s.current.take() else { return };
+    s.last_busy = Some(Instant::now());
+    match running.task {
+        Some(task) if s.stopped => s.abandoned.insert(0, task),
+        Some(task) if running.requeue => {
+            if !s.pending.iter().any(|t| t.contains(&task)) {
+                s.pending.push_front(task);
+            }
+        }
+        _ => {
+            if s.completed.len() == COMPLETED_KEPT {
+                s.completed.pop_front();
+            }
+            s.completed.push_back(running.description);
+        }
     }
 }
 
