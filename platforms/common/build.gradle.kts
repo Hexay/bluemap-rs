@@ -51,7 +51,7 @@ dependencies {
     compileOnly("com.mojang:brigadier:1.3.10")
     compileOnly("org.slf4j:slf4j-api:2.0.17")
 
-    testImplementation(platform("org.junit:junit-bom:5.13.4"))
+    testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     testImplementation("com.google.code.gson:gson:2.11.0")
