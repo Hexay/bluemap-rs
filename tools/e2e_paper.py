@@ -281,6 +281,9 @@ def run_upstream(world: Path, target: Target) -> None:
     try:
         server.wait_for(r"\[BlueMap\].*Loaded!", 600, since_start=True)
         server.wait_for(r"Done \(", 300, since_start=True)
+        if any("Failed to load world" in line for line in server.history):
+            # upstream has no level-data retry and loses the race with Paper's off-thread save (ours: bm-world read_dat)
+            server.command("bluemap reload", r"BlueMap reloaded!", 300)
         map_id = poll(first_map, 30)
         save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
         if target.addons:
