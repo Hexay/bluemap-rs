@@ -95,18 +95,26 @@ fn exit_when_idle_waits_out_a_pause() {
 }
 
 #[test]
-fn stop_cancels_and_wakes() {
-    let q = Arc::new(RenderQueue::new());
+fn stop_cancels_the_running_task() {
+    let q = RenderQueue::new();
     q.schedule(RenderTask::region("w", (0, 0)));
     let running = task(q.take(false)).unwrap();
+    q.stop();
+    assert!(running.cancel.load(Ordering::Relaxed));
+    assert!(!q.schedule(RenderTask::region("w", (0, 0))));
+}
+
+#[test]
+fn stop_wakes_a_waiting_runner() {
+    let q = Arc::new(RenderQueue::new());
+    // take() also retires the caller's previous task, so only an idle queue may have a second thread waiting on it
     let waiter = {
         let q = q.clone();
         std::thread::spawn(move || q.take(false).is_none())
     };
+    std::thread::sleep(std::time::Duration::from_millis(50));
     q.stop();
-    assert!(running.cancel.load(Ordering::Relaxed));
     assert!(waiter.join().unwrap());
-    assert!(!q.schedule(RenderTask::region("w", (0, 0))));
 }
 
 #[test]

@@ -57,9 +57,11 @@ jobs:
         run: |
           file platforms/natives/linux-x64/bluemap-core | grep -q "statically linked"
           platforms/natives/linux-x64/bluemap-core --version
-      # arm64 macOS refuses unsigned code; the linker ad-hoc signs, verify nothing stripped the signature
+      # arm64 macOS refuses unsigned code; the linker ad-hoc signs only native (arm64) builds, so sign both explicitly
       - if: startsWith(matrix.target, 'macos')
-        run: codesign --verify --verbose platforms/natives/${{ matrix.target }}/bluemap-core
+        run: |
+          codesign --force --sign - platforms/natives/${{ matrix.target }}/bluemap-core
+          codesign --verify --verbose platforms/natives/${{ matrix.target }}/bluemap-core
       - if: matrix.target == 'macos-arm64'
         run: platforms/natives/macos-arm64/bluemap-core --version
       - uses: actions/upload-artifact@v4
