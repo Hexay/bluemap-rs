@@ -100,7 +100,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: third-party notices
         run: |
-          cargo install --locked cargo-about
+          cargo install --locked --features cli cargo-about
           python tools/notices.py
       - run: python tools/build_core.py --jars
       # the core is also the standalone CLI (`bluemap`); archives keep the executable bit

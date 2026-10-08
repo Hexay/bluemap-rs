@@ -63,6 +63,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots, upstream compare): `py -3 tools/e2e_paper.py`
   (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one); Fabric mod e2e (Fabric 26.3 + Carpet bots +
   a Fabric addon): `py -3 tools/e2e_fabric.py` (same flags)
+- Third-party notices for releases (cargo-about + `licenses/BUNDLED.txt`; update that file when the webapp, shaded
+  jars or bundled C libraries change): `py -3 tools/notices.py`
 - Plugin cores per target (musl via cargo-zigbuild + `pip install ziglang cargo-zigbuild`) + jars, same as CI:
   `py -3 tools/build_core.py [windows-x64 linux-x64 linux-arm64 linux-armv7 …] [--jars]`
 
