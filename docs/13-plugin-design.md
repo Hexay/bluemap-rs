@@ -392,7 +392,7 @@ from Windows needs the Apple SDK, so they are unverified locally.
   start/stop, freeze/unfreeze, purge, update, cancel) without hover/click events. Task refs are a hash of the task,
   not random; `version` prints `bluemap-rs <version>` where upstream prints its git hash; `start` adds which
   beyond-parity pause still holds (docs/15).
-- The core retries a `level.dat`/`world_gen_settings.dat` that fails to decompress (5 × 200 ms): Paper writes level
+- The core retries a `level.dat`/`world_gen_settings.dat` that fails to decompress (for up to 10 s): Paper writes level
   data off-thread after the enable-time save, while our core is already loading.
 - `reload light` reloads resources too; the rayon pool keeps the first load's thread count until restart; the
   `RenderStart{threads}` count is ignored.

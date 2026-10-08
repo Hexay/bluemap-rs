@@ -8,7 +8,7 @@ use bm_nbt::{Compound, Tag};
 use crate::Result;
 
 const DAT_LIMIT: usize = 64 << 20;
-const DAT_RETRIES: u32 = 5;
+const DAT_RETRIES: u32 = 50;
 const DAT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Where a dimension's `region/` lives: `dimensions/<ns>/<path>` (26.1+ and modded), else the legacy layout
@@ -59,7 +59,7 @@ pub fn load_dimension_type(
 }
 
 fn read_dat(path: &Path) -> Result<Option<Vec<u8>>> {
-    // a server can be rewriting it while a plugin core loads (Paper saves level data off-thread at enable)
+    // a server can be rewriting it while a plugin core loads (Paper saves level data off-thread at enable, seconds under load)
     for _ in 0..DAT_RETRIES {
         match std::fs::read(path) {
             Ok(bytes) => match Compression::Gzip.decompress(&bytes, DAT_LIMIT) {
