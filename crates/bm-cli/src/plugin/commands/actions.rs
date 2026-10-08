@@ -156,7 +156,7 @@ pub fn update(core: &Core, s: &Session, m: &Matched, sender: &CommandSender, say
             (Some((x, z)), Some(r)) => Regions::Only(regions_around(x, z, r)),
             _ => Regions::All,
         };
-        s.queue.schedule(RenderTask { map: map.clone(), regions, strategy });
+        s.queue.schedule(RenderTask::new(map.clone(), regions, strategy));
         say(text::lines(vec![text::format("Created new update-task for map %", &[map])]));
     }
     say(text::lines(vec![text::format("Use % to see the progress", &["/bluemap"])]));

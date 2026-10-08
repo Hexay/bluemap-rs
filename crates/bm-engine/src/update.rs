@@ -36,6 +36,8 @@ pub struct UpdateStats {
     pub tiles_deleted: usize,
     pub tile_errors: usize,
     pub lowres_saves: usize,
+    /// The region the latest [`UpdateEvent::Progress`] reports as finished.
+    pub last_region: Option<bm_format::grid::Tile>,
     /// Stopped early by [`UpdateJob::cancel`]; finished regions are saved.
     pub cancelled: bool,
 }
@@ -145,6 +147,7 @@ fn run(
             last_save = Instant::now();
         }
         stats.regions_done += 1;
+        stats.last_region = Some(region);
         on_event(UpdateEvent::Progress(&stats));
     }
     states.save(on_event)?;

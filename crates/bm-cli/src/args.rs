@@ -37,6 +37,9 @@ pub struct Args {
     pub maps: Option<String>,
     #[arg(long = "markers")]
     pub markers: bool,
+    /// bluemap-rs only: with `-f`, ignore the progress an interrupted forced render saved.
+    #[arg(long = "restart")]
+    pub restart: bool,
     #[arg(short = 'u', long = "watch")]
     pub watch: bool,
     #[arg(short = 'V', long = "version")]
@@ -100,6 +103,8 @@ Options:
                                  rendering.
  -r,--render                     Renders the maps configured in the
                                  'render.conf' file
+    --restart                    With -f: start the forced render over
+                                 instead of resuming an interrupted one
     --to <format>                The target format of --convert-storage
  -s,--generate-websettings       Updates the settings.json for the
                                  web-app

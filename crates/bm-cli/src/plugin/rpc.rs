@@ -96,7 +96,7 @@ fn schedule(s: &Session, map: &str, regions: Option<Vec<[i32; 2]>>, force: bool)
         None => Regions::All,
         Some(r) => Regions::Only(r.into_iter().map(|[x, z]| (x, z)).collect::<BTreeSet<_>>()),
     };
-    Ok(json!(s.queue.schedule(RenderTask { map: map.to_owned(), regions, strategy: ops::strategy(force) })))
+    Ok(json!(s.queue.schedule(RenderTask::new(map, regions, ops::strategy(force)))))
 }
 
 /// `WebAppImpl.registerScript/Style`: settings.json is rewritten after a 1 s debounce (see `timers`).
