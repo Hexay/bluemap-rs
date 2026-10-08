@@ -90,7 +90,9 @@ fn region(data: &Compound) -> Option<((i32, i32), TileUpdateStrategy)> {
 pub type RegionLister<'a> = &'a dyn Fn(&str) -> Option<Vec<(i32, i32)>>;
 
 /// What one task is written as: its regions (done ones first) and how many are done; `None` = `unknown`.
-fn listed(task: &RenderTask, regions: RegionLister) -> Option<(Vec<(i32, i32)>, usize)> {
+type Listed = Option<(Vec<(i32, i32)>, usize)>;
+
+fn listed(task: &RenderTask, regions: RegionLister) -> Listed {
     let all: Vec<(i32, i32)> = match &task.regions {
         Regions::Only(set) => set.iter().copied().collect(),
         Regions::All => regions(&task.map)?,
@@ -104,7 +106,7 @@ fn listed(task: &RenderTask, regions: RegionLister) -> Option<(Vec<(i32, i32)>, 
 /// `TasksData` as BlueNBT writes it; `regions` lists a map's region files for whole-map tasks. Tasks with every
 /// region done are left out.
 pub fn encode(tasks: &[RenderTask], purges: &[String], regions: RegionLister) -> Vec<u8> {
-    let entries: Vec<(&RenderTask, Option<(Vec<(i32, i32)>, usize)>)> = tasks
+    let entries: Vec<(&RenderTask, Listed)> = tasks
         .iter()
         .map(|t| (t, listed(t, regions)))
         .filter(|(_, l)| l.as_ref().is_none_or(|(r, done)| *done < r.len()))

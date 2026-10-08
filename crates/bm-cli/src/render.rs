@@ -73,7 +73,9 @@ pub fn run(
     for map in maps {
         let id = map.id.clone();
         loaded.insert(map);
-        plan.tasks(&id).into_iter().for_each(|t| drop(queue.schedule(t)));
+        for task in plan.tasks(&id) {
+            queue.schedule(task);
+        }
     }
     let watchers = Watchers::new(service, queue.clone());
     if watch {

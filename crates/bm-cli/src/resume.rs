@@ -42,7 +42,7 @@ impl RenderPlan {
         if mine.is_empty() || resume.restart {
             return full();
         }
-        let left: usize = mine.iter().map(|t| region_count(t)).sum();
+        let left: usize = mine.iter().map(region_count).sum();
         log::info(&format!(
             "Resuming the interrupted forced render of map '{map}': {left} regions left (--restart starts over)"
         ));

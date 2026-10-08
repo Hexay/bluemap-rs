@@ -16,9 +16,9 @@ only when none is set:
 | `Memory` | core RSS above `memory-limit` (§2) | RSS below 90 % of it |
 | `ServerLoad` | 10 s average MSPT above `render-pause-mspt` (§3) | average below `render-resume-mspt` |
 
-- The first reason cancels the running task (it stops after its current region) and queues it again in front;
-  later reasons only add to the set. A running job (`storages … delete`) finishes. Finished regions stay done, but
-  a forced task (`-f`, `force-update`) starts over from its first region, as with upstream-style `/bluemap stop`.
+- The first reason cancels the running task (it stops after its current region) and, once it has wound down,
+  queues it again in front without its finished regions (§4); later reasons only add to the set. A running job
+  (`storages … delete`) finishes.
 - `take(exit_when_idle)` (CLI `-r`) no longer ends the run while the queue is paused with work left; it waits for
   the resume.
 - `/bluemap start` clears `Stopped` and `PlayerLimit`, as upstream's restarts the threads. If `Memory` or
@@ -49,8 +49,6 @@ every second:
   rendering`. RSS < 90 % → resume, INFO. The webserver keeps serving.
 - Paused, nothing running and still above the limit for 60 s → WARNING that the limit is below the core's idle
   footprint; it resumes and stays warn-only until the next start.
-- A forced task already interrupted once by the guard is not interrupted again (it would restart from scratch
-  forever); one WARNING says it is let finish.
 
 **Measured** (Windows peak working set, release build of this branch, whose render path is b58745d's; fixture
 `structures`, compat file storage, 2 runs each):
@@ -73,8 +71,7 @@ raise Linux RSS (the perf session measured ~440 MB at 12 threads with optimized 
 160 + 12 × 24 = 448).
 
 **Checked** with `memory-limit: "100M"`, `render-thread-count: 8`, `-r -f` on `structures`: 1 thread used; pause at
-102 MiB, resume at 66 MiB one second later, the forced task restarted, exceeded the limit again and was let finish;
-the render completed (exit 0, 1153 tiles, same as without a limit) and `bm-golden diff-render` against an unlimited
+102 MiB, resume at 66 MiB one second later; the render completed (exit 0, 1153 tiles, same as without a limit) and `bm-golden diff-render` against an unlimited
 render found all 16,467,480 hires faces identical.
 
 ## 3. CPU throttling (plugins)
