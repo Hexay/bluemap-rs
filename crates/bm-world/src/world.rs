@@ -91,9 +91,18 @@ impl World {
         let ctx = ChunkContext { states: &self.states, biomes: &self.biomes, dimension: &self.dimension_type };
         let (rx0, rz0) = (x0.div_euclid(32), z0.div_euclid(32));
         let (rx1, rz1) = ((x0 + width - 1).div_euclid(32), (z0 + depth - 1).div_euclid(32));
-        let regions: Vec<std::result::Result<Region, Arc<Error>>> = (rx0..=rx1)
-            .flat_map(|rx| (rz0..=rz1).map(move |rz| (rx, rz)))
-            .map(|(rx, rz)| self.region(rx, rz).map_err(Arc::new))
+        let coords: Vec<(i32, i32)> = (rx0..=rx1).flat_map(|rx| (rz0..=rz1).map(move |rz| (rx, rz))).collect();
+        let regions: Vec<std::result::Result<Region, Arc<Error>>> = coords
+            .into_par_iter()
+            .map(|(rx, rz)| {
+                let mut region = self.region(rx, rz).map_err(Arc::new)?;
+                let local = |lo: i32, len: i32, r: i32| {
+                    (lo.max(r * 32) - r * 32) as usize..((lo + len).min(r * 32 + 32) - r * 32) as usize
+                };
+                let (xs, zs) = (local(x0, width, rx), local(z0, depth, rz));
+                region.preload(xs.flat_map(|lx| zs.clone().map(move |lz| (lx, lz))));
+                Ok(region)
+            })
             .collect();
         let region_of = |cx: i32, cz: i32| {
             &regions[((cx.div_euclid(32) - rx0) * (rz1 - rz0 + 1) + (cz.div_euclid(32) - rz0)) as usize]

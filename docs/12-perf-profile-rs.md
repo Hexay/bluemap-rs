@@ -272,3 +272,39 @@ Before this round, structures used 27 s of CPU on 12 threads but took 3.4 s of w
   - startup ~0.29 s: client jar open ~60 ms, then textures, models and the gallery
   - tail ~0.3 s: the last region's slowest tiles, plus the serial lowres cascade (~95 ms), which could be computed
     in parallel and applied in order
+
+## Round 6 (re-profiled master `26c46a5`)
+
+Testbox, `perf` at 499 Hz (structures) and 99 Hz (the 4096² world of docs/14). Share of all samples:
+
+| area | structures compat | real compat | structures optimized | real optimized |
+|---|---|---|---|---|
+| hires encode (gzip / BMQ2) | 39% | 47% | 34% | 44% (quads 22%, zstd 21%) |
+| block pass | 28% | 30% | 31% | 32% |
+| ↳ `fully_culled` | 8.6% | 8.5% | | 9.1% |
+| `Volume::fill` | 5.9% | 5.6% | 6.3% | 5.9% |
+| sort + `write_prbm` | 6.4% | 7.9% | 6.7% | 8.2% |
+| chunk load | ~4–9% | 4.1% | ~9% | 6.3% |
+| persist thread | 6.4% | 2.2% | 7.0% | 2.5% |
+
+| change | effect |
+|---|---|
+| BMQ2 `pick_grid` read which grids hold a value exactly from the float's bits instead of three `quantize` calls per value | optimized CPU −5% structures, −7% real. Not landed: BMQ3 (docs/17) replaced the BMQ2 encoder |
+| `Region::preload`: an area load reads each region's chunk sectors up front (runs within 256 KiB in one read), region files in parallel | Linux CPU neutral, webroot identical on structures and real |
+
+- **Why preload:** minidump samples on Windows (`docs/perf-exp/pmp.py`) had 30% of the render threads inside
+  `read_at_most`. Windows serialises I/O on a synchronous handle, and the render threads run at low priority, so a
+  preempted reader holds up every other one. After the change no sample was in a read. The wall-clock gain on
+  Windows is **unmeasured**: the PC ran at 19–20 of 22 cores busy from other work and 60 of 64 GB committed, and
+  renders took 7–16 s either way. Re-measure on an idle machine (`tools/bench_render.py structures --only rs`).
+- **Tried and dropped:**
+  - PGO (`-Cprofile-generate` trained on structures compat + optimized): compat 21.1 s against 20.5 s, optimized
+    18.05 s against 18.1 s. Nothing.
+  - libdeflate level (structures, CPU / hires bytes): 1: 19.0 s / 116 MB, 2: 21.0 / 111, 3: 21.1 / 85.2,
+    **4: 21.9 / 79.9**, 5: 24.0 / 82.3, 6: 27.9 / 78.6. Level 4 stays.
+  - BMQ2 zstd level (CPU / map bytes): 3: 16.6 s / 16.5 MB, 5: 17.0 / 14.3, 7: 17.5 / 13.1, **9: 18.0 / 12.8**.
+    Level 9 stays.
+- **Left:** compat is bound by gzip, which only a format change removes. The Rust side is spread thin: the block
+  walk with `fully_culled`, then one copy each for the material sort and `write_prbm` (writing the PRBM in sorted
+  order straight from the unsorted model would save about one of them, ~3%). The optimized columns above and the
+  zstd sweep describe BMQ2; BMQ3 (docs/17) has since replaced it and has not been profiled here.
