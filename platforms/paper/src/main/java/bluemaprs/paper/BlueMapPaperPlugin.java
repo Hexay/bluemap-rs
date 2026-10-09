@@ -21,8 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @SuppressWarnings("UnstableApiUsage")
 public final class BlueMapPaperPlugin extends JavaPlugin {
 
-    // TODO: register a bStats plugin id
-    static final int BSTATS_ID = 0;
+    static final int BSTATS_ID = 34599;
 
     private final AtomicBoolean metricsStarted = new AtomicBoolean();
     private PaperPlatform platform;
@@ -77,7 +76,7 @@ public final class BlueMapPaperPlugin extends JavaPlugin {
 
     /** Own bStats id only (never upstream's 5912), and only if {@code metrics} is enabled in core.conf. */
     private void startMetrics(ReadyInfo ready) {
-        if (BSTATS_ID <= 0 || ready.plugin() == null || !ready.plugin().metrics()) return;
+        if (ready.plugin() == null || !ready.plugin().metrics()) return;
         if (metricsStarted.compareAndSet(false, true)) new Metrics(this, BSTATS_ID);
     }
 

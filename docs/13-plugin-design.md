@@ -438,6 +438,6 @@ from Windows needs the Apple SDK, so they are unverified locally.
 **Left**
 - macOS: CI runs `cargo test --workspace` on `macos-latest` and the release builds and signs both cores, but no
   server has run the plugin on a Mac. Folia with players (the bots don't load there; needs a real client or a
-  login-protocol bot). A skin downloaded from Mojang on an online-mode join. bStats id.
+  login-protocol bot). A skin downloaded from Mojang on an online-mode join.
 - A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
   `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.
