@@ -48,7 +48,11 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 
 ## Commands
 
-- Test: `cargo test --workspace` (first build compiles zstd's C code — run in background)
+- Test: `cargo test --workspace` (first build compiles zstd's C code — run in background); while iterating on a
+  `--release` test use `--profile fast` instead (release without LTO, `target/fast`); benches and acceptance stay on
+  `--release`
+- Testbox (sync the tree as on disk to `~/bmrs-<name>`, run there, block until exit, print the log tail; run it in
+  the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`
 - Golden renders (Java BlueMap 5.28, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
@@ -69,6 +73,15 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   jars or bundled C libraries change): `py -3 tools/notices.py`
 - Plugin cores per target (musl via cargo-zigbuild + `pip install ziglang cargo-zigbuild`) + jars, same as CI:
   `py -3 tools/build_core.py [windows-x64 linux-x64 linux-arm64 linux-armv7 …] [--jars]`
+
+## Agents
+
+- In a worktree, every path you read, write or build is under that worktree; main-checkout paths are rejected. Only
+  `work/` (junction) is shared.
+- Never search from `C:/Users/hexay` or a drive root; Java/BlueMap sources are under `work/` and `../bluemap_reverse`.
+- Don't hold a turn open on a job over ~1 minute: start it with `run_in_background` and act on the notification. A
+  subagent whose only remaining work is waiting on a multi-hour job reports the job handle and finishes.
+- One feature per session: start a fresh session for unrelated work instead of extending a multi-day orchestrator.
 
 ## Gotchas
 

@@ -20,6 +20,12 @@ lto = "thin"
 codegen-units = 1
 debug = "line-tables-only"
 
+# release optimisation without the LTO/single-CGU link, for iterating on tests; ship and bench with release
+[profile.fast]
+inherits = "release"
+lto = "off"
+codegen-units = 16
+
 # release code + full debug info so samply can name functions
 [profile.profiling]
 inherits = "release"
