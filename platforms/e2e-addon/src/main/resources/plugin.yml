@@ -1,0 +1,7 @@
+name: BlueMapE2eAddon
+description: "Test addon for tools/e2e_paper.py: one marker set per map and a fixed player skin"
+main: bluemaprs.e2e.E2eAddon
+version: "1"
+api-version: "1.21"
+folia-supported: true
+depend: [BlueMap]
