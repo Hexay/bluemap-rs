@@ -3,7 +3,7 @@
 Versions follow `<crate version>`; the plugin and mod jars report `5.28+rs.<crate version>`, the BlueMap version
 they replace.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-10-09
 
 First release: a drop-in replacement for BlueMap 5.28.
 

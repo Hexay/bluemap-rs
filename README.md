@@ -7,7 +7,7 @@ A Rust reimplementation of [BlueMap](https://github.com/BlueMap-Minecraft/BlueMa
 built as a **drop-in replacement for BlueMap 5.28**. Keep your configs, rendered maps, web setup, commands and marker
 plugins; get the same map for a fraction of the CPU and memory.
 
-> **Status: beta, pre-release.** No published builds yet. Not affiliated with the BlueMap project.
+> **Status: beta.** Builds are pre-releases. Not affiliated with the BlueMap project.
 
 ## Why
 
@@ -48,7 +48,7 @@ addon jars still load). See [MIGRATING.md](MIGRATING.md) for the full list.
 
 ## Install
 
-Downloads will be on the [Releases](https://github.com/Hexay/bluemap-rs/releases) page.
+Downloads are on the [Releases](https://github.com/Hexay/bluemap-rs/releases) page.
 
 - **CLI**: unpack `bluemap-rs-<version>-<platform>` and run `bluemap` where you ran `java -jar bluemap-cli.jar`, from
   the same working directory. Builds for Linux (x64, arm64, armv7; static), Windows x64 and macOS (x64, arm64).

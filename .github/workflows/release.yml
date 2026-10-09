@@ -137,6 +137,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           draft: true
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
           files: |
             platforms/*/build/libs/bluemap-rs-*.jar
             dist/*
