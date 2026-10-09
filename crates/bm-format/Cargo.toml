@@ -9,6 +9,7 @@ description = "BlueMap's on-disk and on-the-wire formats: tile grids and paths, 
 
 [dependencies]
 png.workspace = true
+rustc-hash.workspace = true
 thiserror.workspace = true
 zstd.workspace = true
 

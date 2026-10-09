@@ -1,23 +1,23 @@
-//! The `optimized` format ([`crate::format`]): a compat map storage whose hires grid is replaced by BMQ2 blobs
-//! in a [`HiresStore`] (bundles for files, rows for SQL). Hires cells go in and out as raw PRBM
-//! (`grid_compression(Hires)` is `None`), so the web layer, `copy_map` and the renderer need no special case:
-//! reads decode BMQ2 back to the exact PRBM bytes, writes encode them.
+//! The `optimized` format ([`crate::format`]): a compat map storage whose hires grid is replaced by compact blobs
+//! ([`bm_format::compact`]) in a [`HiresStore`] (bundles for files, rows for SQL). Hires cells go in and out as
+//! raw PRBM (`grid_compression(Hires)` is `None`), so the web layer, `copy_map` and the renderer need no special
+//! case: reads decode a blob back to the exact PRBM bytes, writes encode them.
 
 pub(crate) mod bundle;
 
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use bm_compress::Compression;
 use bm_format::compact::CompactCodec;
-use bm_format::grid::Tile;
+use bm_format::grid::{Grid, Tile};
 
 use crate::Result;
 use crate::api::{MapStorage, Stored, Version};
 use crate::key::{GridKey, ItemKey};
 use crate::locks::KeyLocks;
 
-/// Where an optimized map keeps its BMQ2 hires blobs.
+/// Where an optimized map keeps its hires blobs.
 pub(crate) trait HiresStore: Send + Sync {
     fn read(&self, tile: Tile) -> Result<Option<Vec<u8>>>;
     fn write(&self, tile: Tile, blob: &[u8]) -> Result<()>;
@@ -50,20 +50,28 @@ const BLOB_KEEP: usize = 4 << 20;
 pub struct OptimizedMapStorage {
     inner: Arc<dyn MapStorage>,
     hires: Box<dyn HiresStore>,
+    /// See [`MapStorage::set_hires_grid`].
+    grid: RwLock<Option<Grid>>,
 }
 
 impl OptimizedMapStorage {
     pub(crate) fn new(inner: Arc<dyn MapStorage>, hires: Box<dyn HiresStore>) -> Self {
-        Self { inner, hires }
+        Self { inner, hires, grid: RwLock::default() }
     }
 
     pub(crate) fn hires(&self) -> &dyn HiresStore {
         self.hires.as_ref()
     }
 
-    /// The BMQ2 blob of a hires tile, as stored.
+    /// The blob of a hires tile, as stored.
     pub fn read_hires_blob(&self, tile: Tile) -> Result<Option<Vec<u8>>> {
         self.hires.read(tile)
+    }
+
+    /// World block (x, z) of the tile's minimum corner, once the grid is known.
+    fn origin(&self, tile: Tile) -> Option<[i32; 2]> {
+        let grid = *self.grid.read().unwrap_or_else(PoisonError::into_inner);
+        grid.map(|g| g.tile_min(tile).into())
     }
 }
 
@@ -91,9 +99,10 @@ impl MapStorage for OptimizedMapStorage {
         if grid != GridKey::Hires {
             return self.inner.write_grid_encoded(grid, tile, encoded);
         }
+        let origin = self.origin(tile);
         CODEC.with(|c| {
             let (codec, blob) = &mut *c.borrow_mut();
-            codec.encode_into(encoded, blob)?;
+            codec.encode_into(encoded, origin, blob)?;
             let written = self.hires.write(tile, blob);
             if blob.capacity() > BLOB_KEEP {
                 *blob = Vec::new();
@@ -155,6 +164,10 @@ impl MapStorage for OptimizedMapStorage {
         self.inner.key_locks()
     }
 
+    fn set_hires_grid(&self, grid: Grid) {
+        *self.grid.write().unwrap_or_else(PoisonError::into_inner) = Some(grid);
+    }
+
     fn grid_version(&self, grid: GridKey, tile: Tile) -> Result<Option<Version>> {
         if grid == GridKey::Hires { self.hires.version(tile) } else { self.inner.grid_version(grid, tile) }
     }
@@ -176,7 +189,10 @@ impl MapStorage for OptimizedMapStorage {
     }
 }
 
-/// A BMQ2 blob back to its PRBM bytes.
+#[cfg(test)]
+mod tests;
+
+/// A blob back to its PRBM bytes.
 fn decode(blob: &[u8]) -> Result<Stored> {
     let mut prbm = Vec::new();
     CODEC.with(|c| c.borrow_mut().0.decode_into(blob, &mut prbm))?;

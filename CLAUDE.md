@@ -14,7 +14,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 
 - `bm-compress` — storage + region chunk compressions (gzip/deflate/zstd/lz4-java); gzip/zlib encode via libdeflate
   (C build through `libdeflater`), decode via flate2
-- `bm-format` — tile grid and digit-split paths (more formats land here)
+- `bm-format` — tile grid and digit-split paths, PRBM writer, `compact` (BMQ3, the optimized hires blob: models the
+  mesher, docs/17; corpus bench `cargo run --release -p bm-format --example compact_bench -- <tiles dir>`)
 - `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`,
   ImageIO PNG read/write behind feature `png` — madler zlib via `libz-sys`, since zlib-rs output differs)
 - `bm-map` — map layer: `lowres` (LODs, seams, single-writer flush via `LowresStore`), `renderstate` (rstate `.dat`
@@ -25,7 +26,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - `bm-render` — hires mesher (tile → `TileModel` + lowres column data); byte-identical to BlueMap on every golden
   fixture (`cargo test -p bm-render --release`); re-render a fixture: `--example render_map` (usage in its header)
 - `bm-storage` — map storage: file (Java-identical paths, retrying atomic writes) and SQL (sqlx: SQLite/MySQL/Postgres);
-  `format: compat|optimized` (rules in `format.rs`; optimized hires = BMQ2 blobs from `bm_format::compact`, file
+  `format: compat|optimized` (rules in `format.rs`; optimized hires = BMQ3 blobs from `bm_format::compact`, file
   bundles in `optimized/bundle`); in-place conversion `bluemap --convert-storage <id> --to <format>`; golden oracle
   `cargo test -p bm-storage --release --test oracle_optimized -- --ignored`
 - `bm-config` — HOCON parser (Configurate-compatible), typed BlueMap configs, template generation

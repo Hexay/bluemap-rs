@@ -4,7 +4,7 @@
 //! # File
 //! Header (16 B): `"BMB1"`, `u32 4` (log2 tiles per side), `u64 generation` (random per file version). Then
 //! records: `u8 kind` (1 put, 2 delete), `u8 lx`, `u8 lz`, `u8 0`, `u32 len`, `u32 xxh32(first 8 header bytes ‖
-//! data)`, `len` bytes of BMQ2 blob. The last valid record of a tile wins; a delete record removes it.
+//! data)`, `len` bytes of compact blob. The last valid record of a tile wins; a delete record removes it.
 //!
 //! # Why an append log
 //! Rewriting a bundle per tile write would copy ~half a bundle (≈1 MB) per tile during a full render (write

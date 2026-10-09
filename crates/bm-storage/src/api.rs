@@ -5,7 +5,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use bm_compress::Compression;
-use bm_format::grid::Tile;
+use bm_format::grid::{Grid, Tile};
 
 use crate::Result;
 use crate::key::{GridKey, ItemKey};
@@ -87,6 +87,12 @@ pub trait MapStorage: Send + Sync {
     fn exists(&self) -> Result<bool>;
 
     fn key_locks(&self) -> &KeyLocks;
+
+    /// Tells the storage which blocks a hires tile covers. Only a hint: the optimized format stores a tile
+    /// smaller when it knows where the tile lies (`bm_format::compact`), and correctly either way.
+    fn set_hires_grid(&self, grid: Grid) {
+        let _ = grid;
+    }
 
     /// The cell's [`Version`] from metadata only. `None` when it is missing or the backend has no cheap identity
     /// (SQL: Java's schema has no change column).

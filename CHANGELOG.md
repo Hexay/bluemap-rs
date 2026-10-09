@@ -3,6 +3,12 @@
 Versions follow `<crate version>`; the plugin and mod jars report `5.28+rs.<crate version>`, the BlueMap version
 they replace.
 
+## Unreleased
+
+- `optimized` storage: hires tiles are stored as BMQ3, which models how the renderer builds a tile. Hires data is
+  about 0.4× the size of 0.1.0's, and tiles encode faster. An optimized storage written by 0.1.0 is not readable:
+  render it again, or convert it to `compat` with 0.1.0 first and back with this version.
+
 ## 0.1.0 — 2026-10-09
 
 First release: a drop-in replacement for BlueMap 5.28.

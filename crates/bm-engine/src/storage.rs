@@ -53,6 +53,7 @@ impl Storages {
 
     /// Converts storage `id` in place to `to` (see `bm_storage::convert_file_storage`). It must not be open.
     pub fn convert(&self, config: &BlueMapConfig, id: &str, to: Format, progress: Progress) -> Result<ConvertStats> {
+        let grids = |map: &str| config.maps.get(map).map(crate::map::hires_grid);
         let storage_config = config
             .storages
             .get(id)
@@ -61,12 +62,12 @@ impl Storages {
         match storage_config {
             StorageConfig::File(c) => {
                 let compression = compression(c.compression().map_err(invalid)?);
-                convert_file_storage(&c.root, compression, to, progress).map_err(|e| invalid(e.to_string()))
+                convert_file_storage(&c.root, compression, to, &grids, progress).map_err(|e| invalid(e.to_string()))
             }
             StorageConfig::Sql(c) => {
                 let sql = sql_config(c).map_err(invalid)?;
                 let handle = self.runtime()?.handle().clone();
-                convert_sql_storage(&sql, handle, to, progress).map_err(|e| invalid(e.to_string()))
+                convert_sql_storage(&sql, handle, to, &grids, progress).map_err(|e| invalid(e.to_string()))
             }
         }
     }

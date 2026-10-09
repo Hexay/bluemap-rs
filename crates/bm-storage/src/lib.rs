@@ -26,7 +26,7 @@ mod sql;
 pub use api::{MAX_DECODED, MapStorage, Storage, Stored, Version};
 pub use bm_compress::Compression;
 pub use bm_format::grid::Tile;
-pub use convert::{ConvertStats, Progress, convert_file_storage, convert_sql_storage};
+pub use convert::{ConvertStats, Grids, Progress, convert_file_storage, convert_sql_storage};
 pub use copy::{CopyStats, copy_map};
 pub use error::{Error, Result};
 pub use file::{FileMapStorage, FileStorage};

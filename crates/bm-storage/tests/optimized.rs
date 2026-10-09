@@ -74,15 +74,21 @@ fn file_conversion_round_trips() {
     common::populate(&FileStorage::new(&root, Compression::Gzip));
     let before = common::tree(&root);
 
-    let stats = convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_progress).unwrap();
+    let stats =
+        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_grids, &common::no_progress)
+            .unwrap();
     assert_eq!((stats.maps, stats.tiles, stats.already), (1, common::TILES.len(), false));
     assert!(!root.join("m/tiles/0").exists());
     let opt = FileStorage::open(&root, Compression::Gzip, Format::Optimized, false).unwrap();
     common::assert_hires(&opt);
     drop(opt);
-    assert!(convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_progress).unwrap().already);
+    assert!(
+        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_grids, &common::no_progress)
+            .unwrap()
+            .already
+    );
 
-    convert_file_storage(&root, Compression::Gzip, Format::Compat, &common::no_progress).unwrap();
+    convert_file_storage(&root, Compression::Gzip, Format::Compat, &common::no_grids, &common::no_progress).unwrap();
     assert!(!root.join("m/hires").exists() && !root.join(FILE_MARKER).exists());
     common::assert_same_tree_maps(&before, &common::tree(&root));
 }
@@ -97,7 +103,8 @@ fn file_conversion_writes_bundle_records_in_tile_order() {
         for i in (0..96).rev() {
             map.write_grid(GridKey::Hires, (i % 24, i / 24 * 6), &common::prbm(1 + i as usize % 3, i as f32)).unwrap();
         }
-        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_progress).unwrap();
+        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &common::no_grids, &common::no_progress)
+            .unwrap();
         common::tree(&root).into_iter().filter(|(path, _)| path.ends_with(".bmb")).collect::<Vec<_>>()
     };
     let (a, b) = (convert("a"), convert("b"));

@@ -27,6 +27,11 @@ fn sized(tree: &BTreeMap<String, Vec<u8>>, part: &str) -> (usize, u64) {
     tree.iter().filter(|(k, _)| k.contains(part)).fold((0, 0), |(n, b), (_, v)| (n + 1, b + v.len() as u64))
 }
 
+/// The fixtures' hires grid (BlueMap's default), so block hash offsets are modelled as in a real render.
+fn default_grid(_: &str) -> Option<bm_format::grid::Grid> {
+    Some(bm_format::grid::Grid { size: [32; 2], offset: [2; 2] })
+}
+
 #[test]
 #[ignore = "needs Java-rendered fixtures in work/bluemap"]
 fn java_storages_convert_losslessly() {
@@ -47,7 +52,7 @@ fn java_storages_convert_losslessly() {
         let java = common::tree(&root);
         let (files, gz) = sized(&java, "/tiles/0/");
 
-        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &|_, _, _| {}).unwrap();
+        convert_file_storage(&root, Compression::Gzip, Format::Optimized, &default_grid, &|_, _, _| {}).unwrap();
         let opt_tree = common::tree(&root);
         let (bundles, opt) = sized(&opt_tree, "/hires/");
         let storage = FileStorage::open(&root, Compression::Gzip, Format::Optimized, true).unwrap();
@@ -63,7 +68,7 @@ fn java_storages_convert_losslessly() {
         }
         drop(storage);
 
-        convert_file_storage(&root, Compression::Gzip, Format::Compat, &|_, _, _| {}).unwrap();
+        convert_file_storage(&root, Compression::Gzip, Format::Compat, &default_grid, &|_, _, _| {}).unwrap();
         common::assert_same_tree_maps(&java, &common::tree(&root));
         println!(
             "{name:16} hires {files:5} files {:8.2} MB gzip -> {bundles:4} bundles {:7.2} MB ({:.1}x smaller)",

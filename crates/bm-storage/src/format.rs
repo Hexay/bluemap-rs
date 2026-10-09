@@ -1,7 +1,7 @@
 //! Storage formats and how an existing storage reveals its own.
 //!
 //! - `compat`: upstream BlueMap's layout, byte-compatible (Java BlueMap, nginx `gzip_static`, `sql.php`).
-//! - `optimized`: as compat except hires tiles, which are BMQ2 blobs ([`bm_format::compact`]): packed in
+//! - `optimized`: as compat except hires tiles, which are BMQ3 blobs ([`bm_format::compact`]): packed in
 //!   bundles in a file storage ([`crate::optimized`]), one row per tile in SQL. Served only by bluemap-rs.
 //!
 //! A storage records `optimized` with a marker (file: [`FILE_MARKER`] in the storage root; SQL: the

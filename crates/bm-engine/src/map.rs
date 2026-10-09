@@ -20,8 +20,10 @@ use crate::error::{Error, Result};
 use crate::resources::Resources;
 use crate::storage::Storages;
 
-/// `BmMap`'s hires grid offset (`new Grid(hiresTileSize, 2)`).
-const HIRES_OFFSET: i32 = 2;
+/// `BmMap`'s hires grid (`new Grid(hiresTileSize, 2)`).
+pub(crate) fn hires_grid(map: &MapConfig) -> Grid {
+    Grid { size: [map.hires_tile_size; 2], offset: [2; 2] }
+}
 
 pub struct MapContext {
     pub id: String,
@@ -72,6 +74,8 @@ impl MapContext {
         }
         let biome_table = datapack.biome_table(&resources.biomes);
         let storage = storages.get(config, &map.storage)?.map(id)?;
+        let hires_grid = hires_grid(map);
+        storage.set_hires_grid(hires_grid);
         let mask = bm_map::mask::Mask::Combined(build_render_mask(&convert::mask_configs(&map.render_mask))?);
 
         let mut warnings = Vec::new();
@@ -90,7 +94,7 @@ impl MapContext {
             storage,
             gallery,
             mask,
-            hires_grid: Grid { size: [map.hires_tile_size; 2], offset: [HIRES_OFFSET; 2] },
+            hires_grid,
             warnings,
             markers_json,
             tile_listener: None,

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bm_compress::Compression;
-use bm_format::grid::Tile;
+use bm_format::grid::{Grid, Tile};
 use tokio::runtime::Handle;
 
 use crate::api::{MapStorage, Storage};
@@ -32,6 +32,9 @@ pub struct ConvertStats {
 
 /// Called with (map id, tiles done, tiles total) as tiles convert, from worker threads.
 pub type Progress<'a> = &'a (dyn Fn(&str, usize, usize) + Sync);
+
+/// The hires grid of a map id, for [`MapStorage::set_hires_grid`]; `None` for maps without a known one.
+pub type Grids<'a> = &'a (dyn Fn(&str) -> Option<Grid> + Sync);
 
 /// Both views of one physical storage.
 trait Physical {
@@ -90,9 +93,10 @@ pub fn convert_file_storage(
     root: &Path,
     compression: Compression,
     to: Format,
+    grids: Grids,
     progress: Progress,
 ) -> Result<ConvertStats> {
-    convert(&FileStorage::new(root, compression), to, progress)
+    convert(&FileStorage::new(root, compression), to, grids, progress)
 }
 
 /// Converts the SQL storage of `config` (its `format` is ignored) to `to`.
@@ -100,15 +104,16 @@ pub fn convert_sql_storage(
     config: &SqlConfig,
     runtime: Handle,
     to: Format,
+    grids: Grids,
     progress: Progress,
 ) -> Result<ConvertStats> {
     let storage = SqlStorage::connect_unchecked(config, runtime)?;
-    let result = convert(&storage, to, progress);
+    let result = convert(&storage, to, grids, progress);
     storage.close();
     result
 }
 
-fn convert(p: &dyn Physical, to: Format, progress: Progress) -> Result<ConvertStats> {
+fn convert(p: &dyn Physical, to: Format, grids: Grids, progress: Progress) -> Result<ConvertStats> {
     let optimized = to == Format::Optimized;
     let ids = p.map_ids()?;
     let mut stats = ConvertStats { maps: ids.len(), ..ConvertStats::default() };
@@ -122,6 +127,9 @@ fn convert(p: &dyn Physical, to: Format, progress: Progress) -> Result<ConvertSt
     }
     for id in &ids {
         let (compat, opt) = (p.compat(id)?, p.optimized(id)?);
+        if let Some(grid) = grids(id) {
+            opt.set_hires_grid(grid);
+        }
         let (src, dst): (&dyn MapStorage, &dyn MapStorage) = if optimized {
             opt.hires().clear()?;
             (compat.as_ref(), opt.as_ref())

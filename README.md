@@ -17,7 +17,7 @@ On a 4096×4096-block world (100 region files), a full render from scratch, same
 |---|---:|---:|---:|---:|
 | Java BlueMap 5.28 | 23.5 min | 2.7 h | 2,139 MB | 1,545 MiB |
 | bluemap-rs | **77 s** | **7.9 min** | **764 MB** | 1,576 MiB |
-| bluemap-rs, `format: optimized` storage | **49 s** | 8.3 min | 802 MB | **310 MiB** |
+| bluemap-rs, `format: optimized` storage | **49 s** | 8.3 min | 802 MB | **133 MiB** |
 
 - **18× faster, 21× less CPU, 36% of the memory** (medians of 3 runs). Re-rendering after edits to 6 region files:
   5.0 s and 5.6 CPU-seconds, against Java's 20.5 s and 155 CPU-seconds.
@@ -39,7 +39,7 @@ Measured on a 6-core/12-thread Xeon E-2136 with 31 GiB RAM and HDD storage. Meth
 | **Paper plugin** | Verified on Paper 26.3. Runs the core as a child process and ships the real BlueMapAPI 2.8, so marker plugins and addons keep working |
 | **Fabric mod** | Dedicated servers, Fabric 26.1–26.3 (verified on 26.3) |
 | **Worlds** | Every chunk format from Minecraft 1.13 to 26.x; checked against Java BlueMap on 1.16.5–26.3 worlds |
-| **Storage** | File and SQL (SQLite, MySQL/MariaDB, PostgreSQL), the same layout and schema as BlueMap. Opt-in `optimized` format, about 5× smaller |
+| **Storage** | File and SQL (SQLite, MySQL/MariaDB, PostgreSQL), the same layout and schema as BlueMap. Opt-in `optimized` format, about 12× smaller |
 | **Web** | BlueMap 5.28's webapp, unchanged, from the built-in webserver or your own nginx/Apache |
 
 Folia 26.2 passes the plugin tests (maps, commands, addon markers), but nothing has tested it with players online.

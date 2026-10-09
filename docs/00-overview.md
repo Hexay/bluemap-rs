@@ -24,6 +24,7 @@ Subsystem deep-dives:
 | 14 | [14-real-world-validation.md](14-real-world-validation.md) | 4096² world + MC 1.16.5–1.21.11: parity with Java 5.28, 21× less CPU; Java loses lowres writes nondeterministically |
 | 15 | [15-beyond-parity.md](15-beyond-parity.md) | Pause reasons, `memory-limit`, MSPT render throttle, low-priority render threads |
 | 16 | [16-fabric.md](16-fabric.md) | Shared shim layout (`platforms/common`), the Fabric mod (26.1–26.3, dedicated servers), e2e |
+| 17 | [17-bmq3-experiment.md](17-bmq3-experiment.md) | BMQ3, the optimized hires encoding: models the mesher, 0.40× of BMQ2, bit-exact, faster to encode |
 
 ## What BlueMap is
 
@@ -186,8 +187,8 @@ Settled by the drop-in goal:
 - Targets — **both CLI/Docker and server plugins**: the core ships as the CLI first; the Paper jar
   (then Fabric/Forge/NeoForge) wraps the same binary. Sequencing only, not a choice.
 
-- Storage modes — **`compat`** (upstream layout, byte-exact) and **`optimized`** (packed bundles + compact quad
-  encoding + zstd, transcoded back to exact PRBM on serve; ~7.5× smaller, see 09). Webapp unchanged in both;
+- Storage modes — **`compat`** (upstream layout, byte-exact) and **`optimized`** (packed bundles + BMQ3 hires
+  blobs, transcoded back to exact PRBM on serve; hires ~12× smaller than gzip on real terrain, see 17). Webapp unchanged in both;
   `bluemap --convert-storage <id> --to <format>` moves between them. Optional later: `optimized-static` with a patched webapp tile loader.
 - Storage default — **new installs `optimized`, for file *and* SQL storages; existing BlueMap storages stay
   `compat`** until the user converts. Our webserver transcodes optimized tiles; only external hosting that reads

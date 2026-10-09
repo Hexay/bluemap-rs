@@ -1,4 +1,4 @@
-//! Optimized hires tiles in SQL: one `grid_storage_data` row per tile, BMQ2 blob, under storage key
+//! Optimized hires tiles in SQL: one `grid_storage_data` row per tile, compact blob, under storage key
 //! [`HIRES_KEY`] and compression key [`COMPACT_KEY`]. No bundling: the database already packs small rows into
 //! pages, and one row per tile keeps single-tile writes a single `REPLACE`. The distinct storage key keeps the
 //! rows invisible to Java BlueMap and `sql.php`, which look for `bluemap:hires`.

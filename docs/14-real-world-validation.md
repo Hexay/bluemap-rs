@@ -78,6 +78,11 @@ Raw lines: `docs/results/bench.jsonl`, labels `real-*`. Java ran 08:41 UTC (run 
   files. The lowres PNGs are the same in both formats, so the hires-only ratio is higher. Rendering straight to
   optimized took 49 s wall. Converting it back to compat (`--convert-storage file --to compat`) took 27 s, and the
   result compares exactly like the direct compat render.
+- **Optimized storage since BMQ3** (docs/17, run 2026-10-09, labels `real-rs-bmq3*`): **133.4 MiB** in 306 files,
+  11.8× smaller than compat; the hires bundles went from 299 to 122 MB on disk. Converted back to compat it is the
+  same 1,576.0 MiB in 16,865 files and compares to Java like the direct compat render: hires and rstate identical,
+  the one known lowres difference. That run shared the box with a saturated disk (125 s wall, 282 s CPU, 873 MB),
+  so its timings are not comparable with the table; the table's optimized rows are the BMQ2 run.
 - Compat output: Java 1,544.9 MiB, ours 1,576.0 MiB, the same 16,865 files. Hires bytes match after decompression,
   but the gzip streams themselves differ.
 

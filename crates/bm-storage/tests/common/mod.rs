@@ -177,6 +177,10 @@ pub fn assert_hires(storage: &dyn Storage) {
 
 pub fn no_progress(_: &str, _: usize, _: usize) {}
 
+pub fn no_grids(_: &str) -> Option<bm_format::grid::Grid> {
+    None
+}
+
 /// Format detection refuses mismatches; compat -> optimized -> compat conversion keeps every tile.
 pub fn sql_detection_and_conversion(config: &dyn Fn(Format) -> SqlConfig, rt: &Handle) {
     let compat = SqlStorage::connect(&config(Format::Compat), rt.clone()).unwrap();
@@ -185,7 +189,8 @@ pub fn sql_detection_and_conversion(config: &dyn Fn(Format) -> SqlConfig, rt: &H
     let refused = SqlStorage::connect(&config(Format::Optimized), rt.clone()).err().unwrap();
     assert!(matches!(refused, Error::FormatMismatch { found: Format::Compat, .. }), "{refused}");
 
-    let stats = convert_sql_storage(&config(Format::Compat), rt.clone(), Format::Optimized, &no_progress).unwrap();
+    let stats =
+        convert_sql_storage(&config(Format::Compat), rt.clone(), Format::Optimized, &no_grids, &no_progress).unwrap();
     assert_eq!(stats.tiles, TILES.len());
     assert!(SqlStorage::connect(&config(Format::Compat), rt.clone()).is_err());
     let opt = SqlStorage::connect(&config(Format::Optimized), rt.clone()).unwrap();
@@ -193,7 +198,7 @@ pub fn sql_detection_and_conversion(config: &dyn Fn(Format) -> SqlConfig, rt: &H
     assert_eq!(opt.map("m").unwrap().read_item(&ItemKey::Settings).unwrap().unwrap().data, b"{}");
     opt.close();
 
-    convert_sql_storage(&config(Format::Optimized), rt.clone(), Format::Compat, &no_progress).unwrap();
+    convert_sql_storage(&config(Format::Optimized), rt.clone(), Format::Compat, &no_grids, &no_progress).unwrap();
     let back = SqlStorage::connect(&config(Format::Compat), rt.clone()).unwrap();
     assert_hires(&back);
     back.close();

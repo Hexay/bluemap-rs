@@ -1,4 +1,4 @@
-//! BMQ2 over every Java-rendered hires tile in `work/bluemap/*/web/maps/*/tiles/0`: decoded bytes must equal the
+//! BMQ3 over every Java-rendered hires tile in `work/bluemap/*/web/maps/*/tiles/0`: decoded bytes must equal the
 //! decompressed PRBM. Prints sizes vs the stored gzip and timings. `BMQ_LEVELS=3,9,19` sweeps zstd levels.
 
 use std::io::Read;
@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use bm_format::compact::{CompactCodec, DEFAULT_LEVEL};
+use bm_format::grid::{Grid, parse_tile_path};
 use rayon::prelude::*;
 
 fn tiles(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -59,8 +60,11 @@ fn every_golden_tile_round_trips() {
                 let gz = std::fs::read(path).unwrap();
                 let mut raw = Vec::new();
                 flate2::read::MultiGzDecoder::new(&gz[..]).read_to_end(&mut raw).unwrap();
+                // the fixtures use the default hires grid
+                let origin = parse_tile_path(&path.to_string_lossy().split("tiles").last().unwrap()[2..])
+                    .map(|tile| Grid { size: [32; 2], offset: [2; 2] }.tile_min(tile).into());
                 let start = Instant::now();
-                codec.encode_into(&raw, blob).unwrap();
+                codec.encode_into(&raw, origin, blob).unwrap();
                 let mid = Instant::now();
                 codec.decode_into(blob, back).unwrap();
                 t.decode_ns.fetch_add(mid.elapsed().as_nanos() as u64, Ordering::Relaxed);
@@ -75,7 +79,7 @@ fn every_golden_tile_round_trips() {
         let get = |a: &AtomicU64| a.load(Ordering::Relaxed);
         let n = files.len() as u64;
         println!(
-            "level {level}: {n} tiles ({} raw mode), gzip {:.2} MB, raw PRBM {:.1} MB, BMQ2 {:.2} MB = {:.3}x gzip \
+            "level {level}: {n} tiles ({} raw mode), gzip {:.2} MB, raw PRBM {:.1} MB, BMQ3 {:.2} MB = {:.3}x gzip \
              ({:.1}x smaller); encode {:.2} ms/tile (incl. verify), decode {:.2} ms/tile",
             get(&t.raw_mode),
             get(&t.gz) as f64 / 1e6,

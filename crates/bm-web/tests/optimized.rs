@@ -30,7 +30,7 @@ fn serve(storage: &FileStorage, ids: &[String], web: &Path) -> Served {
 fn compare(compat: &Path, scratch: &Path) -> usize {
     let opt_root = scratch.join("opt/maps");
     copy_dir(compat, &opt_root);
-    convert_file_storage(&opt_root, Compression::Gzip, Format::Optimized, &|_, _, _| {}).unwrap();
+    convert_file_storage(&opt_root, Compression::Gzip, Format::Optimized, &|_| None, &|_, _, _| {}).unwrap();
     let a = FileStorage::open(compat, Compression::Gzip, Format::Compat, true).unwrap();
     let b = FileStorage::open(&opt_root, Compression::Gzip, Format::Optimized, true).unwrap();
     let ids = a.map_ids().unwrap();

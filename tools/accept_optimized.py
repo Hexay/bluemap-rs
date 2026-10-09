@@ -1,5 +1,5 @@
 """Acceptance for the optimized storage format: render a fixture into an optimized file storage, re-render (nothing
-to do), serve every hires tile through our webserver (BMQ2 → PRBM on the fly) and compare with Java's tiles, then
+to do), serve every hires tile through our webserver (compact blob → PRBM on the fly) and compare with Java's tiles, then
 convert back with `--convert-storage file --to compat` and compare the webroot with Java's.
 
 Usage: py -3 tools/accept_optimized.py [fixture ...] [--no-build]   (default: vanilla nether)
