@@ -5,12 +5,13 @@ upstream BlueMap 5.28 on a copy of the same world.
 
 `--server`/`--mc` pick another build from e2e_server.SERVERS; other versions need their fixture world
 (`py -3 tools/make_world.py context --mc <mc>`). Folia loads neither BlueBorder nor the bots (no `folia-supported`),
-so its run skips the marker and player checks.
+so its run only checks the markers of our own test addon (`platforms/e2e-addon`) and skips the player checks.
 
 Windows or Linux (host target from tools/build_core.py; on Linux the static musl core). Builds the core and the
-plugin jars (or stages a prebuilt `--core`, or tests a given `--jar`), starts Paper with our jar + BlueBorder (marker addon) + server-side
+plugin jars (or stages a prebuilt `--core`, or tests a given `--jar`), starts Paper with our jar + BlueBorder (marker addon) + our test addon + server-side
 bots, then checks: the core becomes ready, `/bluemap` commands answer on the console, the webserver serves the
-webapp and a rendered tile, `live/players.json` lists a bot, BlueBorder's markers reach `live/markers.json`,
+webapp and a rendered tile, `live/players.json` lists a bot whose head (the test addon's skin) is stored, both addons' markers reach
+`live/markers.json`,
 `/bluemap reload` works, a killed core is respawned, stopping the server leaves no core process, and neither does
 SIGKILLing the JVM (stdin EOF), and upstream resumes a forced render ours stopped partway (tasks.dat). Results and
 captured files go to work/e2e-paper/out/.
@@ -24,7 +25,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from build_core import build_jars, host_jar, stage_host_core
+from build_core import build_jars, e2e_addon_jar, host_jar, stage_host_core
 from e2e_server import (E2E, MC, SERVERS, Paper, check, fetch, fixture_world, get, json_get, kill, pid_alive, poll,
                         prepare, report, rss_mib)
 
@@ -40,6 +41,13 @@ class Target:
     def addons(self) -> bool:
         """BlueBorder and the bots run on Paper only."""
         return self.kind == "paper"
+
+    @property
+    def marker_sets(self) -> set[str]:
+        return {"e2e-addon", *(["worldborder"] if self.addons else [])}
+
+    def plugins(self, bluemap: Path) -> list[Path]:
+        return [bluemap, e2e_addon_jar(build=False), *([fetch("blueborder"), fetch("bots")] if self.addons else [])]
 
     def server(self, folder: Path) -> Paper:
         return Paper(folder, kind=self.kind, mc=self.mc)
@@ -76,6 +84,22 @@ def first_map() -> str | None:
     return settings["maps"][0] if settings and settings.get("maps") else None
 
 
+def markers(map_id: str, target: Target) -> dict | None:
+    """markers.json once every addon's marker set is in it."""
+    found = json_get(f"maps/{map_id}/live/markers.json")
+    return found if found and target.marker_sets <= set(found) else None
+
+
+def bot_head(server: Paper, map_id: str) -> tuple[dict | None, bytes | None]:
+    """Spawns a bot: players.json with it, and the head stored for it from the test addon's skin provider."""
+    server.send("start 1 none")
+    bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
+    url = bot and f"maps/{map_id}/assets/playerheads/{bot['players'][0]['uuid']}.png"
+    head = url and poll(lambda: (r := get(url))[0] == 200 and r[1], 60)
+    server.send("stress stop")
+    return bot, head or None
+
+
 def save(name: str, data: bytes) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / name).write_bytes(data)
@@ -85,8 +109,7 @@ def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
     folder = E2E / "rs"
     # a world Paper generates itself keeps its spawn chunks unlit on disk for the first sessions, and both BlueMaps
     # skip unlit chunks; the `context` fixture (vanilla server) is lit and small
-    addons = [fetch("blueborder"), fetch("bots")] if target.addons else []
-    target.prepare(folder, [jar, *addons], fresh, world_from=fixture_world("context", target.mc))
+    target.prepare(folder, target.plugins(jar), fresh, world_from=fixture_world("context", target.mc))
     server = target.server(folder)
     try:
         spawned = server.wait_for(r"\[(\d+:\d+:\d+) .*BlueMap core \S+ started", 600, since_start=True)
@@ -116,10 +139,9 @@ def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
         check("players.json (no players)", players == {"players": []}, json.dumps(players))
         save("rs-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
 
-        if target.addons:
-            markers = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m and m, 60)
-            check("BlueBorder markers in markers.json", markers, str(list(markers or {})))
-            save("rs-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+        found = poll(lambda: markers(map_id, target), 60)
+        check("addon markers in markers.json", found, str(list(found or {})))
+        save("rs-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
 
         server.command(f"bluemap force-update {map_id}", r"Created new update-task", 120)
         check("/bluemap force-update", True)
@@ -132,11 +154,11 @@ def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
         diagnostic_commands(server, folder, map_id)
 
         if target.addons:
-            server.send("start 1 none")
-            bot = poll(lambda: (p := json_get(f"maps/{map_id}/live/players.json")) and p["players"] and p, 60)
+            bot, head = bot_head(server, map_id)
             check("players.json shows a bot", bot, json.dumps(bot)[:200] if bot else "")
-            save("rs-players-bot.json", get(f"maps/{map_id}/live/players.json")[1])
-            server.send("stress stop")
+            check("player head stored (addon skin provider)", head, f"{len(head or b'')} B")
+            save("rs-players-bot.json", json.dumps(bot).encode())
+            save("rs-playerhead.png", head or b"")
 
         pid = core_pid(folder)
         rss = rss_mib(pid) if pid else None
@@ -144,9 +166,7 @@ def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
 
         server.command("bluemap reload", r"BlueMap reloaded!", 300)
         check("/bluemap reload", True)
-        if target.addons:
-            again = poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
-            check("markers back after reload", again)
+        check("markers back after reload", poll(lambda: markers(map_id, target), 60))
 
         old = core_pid(folder)
         kill(old)
@@ -154,9 +174,7 @@ def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
         check("killed core respawns", new, f"pid {old} -> {new}")
         back = poll(lambda: get("index.html")[0] == 200, 120)
         check("webserver back after respawn", back)
-        if target.addons:
-            check("markers after respawn",
-                  poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 90))
+        check("markers after respawn", poll(lambda: markers(map_id, target), 90))
         save("rs-frozen.json", json.dumps(frozen_texts(server), indent=1, ensure_ascii=False).encode())
     finally:
         last = core_pid(folder)
@@ -276,7 +294,7 @@ def status_progress(server: Paper) -> float | None:
 
 def run_upstream(world: Path, target: Target) -> None:
     folder = E2E / "upstream"
-    target.prepare(folder, [fetch("upstream"), *([fetch("blueborder")] if target.addons else [])], True, world_from=world)
+    target.prepare(folder, target.plugins(fetch("upstream")), True, world_from=world)
     server = target.server(folder)
     try:
         server.wait_for(r"\[BlueMap\].*Loaded!", 600, since_start=True)
@@ -286,15 +304,16 @@ def run_upstream(world: Path, target: Target) -> None:
             server.command("bluemap reload", r"BlueMap reloaded!", 300)
         map_id = poll(first_map, 30)
         save("upstream-players-empty.json", get(f"maps/{map_id}/live/players.json")[1])
+        poll(lambda: markers(map_id, target), 60)
+        save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
         if target.addons:
-            poll(lambda: (m := json_get(f"maps/{map_id}/live/markers.json")) and "worldborder" in m, 60)
-            save("upstream-markers.json", get(f"maps/{map_id}/live/markers.json")[1])
+            save("upstream-playerhead.png", bot_head(server, map_id)[1] or b"")
         texts = command_texts(server, map_id)
         save("upstream-commands.json", json.dumps(texts, indent=1, ensure_ascii=False).encode())
         save("upstream-frozen.json", json.dumps(frozen_texts(server), indent=1, ensure_ascii=False).encode())
     finally:
         server.stop()
-    for name in ["players-empty.json", *(["markers.json"] if target.addons else [])]:
+    for name in ["players-empty.json", "markers.json", *(["playerhead.png"] if target.addons else [])]:
         ours, theirs = (OUT / f"rs-{name}").read_bytes(), (OUT / f"upstream-{name}").read_bytes()
         check(f"{name} byte-identical to upstream", ours == theirs, f"{len(ours)} vs {len(theirs)} B")
     compare_texts("commands.json")
@@ -333,6 +352,7 @@ def main() -> None:
     if (target.kind, target.mc) not in SERVERS:
         ap.error(f"no pinned {target.kind} build for {target.mc}; known: {sorted(SERVERS)}")
     jar = args.jar or (plugin_jar() if args.skip_build else build(args.core, args.jobs))
+    e2e_addon_jar(build=not (args.jar or args.skip_build))
     if OUT.exists():
         shutil.rmtree(OUT)
     folder = run_ours(jar, not args.keep, target)

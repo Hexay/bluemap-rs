@@ -60,7 +60,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - SQL servers (portable MariaDB/MySQL/PostgreSQL in `work/db`): `py -3 tools/dbs.py start|stop|status [mariadb mysql postgres]`;
   tests: `BM_TEST_MYSQL_URL=… BM_TEST_POSTGRES_URL=… cargo test -p bm-storage --test sql_remote -- --ignored`; vs Java
   over the same DBs: `py -3 tools/accept_sql.py [--servers …]`
-- Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots, upstream compare): `py -3 tools/e2e_paper.py`
+- Paper plugin e2e (builds core + jars, real Paper 26.3 + BlueBorder + bots + our test addon `platforms/e2e-addon`, upstream compare): `py -3 tools/e2e_paper.py`
   (Windows or Linux; `--core BIN`/`--jar JAR` to test a prebuilt one; `--server folia`/`--mc 26.2` for other pinned
   builds, see `e2e_server.SERVERS`); Fabric mod e2e (Fabric 26.3 + Carpet bots +
   a Fabric addon): `py -3 tools/e2e_fabric.py` (same flags)

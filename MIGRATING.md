@@ -37,7 +37,7 @@ New: a forced render (`-f`) stopped with Ctrl+C resumes where it left off the ne
    point the plugin at it with `-DBLUEMAP_CORE=/path/to/bluemap` or the `BLUEMAP_CORE` environment variable.
 
 Requires Java 21 or newer. Built against the Paper 1.21.11 API and verified on Paper 26.3; older 1.21.x servers
-should work but are untested. Folia is wired up but not yet tested.
+should work but are untested. Folia 26.2 passes the same end-to-end tests except the ones that need players online.
 
 Unlike upstream, rendering pauses while the server lags: when the average tick time over 10 s goes above 45 ms, and
 resumes below 40 ms. Change this with `render-pause-mspt` / `render-resume-mspt` in `plugin.conf` (`0` turns it off).

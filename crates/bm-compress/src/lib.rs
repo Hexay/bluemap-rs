@@ -33,8 +33,9 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// libdeflate 4 beats zlib-rs 5 on hires tiles both ways: 0.987× Java's bytes vs 0.997×, 35% faster
-/// (docs/12-perf-profile-rs.md). Java's own Deflater bytes are never matched, so compat only pins the format.
+/// libdeflate 4 beats zlib-rs 5 on hires tiles both ways: smaller output and 35% faster (docs/12-perf-profile-rs.md).
+/// Against Java's bytes it is 0.987× on the golden fixtures but 1.022× on the 4096² world (docs/14). Java's own
+/// Deflater bytes are never matched, so compat only pins the format.
 const DEFLATE_LEVEL: i32 = 4;
 
 thread_local! {

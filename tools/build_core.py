@@ -105,15 +105,27 @@ def build(target: str, jobs: int | None) -> Path:
     return dest
 
 
-def build_jars(shims: tuple[str, ...] = SHIMS) -> list[Path]:
+def gradle(*tasks: str) -> None:
     gradlew = PLATFORMS / ("gradlew.bat" if WINDOWS else "gradlew")
-    cmd = [str(gradlew), *(f":{s}:allJars" for s in shims), "--no-daemon", "--console=plain", "-q", "--max-workers=2",
+    cmd = [str(gradlew), *tasks, "--no-daemon", "--console=plain", "-q", "--max-workers=2",
            f"-PreleaseVersion={release_version()}"]
     env = dict(os.environ)
     if jdk_dir(25).is_dir():
         env["JAVA_HOME"] = str(jdk_dir(25))
     subprocess.run(cmd, cwd=PLATFORMS, check=True, env=env)
+
+
+def build_jars(shims: tuple[str, ...] = SHIMS) -> list[Path]:
+    gradle(*(f":{s}:allJars" for s in shims))
     return sorted(j for s in shims for j in (PLATFORMS / s / "build" / "libs").glob(f"bluemap-rs-{s}-*.jar"))
+
+
+def e2e_addon_jar(build: bool = True) -> Path:
+    """The test-only Paper addon (`platforms/e2e-addon`), built unless a jar exists and `build` is off."""
+    jar = PLATFORMS / "e2e-addon" / "build" / "libs" / "bluemap-e2e-addon.jar"
+    if build or not jar.is_file():
+        gradle(":e2e-addon:jar")
+    return jar
 
 
 def stage_host_core(core: Path | None, jobs: int | None) -> None:

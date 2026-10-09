@@ -7,4 +7,4 @@ pluginManagement {
 
 rootProject.name = "bluemap-rs-platforms"
 
-include(":common", ":paper", ":fabric")
+include(":common", ":paper", ":fabric", ":e2e-addon")
