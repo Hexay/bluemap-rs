@@ -42,7 +42,8 @@ Measured on a 6-core/12-thread Xeon E-2136 with 31 GiB RAM and HDD storage. Meth
 | **Storage** | File and SQL (SQLite, MySQL/MariaDB, PostgreSQL), the same layout and schema as BlueMap. Opt-in `optimized` format, about 5× smaller |
 | **Web** | BlueMap 5.28's webapp, unchanged, from the built-in webserver or your own nginx/Apache |
 
-Not yet: Folia, Spigot, NeoForge/Forge, Fabric singleplayer, and BlueMap's Java native addons (resource packs from
+Folia 26.2 passes the plugin tests (maps, commands, addon markers), but nothing has tested it with players online.
+Not yet: Spigot, NeoForge/Forge, Fabric singleplayer, and BlueMap's Java native addons (resource packs from
 addon jars still load). See [MIGRATING.md](MIGRATING.md) for the full list.
 
 ## Install

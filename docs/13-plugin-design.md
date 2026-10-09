@@ -354,8 +354,12 @@ testbox (linux-x64 static musl jar, `--core`/`--jar` prebuilt from Windows):
   `live/players.json` are byte-identical; console text of `storages`, `storages file`, `debug world <map> 0 64 0`
   identical; all generated configs identical except the deliberate `format: optimized` block in `storages/*.conf`.
 - `--server folia --mc 26.2` (Folia 26.2 build 7; BlueBorder and the bots don't declare `folia-supported`, so no
-  marker/player checks) and `--mc 26.2|26.1.2` on Paper (`context` world from each version's vanilla server) pass on
+  player checks) and `--mc 26.2|26.1.2` on Paper (`context` world from each version's vanilla server) pass on
   the Linux testbox, upstream comparison included.
+- Test addon `platforms/e2e-addon` (`folia-supported`, never shipped) on every run, ours and upstream's: its marker
+  set makes `live/markers.json` byte-identical to upstream's on Folia too, and its fixed `SkinProvider` makes both
+  store `assets/playerheads/<uuid>.png` for a bot, byte-identical (skin provider → icon factory → PNG → asset
+  storage → webserver; the Mojang download itself is upstream's code unchanged and not exercised).
 - With every map frozen and the render-threads stopped, the `/bluemap` and `/bluemap maps` console text is identical
   to upstream's.
 - Switching back mid-render: ours stops a forced render of `structures` (31 regions, 1 thread) partway; upstream
@@ -432,8 +436,8 @@ from Windows needs the Apple SDK, so they are unverified locally.
 - musl cores use mimalloc with a 3 ms purge delay (table in §5).
 
 **Left**
-- macOS run on real hardware (CI builds and signs only), Folia with players and a marker addon (none of the e2e
-  addons load on Folia), player-head bytes vs upstream on a real online-mode join (offline bots have no skin),
-  bStats id.
+- macOS: CI runs `cargo test --workspace` on `macos-latest` and the release builds and signs both cores, but no
+  server has run the plugin on a Mac. Folia with players (the bots don't load there; needs a real client or a
+  login-protocol bot). A skin downloaded from Mojang on an online-mode join. bStats id.
 - A world Paper 26.3 generates itself keeps its spawn chunks unlit on disk for the first sessions (even after
   `save-all flush`), so we skip them (upstream wrote no tiles in the same window either); the e2e therefore starts from the lit `context` fixture world.
