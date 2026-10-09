@@ -3,11 +3,13 @@
 Versions follow `<crate version>`; the plugin and mod jars report `5.28+rs.<crate version>`, the BlueMap version
 they replace.
 
-## Unreleased
+## 0.2.0 — 2026-10-09
 
 - `optimized` storage: hires tiles are stored as BMQ3, which models how the renderer builds a tile. Hires data is
   about 0.4× the size of 0.1.0's, and tiles encode faster. An optimized storage written by 0.1.0 is not readable:
   render it again, or convert it to `compat` with 0.1.0 first and back with this version.
+- World reads: an area's chunks are read from each region file up front, instead of chunk by chunk from every
+  render thread on one file handle (which Windows serialises).
 
 ## 0.1.0 — 2026-10-09
 

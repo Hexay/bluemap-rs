@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "bm-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bm-config",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "bm-compress"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "libdeflater",
@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "bm-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bm-java",
  "serde",
@@ -249,7 +249,7 @@ dependencies = [
 
 [[package]]
 name = "bm-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bm-compress",
  "bm-config",
@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "bm-format"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "png",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "bm-golden"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -299,7 +299,7 @@ dependencies = [
 
 [[package]]
 name = "bm-ipc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libc",
  "serde",
@@ -310,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "bm-java"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "libz-sys",
  "thiserror",
@@ -318,7 +318,7 @@ dependencies = [
 
 [[package]]
 name = "bm-map"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bm-compress",
  "bm-config",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "bm-math"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bm-java",
  "thiserror",
@@ -343,14 +343,14 @@ dependencies = [
 
 [[package]]
 name = "bm-nbt"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "bm-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bm-compress",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "bm-resources"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "bm-java",
@@ -387,7 +387,7 @@ dependencies = [
 
 [[package]]
 name = "bm-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bm-compress",
  "bm-format",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "bm-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "bm-compress",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[package]]
 name = "bm-world"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bm-compress",
  "bm-nbt",
