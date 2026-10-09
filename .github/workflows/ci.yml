@@ -19,6 +19,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # ~55 test binaries: without debug info they link in a fraction of the time (Windows PDBs most of all)
+      CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
