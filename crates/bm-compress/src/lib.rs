@@ -4,8 +4,8 @@
 
 pub mod lz4_block;
 
-use std::cell::RefCell;
 use std::io::{self, Read, Write};
+use std::sync::{Mutex, PoisonError};
 
 use flate2::read::{MultiGzDecoder, ZlibDecoder};
 use flate2::write::GzEncoder;
@@ -38,11 +38,29 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Deflater bytes are never matched, so compat only pins the format.
 const DEFLATE_LEVEL: i32 = 4;
 
-thread_local! {
-    static DEFLATER: RefCell<libdeflater::Compressor> = RefCell::new(libdeflater::Compressor::new(
-        libdeflater::CompressionLvl::new(DEFLATE_LEVEL).expect("valid libdeflate level"),
-    ));
+/// Compression contexts, pooled by concurrent use instead of per thread: a webserver compresses on a blocking
+/// pool of hundreds of threads, and a context holds 0.5–1.3 MB.
+struct Pool<T>(Mutex<Vec<T>>);
+
+impl<T> Pool<T> {
+    const fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+
+    fn with<R>(&self, create: impl FnOnce() -> io::Result<T>, work: impl FnOnce(&mut T) -> R) -> io::Result<R> {
+        let pooled = self.0.lock().unwrap_or_else(PoisonError::into_inner).pop();
+        let mut context = match pooled {
+            Some(c) => c,
+            None => create()?,
+        };
+        let result = work(&mut context);
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).push(context);
+        Ok(result)
+    }
 }
+
+static DEFLATERS: Pool<libdeflater::Compressor> = Pool::new();
+static ZSTD_BULK: Pool<zstd::bulk::Compressor<'static>> = Pool::new();
 /// airlift `ZstdOutputStream`'s level.
 const ZSTD_LEVEL: i32 = 3;
 
@@ -164,15 +182,35 @@ pub fn gzip_with_level(data: &[u8], level: u32) -> Vec<u8> {
     encoder.finish().expect("writing to a Vec cannot fail")
 }
 
-/// The last member's ISIZE trailer (size mod 2^32), capped by `limit` and deflate's maximum ratio (~1032:1).
+/// One zstd frame from a reused context at [`ZSTD_LEVEL`]: ~1.6× faster than [`Compression::Zstd`]'s stream
+/// encoder on hires tiles (docs/perf-exp/web-profile.md). Any zstd decoder reads it; the frame header differs
+/// from the stream encoder's, so stored data keeps that one.
+pub fn zstd_bulk(data: &[u8]) -> Result<Vec<u8>> {
+    let compress = |cctx: &mut zstd::bulk::Compressor<'static>| {
+        let bound = zstd::zstd_safe::compress_bound(data.len());
+        let mut out = Vec::with_capacity(bound.min(first_output_guess(data.len())));
+        if cctx.compress_to_buffer(data, &mut out).is_err() {
+            out = Vec::with_capacity(bound);
+            cctx.compress_to_buffer(data, &mut out)?;
+        }
+        out.shrink_to_fit();
+        Ok(out)
+    };
+    ZSTD_BULK
+        .with(|| zstd::bulk::Compressor::new(ZSTD_LEVEL), compress)
+        .and_then(|compressed| compressed)
+        .map_err(|e| Error::Corrupt(Compression::Zstd, e))
+}
+
 /// Output space for a first libdeflate attempt; hires tiles shrink ~18×, worse input retries at the full bound.
 fn first_output_guess(len: usize) -> usize {
     len / 8 + 4096
 }
 
-/// Gzip, or zlib-wrapped deflate when `zlib`, with this thread's libdeflate compressor.
+/// Gzip, or zlib-wrapped deflate when `zlib`, with a pooled libdeflate compressor.
 fn deflate_into(data: &[u8], out: &mut Vec<u8>, zlib: bool) -> io::Result<()> {
-    DEFLATER.with_borrow_mut(|c| {
+    let level = libdeflater::CompressionLvl::new(DEFLATE_LEVEL).expect("valid libdeflate level");
+    let compress = |c: &mut libdeflater::Compressor| {
         let bound = if zlib { c.zlib_compress_bound(data.len()) } else { c.gzip_compress_bound(data.len()) };
         // libdeflate needs the whole output up front; sizing to the bound would leave every buffer at input size
         for size in [bound.min(first_output_guess(data.len())), bound] {
@@ -188,7 +226,8 @@ fn deflate_into(data: &[u8], out: &mut Vec<u8>, zlib: bool) -> io::Result<()> {
             }
         }
         unreachable!("the bound always fits")
-    })
+    };
+    DEFLATERS.with(|| Ok(libdeflater::Compressor::new(level)), compress).and_then(|written| written)
 }
 
 fn gzip_size_hint(data: &[u8], limit: usize) -> usize {

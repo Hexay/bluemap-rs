@@ -25,6 +25,7 @@ Subsystem deep-dives:
 | 15 | [15-beyond-parity.md](15-beyond-parity.md) | Pause reasons, `memory-limit`, MSPT render throttle, low-priority render threads |
 | 16 | [16-fabric.md](16-fabric.md) | Shared shim layout (`platforms/common`), the Fabric mod (26.1–26.3, dedicated servers), e2e |
 | 17 | [17-bmq3-experiment.md](17-bmq3-experiment.md) | BMQ3, the optimized hires encoding: models the mesher, 0.40× of BMQ2, bit-exact, faster to encode |
+| 18 | [18-client-unpack.md](18-client-unpack.md) | Optimized hires tiles sent packed and unpacked in the browser (WASM): wire protocol, client script, serve numbers |
 
 ## What BlueMap is
 
@@ -188,8 +189,10 @@ Settled by the drop-in goal:
   (then Fabric/Forge/NeoForge) wraps the same binary. Sequencing only, not a choice.
 
 - Storage modes — **`compat`** (upstream layout, byte-exact) and **`optimized`** (packed bundles + BMQ3 hires
-  blobs, transcoded back to exact PRBM on serve; hires ~12× smaller than gzip on real terrain, see 17). Webapp unchanged in both;
-  `bluemap --convert-storage <id> --to <format>` moves between them. Optional later: `optimized-static` with a patched webapp tile loader.
+  blobs; hires ~12× smaller than gzip on real terrain, see 17). The webapp bundle is unchanged in both. For
+  `optimized` the server adds a script to `index.html` that fetches tiles packed and unpacks them in the browser
+  (WASM, see 18); any other client gets them transcoded back to exact PRBM on serve.
+  `bluemap --convert-storage <id> --to <format>` moves between them.
 - Storage default — **new installs `optimized`, for file *and* SQL storages; existing BlueMap storages stay
   `compat`** until the user converts. Our webserver transcodes optimized tiles; only external hosting that reads
   storage directly (sql.php, nginx on the file tree) needs `compat` — the generated config says so.

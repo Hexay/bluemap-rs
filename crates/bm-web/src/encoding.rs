@@ -74,6 +74,22 @@ fn plan(c: Compression, is_png: bool, gz_url: bool, accepted: &Accepted) -> (Op,
     (if c == Compression::None { Op::Stored } else { Op::Decode }, None)
 }
 
+/// The coding a packed hires tile (`MapStorage::read_hires_packed`) is sent in. Nothing is stored in a client
+/// coding, so one is made per tile: zstd where accepted (1.8 against 5.0 ms and no larger than gzip,
+/// docs/perf-exp/web-profile.md), else as [`plan`] does for uncompressed data.
+pub fn packed_coding(gz_url: bool, accepted: &Accepted) -> Compression {
+    let (gzip, zstd) = (Compression::Gzip, Compression::Zstd);
+    if gz_url {
+        gzip
+    } else if accepted.accepts(zstd.id()) {
+        zstd
+    } else if accepted.accepts(gzip.id()) {
+        gzip
+    } else {
+        Compression::None
+    }
+}
+
 /// The coding of the bytes [`encode`] sends (`.gz` URLs get gzip bytes unlabelled), known before reading them.
 pub fn body_coding(c: Compression, is_png: bool, gz_url: bool, accepted: &Accepted) -> Option<&'static str> {
     if gz_url { Some(Compression::Gzip.id()) } else { plan(c, is_png, gz_url, accepted).1 }

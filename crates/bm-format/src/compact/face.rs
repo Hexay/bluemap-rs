@@ -68,7 +68,7 @@ impl Face {
     }
 
     /// f32 bits of the 4 vertices' xyz for the block at `cell`, whose hash offset is `d` (x, z).
-    #[inline]
+    #[inline(always)]
     pub fn positions(&self, cell: [i32; 3], d: [f32; 2]) -> [[u32; 3]; 4] {
         let mut out = [[0u32; 3]; 4];
         for a in 0..3 {

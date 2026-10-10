@@ -3,11 +3,11 @@
 use super::ao::{Grid, LEVELS, Probes, pack};
 use super::bytes::stream;
 use super::cells::{self, Frame};
+use super::decode::predict_normals;
 use super::face::Face;
 use super::shapes::Shapes;
 use super::view::{self, AO, BLOCKLIGHT, COLOR, NORMAL, POSITION, PrbmView, QV, SUNLIGHT, UV};
 use super::{Groups, trim};
-use crate::prbm::{normal_byte, surface_normal};
 
 #[derive(Default)]
 pub(super) struct Scratch {
@@ -154,16 +154,6 @@ fn ao_stream(body: &mut Vec<u8>, ao: &[u8], s: &mut Scratch) {
         }
     });
     debug_assert!(LEVELS.iter().enumerate().all(|(n, &l)| usize::from((255 - l) / 64) == n));
-}
-
-/// PRBMWriter normals of a quad's two triangles from its 6 PRBM vertex positions (72 bytes) → 18 bytes.
-pub(super) fn predict_normals(pos: &[u8], pred: &mut [u8]) {
-    let f = |i: usize| f32::from_le_bytes(pos[4 * i..4 * i + 4].try_into().unwrap());
-    for t in 0..2 {
-        let p: [f32; 9] = std::array::from_fn(|i| f(9 * t + i));
-        let n = surface_normal(&p).map(normal_byte);
-        pred[9 * t..9 * t + 9].as_chunks_mut::<3>().0.iter_mut().for_each(|vert| *vert = n);
-    }
 }
 
 /// Quads whose `size`-byte row differs from its prediction, verbatim: `u32 n, u32 index[n], rows[n]`.

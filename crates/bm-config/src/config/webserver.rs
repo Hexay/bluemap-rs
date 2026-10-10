@@ -20,6 +20,8 @@ pub struct WebserverConfig {
     pub additional_headers: Vec<(String, String)>,
     /// Hidden bluemap-rs key: `ETag` on map data so reloads revalidate with 304s (Java sends none).
     pub map_etags: bool,
+    /// Hidden bluemap-rs key: clients may unpack the hires tiles of an `optimized` storage themselves (docs/18).
+    pub client_unpack: bool,
 }
 
 /// `log { file, append, format }`; `file` and `format` are Java `String.format` patterns, passed through verbatim.
@@ -42,6 +44,7 @@ impl Default for WebserverConfig {
             log: WebserverLogConfig::default(),
             additional_headers: Vec::new(),
             map_etags: true,
+            client_unpack: true,
         }
     }
 }

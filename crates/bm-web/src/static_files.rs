@@ -2,7 +2,7 @@
 //! come from [`StaticCache`]; compressible files go out gzipped to clients that accept it (Java never compresses).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::body::Body;
 use http::header::{
@@ -12,6 +12,7 @@ use http::header::{
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::io::ReaderStream;
 
+use crate::client_unpack::{SCRIPT, with_script};
 use crate::content_type;
 use crate::encoding::Accepted;
 use crate::http_date::parse_http_date;
@@ -26,16 +27,41 @@ pub(crate) struct StaticFiles {
     /// Normalized like Java's `webRoot.normalize()`: the ETag hashes this path's string form.
     root: PathBuf,
     cache: StaticCache,
+    /// The `index.html` last served with the client script: the file it was made from, and the result.
+    scripted_index: Mutex<Option<(Arc<FileEntry>, Arc<FileEntry>)>>,
 }
+
+static CLIENT_SCRIPT: LazyLock<Arc<FileEntry>> = LazyLock::new(|| FileEntry::generated(SCRIPT.body.clone()));
 
 impl StaticFiles {
     pub fn new(root: &Path, embedded: bool) -> Self {
         let root: PathBuf = root.components().collect();
-        Self { cache: StaticCache::new(&root, embedded), root }
+        Self { cache: StaticCache::new(&root, embedded), root, scripted_index: Mutex::default() }
+    }
+
+    /// `index` with the client script ([`crate::client_unpack`]), or as it is if the script can't be added.
+    fn with_client_script(&self, index: Arc<FileEntry>) -> Arc<FileEntry> {
+        let mut last = self.scripted_index.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, made)) = last.as_ref().filter(|(source, _)| Arc::ptr_eq(source, &index)) {
+            return made.clone();
+        }
+        let Content::Memory(html) = &index.content else { return index };
+        let Some(html) = with_script(html) else { return index };
+        let made = index.rewritten(html.into());
+        *last = Some((index, made.clone()));
+        made
     }
 
     /// `route_path` is the router's path (leading `/` stripped, `/` for the root); `query` is Java's re-encoded one.
-    pub async fn handle(&self, method: &Method, route_path: &str, query: &str, headers: &HeaderMap) -> Response<Body> {
+    /// `client_unpack`: serve the client script and load it from `index.html`.
+    pub async fn handle(
+        &self,
+        method: &Method,
+        route_path: &str,
+        query: &str,
+        headers: &HeaderMap,
+        client_unpack: bool,
+    ) -> Response<Body> {
         if !method.as_str().eq_ignore_ascii_case("GET") {
             return empty(StatusCode::BAD_REQUEST);
         }
@@ -46,7 +72,10 @@ impl StaticFiles {
             Resolved::Outside => return empty(StatusCode::FORBIDDEN),
             Resolved::Invalid => return empty(StatusCode::NOT_FOUND),
         };
-        let node = self.cache.lookup(&rel).await;
+        let mut node = self.cache.lookup(&rel).await;
+        if client_unpack && node.file.is_none() && rel == SCRIPT.path {
+            node.file = Some(CLIENT_SCRIPT.clone());
+        }
         if !route_path.ends_with('/') && node.is_dir {
             return redirect(path, query);
         }
@@ -66,6 +95,7 @@ impl StaticFiles {
         if rel.ends_with(".php") {
             return empty(StatusCode::FORBIDDEN);
         }
+        let file = if client_unpack && rel == "index.html" { self.with_client_script(file) } else { file };
         let etag = format!("{:x}{:x}{:x}", file.len, java_path_hash(&join(&self.root, &java_path)), file.mtime_ms);
         if not_modified(headers, file.mtime_ms, &etag) {
             return empty(StatusCode::NOT_MODIFIED);

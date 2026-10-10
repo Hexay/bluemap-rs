@@ -2,8 +2,10 @@
 //!
 //! Usage: `cargo run --release -p bm-format --example compact_bench -- <dir with x…/z….prbm.gz> [--level 9]
 //! [--reps 3] [--step 1] [--no-origin] [--streams]`. Tile coordinates come from the path; the world origin assumes
-//! the default hires grid (32-block tiles offset by 2). Times are the fastest of `reps` runs per tile, summed.
+//! the default hires grid (32-block tiles offset by 2). Times are the fastest of `reps` runs per tile, summed. The
+//! last line hashes every blob: it must not change when only the codec's speed does.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -50,6 +52,7 @@ fn main() {
     let mut codec = CompactCodec::new(level as i32);
     let (mut encode, mut decode) = (Duration::ZERO, Duration::ZERO);
     let (mut prbm, mut blob, mut out) = (Vec::new(), Vec::new(), Vec::new());
+    let mut blobs = DefaultHasher::new();
     let (mut tiles, mut raw_mode, mut quads, mut raw, mut gz, mut bytes) = (0, 0, 0, 0, 0, 0);
     for path in paths.iter().step_by(step) {
         let stored = std::fs::read(path).expect("readable tile");
@@ -64,6 +67,7 @@ fn main() {
 
         encode += fastest(reps, || codec.encode_into(&prbm, origin, &mut blob).expect("encode"));
         bytes += blob.len();
+        blob.hash(&mut blobs);
         decode += fastest(reps, || codec.decode_into(&blob, &mut out).expect("decode"));
         assert!(out == prbm, "round trip differs: {}", path.display());
         // an empty tile has nothing to model
@@ -105,4 +109,5 @@ fn main() {
         bytes as f64 / 1e6,
         gz as f64 / bytes as f64,
     );
+    println!("blobs {:016x}", blobs.finish());
 }

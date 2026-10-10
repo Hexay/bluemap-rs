@@ -16,6 +16,7 @@
 
 mod access_log;
 mod app;
+mod client_unpack;
 mod content_type;
 mod encoding;
 mod error;

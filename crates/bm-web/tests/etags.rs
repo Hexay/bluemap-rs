@@ -134,6 +134,12 @@ fn optimized_file_storage() {
     fill(map.as_ref());
     let s = serve(map.clone(), true, dir.path());
     assert_revalidates(&s);
+    let zstd = [("Accept-Encoding", "gzip, deflate, br, zstd")];
+    let hires = "tiles/0/x0/z0.prbm";
+    let tag = get(s.addr, &url(hires), &zstd).header("etag").unwrap().to_owned();
+    assert!(tag.ends_with("-zstd\""), "{tag}");
+    assert_eq!(revalidate(&s, hires, &zstd, &tag).status, 304);
+    assert_eq!(revalidate(&s, hires, &[GZIP], &tag).status, 200, "zstd tag for a gzip client");
     assert_rewrite_changes_tag(&s, map.as_ref());
 }
 

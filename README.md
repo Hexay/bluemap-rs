@@ -31,6 +31,38 @@ On a 4096×4096-block world (100 region files), a full render from scratch, same
 Measured on a 6-core/12-thread Xeon E-2136 with 31 GiB RAM and HDD storage. Method, raw numbers and caveats:
 [docs/14](docs/14-real-world-validation.md).
 
+### Which storage format
+
+Same world and machine; the better value in each row is bold:
+
+| | `compat` (BlueMap's layout) | `optimized` |
+|---|---:|---:|
+| Render, wall time | 77 s | **49 s** ¹ |
+| Render, CPU time | **7.9 min** | 8.3 min ¹ |
+| Size on disk | 1,576 MiB in 16,865 files | **133 MiB in 306 files** |
+| Serve a hires tile (server CPU) | 0.08 ms | **0.05 ms** ² |
+| Bytes sent per hires tile | 96 KB | **7 KB** ² |
+| Hires tiles served per second | 50,000 | **105,000** ² |
+| Can be served by | **bluemap-rs, Java BlueMap, nginx, `sql.php`** | bluemap-rs only |
+
+¹ Measured with the previous optimized encoding; the size is the current one.
+² With bluemap-rs's webserver, which has the browser unpack optimized tiles itself
+([docs/18](docs/18-client-unpack.md)). A client that doesn't (another webapp, or `index.html` served by nginx) is
+sent ordinary tiles, which the server has to rebuild.
+
+Serving a hires tile nobody requested recently, by who asks for it:
+
+| Storage, client | Server CPU per tile | Tiles per second | Sent per tile |
+|---|---:|---:|---:|
+| `compat` | 0.08 ms | 50,259 | 96 KB |
+| `optimized`, browser unpacks, zstd | **0.05 ms** | **105,123** | **7 KB** |
+| `optimized`, browser unpacks, gzip | 0.46 ms | 13,971 | 8 KB |
+| `optimized`, client without the script, zstd | 3.04 ms | 1,621 | 92 KB |
+| `optimized`, client without the script, gzip | 7.09 ms | 999 | 100 KB |
+
+CPU per tile is at 1 connection, tiles per second at 32. A tile served again from the server's cache costs the same
+as `compat` on every row.
+
 ## What works
 
 | | |
@@ -40,7 +72,7 @@ Measured on a 6-core/12-thread Xeon E-2136 with 31 GiB RAM and HDD storage. Meth
 | **Fabric mod** | Dedicated servers, Fabric 26.1–26.3 (verified on 26.3) |
 | **Worlds** | Every chunk format from Minecraft 1.13 to 26.x; checked against Java BlueMap on 1.16.5–26.3 worlds |
 | **Storage** | File and SQL (SQLite, MySQL/MariaDB, PostgreSQL), the same layout and schema as BlueMap. Opt-in `optimized` format, about 12× smaller |
-| **Web** | BlueMap 5.28's webapp, unchanged, from the built-in webserver or your own nginx/Apache |
+| **Web** | BlueMap 5.28's webapp, unchanged, from the built-in webserver or your own nginx/Apache. For `optimized` storage the built-in webserver adds one script so browsers unpack tiles themselves |
 
 Folia 26.2 passes the plugin tests (maps, commands, addon markers), but nothing has tested it with players online.
 Not yet: Spigot, NeoForge/Forge, Fabric singleplayer, and BlueMap's Java native addons (resource packs from

@@ -9,6 +9,7 @@ description = "BlueMap's integrated webserver: webroot + bundled webapp, map sto
 
 [dependencies]
 axum.workspace = true
+base64.workspace = true
 bm-compress.workspace = true
 bm-config.workspace = true
 bm-map.workspace = true

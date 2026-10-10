@@ -1,5 +1,6 @@
 //! An optimized storage serves the same map as its compat original: per hires tile the same decompressed PRBM
-//! bytes and the same coding choices, for every Accept-Encoding and for `.gz` URLs; everything else unchanged.
+//! bytes and the same coding choices, for every Accept-Encoding and for `.gz` URLs, except that a client accepting
+//! zstd gets zstd; everything else unchanged.
 
 mod common;
 
@@ -48,6 +49,12 @@ fn compare(compat: &Path, scratch: &Path) -> usize {
             }
             let (ga, gb) = (get(sa.addr, &format!("{path}.gz"), &[]), get(sb.addr, &format!("{path}.gz"), &[]));
             assert!(gunzip(&ga.body) == gunzip(&gb.body), "{path}.gz differs");
+            // twice: the second reply comes from the transcode cache
+            for _ in 0..2 {
+                let zb = get(sb.addr, &path, &[("Accept-Encoding", "gzip, deflate, br, zstd")]);
+                assert_eq!(zb.header("content-encoding"), Some("zstd"), "{path}");
+                assert!(zb.decoded() == gunzip(&ga.body), "{path} as zstd differs");
+            }
             tiles += 1;
         }
         for item in ["settings.json", "textures.json", "tiles/1/x0/z0.png", "tiles/0/x99/z99.prbm"] {

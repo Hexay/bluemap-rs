@@ -33,5 +33,5 @@ pub use file::{FileMapStorage, FileStorage};
 pub use format::{FILE_MARKER, Format, SQL_MARKER};
 pub use key::{GridKey, ItemKey, escape_asset_name};
 pub use locks::{KeyLock, KeyLocks, LockKey};
-pub use optimized::OptimizedMapStorage;
+pub use optimized::{OptimizedMapStorage, packed_model_frame, unpack_hires, with_unpacked_hires};
 pub use sql::{Dialect, STATEMENT_TIMEOUT, SqlConfig, SqlMapStorage, SqlStorage, UNBOUNDED_CONNECTIONS};

@@ -7,11 +7,24 @@ rust-version.workspace = true
 publish.workspace = true
 description = "BlueMap's on-disk and on-the-wire formats: tile grids and paths, PRBM, compact tiles"
 
+[features]
+default = ["codec"]
+# the BMQ3 encoder and blob codec (zstd, a C build); without it compact only unpacks model bodies (crates/bm-wasm)
+codec = ["dep:zstd", "dep:rustc-hash"]
+
 [dependencies]
 png.workspace = true
-rustc-hash.workspace = true
+rustc-hash = { workspace = true, optional = true }
 thiserror.workspace = true
-zstd.workspace = true
+zstd = { workspace = true, optional = true }
+
+[[example]]
+name = "compact_bench"
+required-features = ["codec"]
+
+[[test]]
+name = "compact_corpus"
+required-features = ["codec"]
 
 [dev-dependencies]
 flate2.workspace = true

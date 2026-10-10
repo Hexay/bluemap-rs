@@ -155,12 +155,36 @@ pub(crate) fn normal_byte(v: f32) -> u8 {
 }
 
 /// Unit normal of the triangle's plane, in Java's float/double mix.
-pub(crate) fn surface_normal(p: &[f32]) -> [f32; 3] {
-    let (ax, ay, az) = (p[3] - p[0], p[4] - p[1], p[5] - p[2]);
-    let (bx, by, bz) = (p[6] - p[0], p[7] - p[1], p[8] - p[2]);
-    let (nx, ny, nz) = (ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx);
+pub(crate) fn surface_normal(p: &[f32; 9]) -> [f32; 3] {
+    let [nx, ny, nz] = plane(p);
     let length = ((nx * nx + ny * ny + nz * nz) as f64).sqrt() as f32;
     [nx / length, ny / length, nz / length]
+}
+
+#[inline(always)]
+fn plane(p: &[f32; 9]) -> [f32; 3] {
+    let (ax, ay, az) = (p[3] - p[0], p[4] - p[1], p[5] - p[2]);
+    let (bx, by, bz) = (p[6] - p[0], p[7] - p[1], p[8] - p[2]);
+    [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx]
+}
+
+/// Magnitudes whose square neither overflows nor leaves f32's normal range.
+const SQUARABLE: std::ops::Range<f32> = 1e-12..1e12;
+
+/// `surface_normal(p).map(normal_byte)` without the square root for axis-aligned triangles: there the quotient is
+/// within a few ulp of ±1, which [`normal_byte`] maps to one byte per sign. Which axis a face looks along is
+/// unpredictable, so the test and the bytes are computed without branches.
+// always inlined: as a call, loading the 9 floats the caller just stored one by one stalls on store forwarding
+#[inline(always)]
+pub(crate) fn normal_bytes(p: &[f32; 9]) -> [u8; 3] {
+    let n = plane(p);
+    let zero = n.map(|c| u8::from(c == 0.0));
+    let squarable = n.map(|c| u8::from(SQUARABLE.contains(&c.abs())));
+    let exact = (zero[0] | squarable[0]) & (zero[1] | squarable[1]) & (zero[2] | squarable[2]);
+    if zero[0] + zero[1] + zero[2] == 2 && exact == 1 {
+        return n.map(|c| u8::from(c > 0.0) * 127 + u8::from(c < 0.0) * 128);
+    }
+    surface_normal(p).map(normal_byte)
 }
 
 #[cfg(test)]
@@ -217,6 +241,23 @@ mod tests {
         assert_eq!(normal_byte(-1.0) as i8, -128);
         assert_eq!(normal_byte(0.0) as i8, 0, "(int)-0.5 truncates to 0");
         assert_eq!(surface_normal(&[0., 0., 0., 0., 0., 1., 1., 0., 0.]), [0., 1., 0.]);
+    }
+
+    #[test]
+    fn normal_bytes_match_the_square_root_path() {
+        let slow = |p: &[f32; 9]| surface_normal(p).map(normal_byte);
+        for bits in (0..=u32::MAX).step_by(40_009) {
+            let s = f32::from_bits(bits);
+            for t in [1.0, -1.0, 3.3e-7, -7.7e5, 0.0, 1e-20, 1e20] {
+                for axis in 0..3 {
+                    let mut p = [0f32; 9];
+                    (p[3 + (axis + 1) % 3], p[6 + (axis + 2) % 3]) = (s, t);
+                    assert_eq!(normal_bytes(&p), slow(&p), "{s:e} {t:e} axis {axis}");
+                }
+            }
+        }
+        let tilted = [0.25, 1., 0.5, 1.5, 2., 0.75, -1., 0.125, 3.];
+        assert_eq!(normal_bytes(&tilted), slow(&tilted));
     }
 
     #[test]

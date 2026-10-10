@@ -58,6 +58,17 @@ fn zstd_ctx(level: i32, window_log: Option<u32>) -> Enc {
     })
 }
 
+/// A reused context at `level` with advanced parameters on top.
+fn zstd_tuned(level: i32, params: &[CParameter]) -> Enc {
+    let mut c = zstd::bulk::Compressor::new(level).unwrap();
+    params.iter().for_each(|&p| c.set_parameter(p).unwrap());
+    Box::new(move |data, out| {
+        out.clear();
+        out.reserve(zstd::zstd_safe::compress_bound(data.len()));
+        c.compress_to_buffer(data, out).unwrap();
+    })
+}
+
 fn product(c: Compression) -> Enc {
     Box::new(move |d, o| c.compress_into(d, o).unwrap())
 }
@@ -86,11 +97,24 @@ fn codecs() -> Vec<Codec> {
         c("lz4-java blocks (product)", false, Dec::Product(Compression::Lz4), product(Compression::Lz4)),
         c("zstd-3 (product, stream)", false, Dec::Product(Compression::Zstd), product(Compression::Zstd)),
     ];
-    for level in 4..=9 {
+    for level in 1..=9 {
         v.push(c(&format!("libdeflate gzip-{level}"), false, Dec::Product(Compression::Gzip), libdeflate_gz(level)));
     }
     for level in [1, 3, 6, 9, 12, 15, 16, 17, 18, 19] {
         v.push(c(&format!("zstd-{level} ctx"), level >= 15, Dec::ZstdBulk, zstd_ctx(level, None)));
+    }
+    for level in [-5, -3, -1, 2] {
+        v.push(c(&format!("zstd tuned {level}"), false, Dec::ZstdBulk, zstd_tuned(level, &[])));
+    }
+    for level in [1, 3] {
+        for min_match in [5, 6, 7] {
+            let name = format!("zstd tuned {level} minmatch {min_match}");
+            v.push(c(&name, false, Dec::ZstdBulk, zstd_tuned(level, &[CParameter::MinMatch(min_match)])));
+        }
+        for hash_log in [12, 14, 16] {
+            let name = format!("zstd tuned {level} hashlog {hash_log}");
+            v.push(c(&name, false, Dec::ZstdBulk, zstd_tuned(level, &[CParameter::HashLog(hash_log)])));
+        }
     }
     for (level, w) in [(1, 24), (3, 24), (3, 27), (6, 24), (9, 24), (12, 24), (19, 24)] {
         v.push(c(&format!("zstd-{level} ctx + LDM w{w}"), level >= 15, Dec::ZstdBulk, zstd_ctx(level, Some(w))));
