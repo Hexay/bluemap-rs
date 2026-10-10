@@ -70,8 +70,17 @@ The script first runs `tools/check_client_unpack.mjs`: the served client script 
 tiles through its `fetch` wrapper and comparing each with the compat webroot. 505 sampled tiles of that world were
 identical, 8,272 B on the wire each (Node asks for gzip).
 
-Not measured: the browser's unpack time per tile (natively the same code takes ~1 ms for these tiles), and the
-feature has not been exercised in a real browser yet, only through Node's `fetch`.
+In a real browser (`tools/check_client_unpack_browser.mjs`, headless Chrome over the DevTools protocol, the same
+map at x 0, z 0): the webapp's own 42 hires tile requests were all answered packed as zstd, 3,964 B on the wire
+each; 40 of them refetched in the page were byte-identical to the PRBM the server makes for a client without the
+script; the page logged no error or warning and drew the tiles.
+
+```
+node tools/check_client_unpack_browser.mjs "http://<host>:<port>/#<map>:0:70:0:60:0:0.9:0:0:perspective" \
+    <chrome or edge exe> [screenshot.png]
+```
+
+Not measured: the browser's unpack time per tile (natively the same code takes ~1 ms for these tiles).
 
 ## Limits
 
