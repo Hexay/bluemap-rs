@@ -68,3 +68,68 @@ Not hot: tile-path parsing (`map_handler.rs:134`), routing loop (`app.rs:126`), 
 | I | SSE/live: gzip `players.json`/`markers.json` once per change (cache), optional per-connection gzip stream with sync flush; round doubles to 3 dp | `live.rs` | ~3–5× fewer live bytes (17.6 MB/h per tab → ~4 MB/h, estimate) |
 
 Order by value: C and B (bytes, every user), A (CPU+latency on every page load and every 304), D/E (CPU+RSS spikes from non-browser clients), then F/G/H/I.
+
+## Optimized storage (BMQ3), 2026-10-09
+Same fixture, converted with `--convert-storage file --to optimized` (maps folder 82 → 6.7 MB), `--etags`, 5 s per
+scenario, one run, compat and optimized back to back on a PC shared with other builds. CPU ms/req, 1 connection
+(32 connections in brackets):
+
+| scenario | compat | optimized, first measured | optimized, now |
+|---|---|---|---|
+| hires, every tile once, browser `Accept-Encoding` | 0.27 (0.31), p50 268 µs | 7.76 (12.97), p50 6.9 ms | **3.09** (5.93), p50 2.7 ms |
+| same, `Accept-Encoding: gzip` | | 7.76 | 6.07 (12.76) |
+| hires, identity | 1.92 (2.52) | 2.09 (3.56) | 1.70 (5.06) |
+| one-view mix, repeated | 0.24 (0.19) | 1.40 (1.04) | **0.20** (0.48; compat in that run 0.29) |
+| reload, hires revalidated → 304 | 0.21 (0.17) | 0.23 (0.24) | 0.20 (0.58) |
+
+First measured: every request unpacked the blob (about the cost of a gunzip) and gzipped the 1.24 MB PRBM, which
+was 73% of the request. What changed:
+- **zstd for packed tiles** (`encoding::packed_coding`): a client that accepts zstd gets `Content-Encoding: zstd`.
+  Per tile, single thread (`codec_bench`): libdeflate gzip-4 4.99 ms at 0.99× Java's gzip bytes, gzip-1 2.24 ms at
+  1.44×, zstd-3 with a reused context 1.80 ms at 0.97×. Compat storages still follow Java's negotiation.
+- **Transcode cache keyed by the blob** (`transcode::packed`, `MapStorage::read_hires_packed`): ~6 KB in, ~70 KB
+  out, so the 32 MB budget holds a few hundred tiles and a hit skips unpack and compression. A view that is
+  requested again costs what compat does.
+- **Contexts pooled by concurrent use instead of per thread** (`bm_compress::Pool`, `bm_storage::unpack_hires`).
+  Under load the blocking pool grows far past the connection count (70–540 threads at 32 connections, more when the
+  PC is busy) and each thread kept a BMQ3 decoder and a libdeflate compressor: live heap 435 MB and 857 MB working
+  set at 538 threads before, 71–73 MB and 93–173 MB after, whatever the thread count.
+
+The crawl rows (every tile once, shuffled) are the cold cost; hires throughput at 32 connections went 940 →
+~2 000–3 000 req/s against compat's ~30 000. Timings moved ±50% between runs on this PC, so read them as ratios.
+
+```
+py -3 docs/perf-exp/web_bench.py <optimized webroot> --urls-from work/bluemap/structures/web --secs 5 --sse 0 \
+  --only hires_gzip,hires_gzip_only,hires_identity,page_view_mix,reload_hires --server-arg=--etags \
+  --server-arg=--optimized [--conns 1]
+target/profiling/examples/codec_bench.exe work/bluemap/structures/web/maps --every 4 --reps 3 --only "libdeflate,zstd-3 ctx"
+```
+
+## Optimized storage, round 2 (testbox, 2026-10-10)
+Linux, 6-core Xeon E-2136; the Windows numbers above came from a PC short of memory and are not comparable.
+End-to-end rows and the client-side unpacking that came out of this round: docs/18.
+
+- **A cold tile is unpack + recompress**: on the 4096² world (1.6 MB of PRBM per tile) 3.04 ms CPU = ~1.0 ms
+  unpack (the identity row is 1.14 ms) + ~1.9 ms zstd; a gzip client pays 7.09 ms; compat 0.08 ms.
+- **zstd has nothing left to tune**: on 289 fixture tiles every setting lands at 1.47–1.68 ms per tile, from level
+  -5 (3.1× Java's gzip bytes) to level 3 (0.97×), with min-match 5–7 or hash-log 12–16 on top
+  (`codec_bench --only "zstd tuned"`). `perf` splits the plain level 3 run roughly in half between match search
+  and sequence/entropy coding. libdeflate: level 1 2.79 ms at 1.44×, level 3 4.43 ms at 1.05×, level 4 4.31 ms at
+  0.99×.
+- **Unpack 1.45× faster** (`compact_bench`, old against new binary back to back, ns/quad): fixture 119–139 →
+  84–89, 4096² world 136 → 93. `normal_bytes` was a call that loaded as one 8-byte read the floats its caller had
+  just stored one by one (a store-forwarding stall, 23% of the function on that instruction); it and
+  `Face::positions` are now `#[inline(always)]`, an axis-aligned triangle skips the square root, and each quad's
+  position, normal, uv and ao rows are written in one pass into a pre-sized buffer. A branch-free rewrite of the
+  normal alone changed nothing. The blob hash `compact_bench` prints is unchanged, so stored tiles unpack to the
+  same bytes.
+- **Cache**: a packed tile is admitted the first time it is transcoded (it was the second), and lookup is a hash
+  lookup instead of a scan of up to 1024 entries under the lock. 200 tiles requested repeatedly: 0.09 ms against
+  compat's 0.08.
+- **Not chased**: peak RSS of 576–698 MB at 32 connections on the PRBM paths. `serve_bench` counts through the
+  system allocator, release builds use mimalloc; whether the server itself grows like that is unmeasured.
+
+```
+py -3 tools/testbox.py run <name> --sync --lock -- bash docs/perf-exp/testbox_web.sh ~/bmrs-<name> \
+    <compat webroot> <optimized webroot of the same map>
+```

@@ -1,5 +1,5 @@
 """usage: web_bench.py <webroot> [--secs 8] [--conns 32] [--only name,…] [--log file] [--sse N] [--attach]
-                    [--server-arg ARG]…
+                    [--server-arg ARG]… [--urls-from <compat webroot>]
 
 Starts examples/serve_bench on <webroot>, runs examples/load_bench scenarios against it, and prints one table row
 per scenario: throughput, latency percentiles, server CPU ms/request, allocations/request, working set.
@@ -56,6 +56,7 @@ def scenarios(webroot: Path):
     ims = "If-Modified-Since: Fri, 1 Jan 2100 00:00:00 GMT"
     return m.name, [
         ("hires_gzip", hires, [BROWSER_AE]),
+        ("hires_gzip_only", hires, ["Accept-Encoding: gzip"]),
         ("hires_identity", hires, []),
         ("lowres_png", lowres, [BROWSER_AE]),
         ("missing_204", missing, [BROWSER_AE]),
@@ -149,9 +150,10 @@ def main():
     ap.add_argument("--sse", type=int, default=1000)
     ap.add_argument("--attach", action="store_true", help="drive an already running server on --port")
     ap.add_argument("--server-arg", action="append", default=[], help="extra serve_bench argument, e.g. --etags")
+    ap.add_argument("--urls-from", help="compat webroot to list tile URLs from (an optimized one has no tile files)")
     a = ap.parse_args()
     webroot = Path(a.webroot)
-    map_id, scen = scenarios(webroot)
+    map_id, scen = scenarios(Path(a.urls_from or webroot))
     only = set(filter(None, a.only.split(",")))
     srv = Attached() if a.attach else Server(webroot, a.port, a.log, a.server_arg)
     addr = f"127.0.0.1:{a.port}"

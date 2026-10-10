@@ -79,9 +79,15 @@ format: optimized
 
 - **Existing storages** (no `format` setting, or written by Java BlueMap) stay `compat`, BlueMap's original
   layout. Nothing changes on disk.
-- **`optimized`** packs hires tiles into a compact encoding that is several times smaller and faster to write. The
-  webapp is unchanged, but only bluemap-rs's own webserver can serve it. nginx on the file tree and `sql.php`
-  need `compat`.
+- **`optimized`** packs hires tiles into a compact encoding that is several times smaller and faster to write.
+  Only bluemap-rs's own webserver can serve it; nginx on the file tree and `sql.php` need `compat`.
+- While it serves an optimized storage, the webserver adds one script to the `index.html` it sends (the files in
+  your webroot are not changed). With it, browsers download the packed tiles and unpack them themselves, which
+  takes the work off the server and sends about a twelfth of the bytes. Without it (another webapp, or
+  `index.html` served by nginx) tiles arrive as plain PRBM, at a higher server cost per tile. To turn it off for
+  everyone set `client-unpack: false` in `webserver.conf`; a single viewer can run
+  `localStorage.setItem("bluemap-rs-client-unpack", "off")` in the browser console
+  ([docs/18](docs/18-client-unpack.md)).
 - A storage records its own format, and a config that disagrees with it is refused rather than guessed.
   Converting is a separate step. Stop BlueMap first, then:
 

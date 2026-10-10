@@ -400,10 +400,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bm-wasm"
+version = "0.2.0"
+dependencies = [
+ "bm-format",
+]
+
+[[package]]
 name = "bm-web"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "bm-compress",
  "bm-config",
  "bm-format",

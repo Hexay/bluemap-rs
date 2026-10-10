@@ -1,0 +1,18 @@
+[package]
+name = "bm-wasm"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BMQ3 model-body unpacker for the browser (wasm32-unknown-unknown), shipped inside bm-web's client script"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# by path: the workspace entry can't drop default features, and zstd (C) does not build for the browser
+bm-format = { path = "../bm-format", default-features = false }
+
+[dev-dependencies]
+bm-format.workspace = true

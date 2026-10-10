@@ -8,8 +8,8 @@ use http::header::{CONTENT_ENCODING, CONTENT_TYPE, ETAG, VARY};
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::sync::CancellationToken;
 
-use crate::content_type;
 use crate::encoding::Accepted;
+use crate::{client_unpack, content_type};
 use crate::live::LiveMap;
 use crate::map_data::{self, Reply, Target};
 use crate::response::{empty, header_static};
@@ -30,6 +30,7 @@ pub(crate) async fn handle(
     method: &Method,
     headers: &HeaderMap,
     etags: bool,
+    client_unpack: bool,
     shutdown: &CancellationToken,
 ) -> Response<Body> {
     if let Some(live) = &route.live {
@@ -40,7 +41,7 @@ pub(crate) async fn handle(
             _ => {}
         }
     }
-    storage(route, path, method, headers, etags).await
+    storage(route, path, method, headers, etags, client_unpack).await
 }
 
 fn live_json(body: Option<bytes::Bytes>) -> Response<Body> {
@@ -65,7 +66,14 @@ fn no_store(res: &mut Response<Body>) {
     }
 }
 
-async fn storage(route: &MapRoute, path: &str, method: &Method, headers: &HeaderMap, etags: bool) -> Response<Body> {
+async fn storage(
+    route: &MapRoute,
+    path: &str,
+    method: &Method,
+    headers: &HeaderMap,
+    etags: bool,
+    client_unpack: bool,
+) -> Response<Body> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let path = path.strip_suffix('/').unwrap_or(path);
     let (path, gz_url) = match path.strip_suffix(".gz") {
@@ -93,6 +101,7 @@ async fn storage(route: &MapRoute, path: &str, method: &Method, headers: &Header
         accepted: Accepted::from_headers(headers),
         if_none_match: IfNoneMatch::from_request(method, headers),
         etags,
+        unpacks: client_unpack.then(|| client_unpack::requested(headers)),
     };
     let storage = route.storage.clone();
     match tokio::task::spawn_blocking(move || map_data::serve(storage.as_ref(), req)).await {
@@ -101,17 +110,21 @@ async fn storage(route: &MapRoute, path: &str, method: &Method, headers: &Header
             res.headers_mut().insert(ETAG, etag);
             res
         }
-        Ok(Ok(Reply::Found { encoded, etag })) => {
+        Ok(Ok(Reply::Found { encoded, etag, negotiated })) => {
             let mut res = Response::new(Body::from(encoded.body));
-            header_static(&mut res, CONTENT_TYPE, content_type);
+            header_static(&mut res, CONTENT_TYPE, negotiated.unwrap_or(content_type));
             if let Some(coding) = encoded.content_encoding {
                 header_static(&mut res, CONTENT_ENCODING, coding);
             }
+            let has_etag = etag.is_some();
             if let Some(etag) = etag {
                 res.headers_mut().insert(ETAG, etag);
-                if !gz_url {
-                    header_static(&mut res, VARY, "Accept-Encoding");
-                }
+            }
+            // a cache must not hand a packed body to a client that did not ask for one
+            if negotiated.is_some() && !gz_url {
+                header_static(&mut res, VARY, "Accept, Accept-Encoding");
+            } else if has_etag && !gz_url {
+                header_static(&mut res, VARY, "Accept-Encoding");
             }
             res
         }

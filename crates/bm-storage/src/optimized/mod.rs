@@ -1,12 +1,13 @@
 //! The `optimized` format ([`crate::format`]): a compat map storage whose hires grid is replaced by compact blobs
 //! ([`bm_format::compact`]) in a [`HiresStore`] (bundles for files, rows for SQL). Hires cells go in and out as
-//! raw PRBM (`grid_compression(Hires)` is `None`), so the web layer, `copy_map` and the renderer need no special
-//! case: reads decode a blob back to the exact PRBM bytes, writes encode them.
+//! raw PRBM (`grid_compression(Hires)` is `None`), so `copy_map` and the renderer need no special case: reads
+//! decode a blob back to the exact PRBM bytes, writes encode them. The webserver takes the blob itself
+//! ([`MapStorage::read_hires_packed`]) to cache what it sends by it.
 
 pub(crate) mod bundle;
 
 use std::cell::RefCell;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use bm_compress::Compression;
 use bm_format::compact::CompactCodec;
@@ -44,7 +45,7 @@ thread_local! {
     static CODEC: RefCell<(CompactCodec, Vec<u8>)> = RefCell::new((CompactCodec::default(), Vec::new()));
 }
 
-/// Keeps the per-thread blob buffer from pinning a huge tile's allocation.
+/// Keeps a reused blob or PRBM buffer from pinning a huge tile's allocation.
 const BLOB_KEEP: usize = 4 << 20;
 
 pub struct OptimizedMapStorage {
@@ -168,6 +169,14 @@ impl MapStorage for OptimizedMapStorage {
         *self.grid.write().unwrap_or_else(PoisonError::into_inner) = Some(grid);
     }
 
+    fn packs_hires(&self) -> bool {
+        true
+    }
+
+    fn read_hires_packed(&self, tile: Tile) -> Result<Option<(Vec<u8>, Option<Version>)>> {
+        self.hires.read_versioned(tile)
+    }
+
     fn grid_version(&self, grid: GridKey, tile: Tile) -> Result<Option<Version>> {
         if grid == GridKey::Hires { self.hires.version(tile) } else { self.inner.grid_version(grid, tile) }
     }
@@ -192,9 +201,43 @@ impl MapStorage for OptimizedMapStorage {
 #[cfg(test)]
 mod tests;
 
-/// A blob back to its PRBM bytes.
+/// A blob from [`MapStorage::read_hires_packed`] back to its PRBM bytes.
+pub fn unpack_hires(blob: &[u8]) -> Result<Vec<u8>> {
+    with_decoder(|codec, _| {
+        let mut prbm = Vec::new();
+        codec.decode_into(blob, &mut prbm)?;
+        Ok(prbm)
+    })
+}
+
+/// The zstd frame around the model body of a blob from [`MapStorage::read_hires_packed`], for a client that
+/// unpacks the body itself (`bm_format::compact::BodyUnpacker`); `None` for a tile the model could not hold.
+pub fn packed_model_frame(blob: &[u8]) -> Option<&[u8]> {
+    bm_format::compact::model_frame(blob)
+}
+
+/// `use_prbm` on the PRBM bytes of a blob from [`MapStorage::read_hires_packed`], unpacked into a reused buffer.
+pub fn with_unpacked_hires<R>(blob: &[u8], use_prbm: impl FnOnce(&[u8]) -> R) -> Result<R> {
+    with_decoder(|codec, prbm| {
+        let used = codec.decode_into(blob, prbm).map(|()| use_prbm(prbm));
+        if prbm.capacity() > BLOB_KEEP {
+            *prbm = Vec::new();
+        }
+        Ok(used?)
+    })
+}
+
+/// A decoder and a PRBM buffer, pooled by concurrent use, not per thread: a webserver reads on a blocking pool of
+/// hundreds of threads, and each pair keeps a few MB.
+fn with_decoder<R>(work: impl FnOnce(&mut CompactCodec, &mut Vec<u8>) -> R) -> R {
+    static DECODERS: Mutex<Vec<(CompactCodec, Vec<u8>)>> = Mutex::new(Vec::new());
+    let pooled = DECODERS.lock().unwrap_or_else(PoisonError::into_inner).pop();
+    let (mut codec, mut prbm) = pooled.unwrap_or_default();
+    let result = work(&mut codec, &mut prbm);
+    DECODERS.lock().unwrap_or_else(PoisonError::into_inner).push((codec, prbm));
+    result
+}
+
 fn decode(blob: &[u8]) -> Result<Stored> {
-    let mut prbm = Vec::new();
-    CODEC.with(|c| c.borrow_mut().0.decode_into(blob, &mut prbm))?;
-    Ok(Stored { data: prbm, compression: Compression::None })
+    Ok(Stored { data: unpack_hires(blob)?, compression: Compression::None })
 }

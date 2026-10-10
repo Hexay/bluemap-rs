@@ -45,6 +45,18 @@ impl FileEntry {
         Arc::new(Self { len, mtime_ms, content, last_modified, embedded, gzip: OnceLock::new() })
     }
 
+    /// A file that exists only in this server.
+    pub fn generated(data: Bytes) -> Arc<Self> {
+        Self::new(data.len() as u64, 0, Content::Memory(data), true)
+    }
+
+    /// This file with a rewritten body. Its mtime moves past the `If-Modified-Since` slack, so a copy of the
+    /// original in a browser cache is not confirmed as current.
+    pub fn rewritten(&self, data: Bytes) -> Arc<Self> {
+        let mtime_ms = if self.mtime_ms > 0 { self.mtime_ms + 2000 } else { 0 };
+        Self::new(data.len() as u64, mtime_ms, Content::Memory(data), self.embedded)
+    }
+
     fn memory_len(&self) -> usize {
         match &self.content {
             Content::Memory(b) => b.len(),

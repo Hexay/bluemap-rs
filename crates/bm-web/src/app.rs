@@ -43,6 +43,9 @@ pub struct WebOptions {
     /// Send `ETag` (and `Vary`) on map data so reloads revalidate with 304s; Java sends neither. A matching
     /// `If-None-Match` gets a 304 either way.
     pub map_etags: bool,
+    /// Let clients unpack the hires tiles of storages that pack them (docs/18): `index.html` loads a script that
+    /// asks for tiles as stored. Clients without the script are served as before.
+    pub client_unpack: bool,
 }
 
 impl WebOptions {
@@ -54,6 +57,7 @@ impl WebOptions {
             serve_embedded_webapp: true,
             access_log: AccessLog::disabled(),
             map_etags: true,
+            client_unpack: true,
         }
     }
 
@@ -70,6 +74,7 @@ impl WebOptions {
             additional_headers: config.additional_headers.clone(),
             access_log: AccessLog::new(&config.log.format, sinks)?,
             map_etags: config.map_etags,
+            client_unpack: config.client_unpack,
             ..Self::new(&config.webroot)
         })
     }
@@ -86,6 +91,7 @@ pub struct WebApp {
     extra: ExtraHeaders,
     log: AccessLog,
     map_etags: bool,
+    client_unpack: bool,
     shutdown: CancellationToken,
 }
 
@@ -102,6 +108,7 @@ impl WebApp {
             extra: ExtraHeaders::new(&options.additional_headers)?,
             log: options.access_log,
             map_etags: options.map_etags,
+            client_unpack: options.client_unpack,
             shutdown: CancellationToken::new(),
         })
     }
@@ -146,10 +153,13 @@ impl WebApp {
             if let Some(rest) = rest.filter(|r| !r.contains(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])) {
                 let rest = rest.strip_prefix('/').unwrap_or(rest);
                 let rest = if rest.is_empty() { "/" } else { rest };
-                return map_handler::handle(map, rest, &req.method, &req.headers, self.map_etags, &self.shutdown).await;
+                let (etags, unpack) = (self.map_etags, self.client_unpack);
+                return map_handler::handle(map, rest, &req.method, &req.headers, etags, unpack, &self.shutdown).await;
             }
         }
-        self.statics.handle(&req.method, route_path, query, &req.headers).await
+        // the webapp only gets the client script while a map has something for it to unpack
+        let client_unpack = self.client_unpack && maps.iter().any(|(_, map)| map.storage.packs_hires());
+        self.statics.handle(&req.method, route_path, query, &req.headers, client_unpack).await
     }
 }
 

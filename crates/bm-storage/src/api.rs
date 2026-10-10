@@ -94,6 +94,19 @@ pub trait MapStorage: Send + Sync {
         let _ = grid;
     }
 
+    /// Whether hires tiles are kept packed ([`MapStorage::read_hires_packed`]).
+    fn packs_hires(&self) -> bool {
+        false
+    }
+
+    /// A hires tile as stored by a storage that [packs](MapStorage::packs_hires) them, with its version as in
+    /// [`MapStorage::read_grid_versioned`]: a blob [`crate::unpack_hires`] turns into the PRBM bytes. It is a few
+    /// percent of the tile, so a server can key a cache of what it sends on it.
+    fn read_hires_packed(&self, tile: Tile) -> Result<Option<(Vec<u8>, Option<Version>)>> {
+        let _ = tile;
+        Ok(None)
+    }
+
     /// The cell's [`Version`] from metadata only. `None` when it is missing or the backend has no cheap identity
     /// (SQL: Java's schema has no change column).
     fn grid_version(&self, grid: GridKey, tile: Tile) -> Result<Option<Version>> {

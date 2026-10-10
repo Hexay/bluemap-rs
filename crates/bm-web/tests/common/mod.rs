@@ -21,10 +21,11 @@ impl Reply {
         self.headers.iter().rev().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
     }
 
-    /// Body with `Content-Encoding` undone (gzip only, the one the servers produce).
+    /// Body with `Content-Encoding` undone (gzip, and the zstd we send for packed hires tiles).
     pub fn decoded(&self) -> Vec<u8> {
         match self.header("content-encoding") {
             Some("gzip") => gunzip(&self.body),
+            Some("zstd") => bm_compress::Compression::Zstd.decompress(&self.body, 1 << 30).expect("valid zstd"),
             Some(other) => panic!("unexpected content-encoding {other}"),
             None => self.body.clone(),
         }

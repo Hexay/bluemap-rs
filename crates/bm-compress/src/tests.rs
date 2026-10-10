@@ -89,6 +89,10 @@ fn incompressible_input_outgrows_the_first_output_guess() {
         assert!(packed.len() > first_output_guess(noise.len()), "{c:?}: the retry path must run");
         assert_eq!(c.decompress(&packed, LIMIT).unwrap(), noise, "{c:?}");
     }
+    // twice: the second call reuses the pooled context
+    for data in [&noise[..], TILE, &noise[..], b""] {
+        assert_eq!(Compression::Zstd.decompress(&zstd_bulk(data).unwrap(), LIMIT).unwrap(), data);
+    }
 }
 
 #[test]
