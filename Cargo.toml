@@ -78,7 +78,7 @@ twox-hash = { version = "2.1", default-features = false, features = ["xxhash32"]
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 zstd = "0.14"
 # deflate via flate2 only: the default features pull C builds (bzip2, zstd) and crypto we don't need
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.0", default-features = false, features = ["deflate-flate2"] }
 bm-compress = { path = "crates/bm-compress" }
 bm-config = { path = "crates/bm-config" }
 bm-engine = { path = "crates/bm-engine" }
