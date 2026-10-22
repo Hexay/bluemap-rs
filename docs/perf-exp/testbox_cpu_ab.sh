@@ -1,19 +1,22 @@
 #!/bin/bash
-# usage: testbox_cpu_ab.sh <checkout> <patch> <fixture dir> [runs=3]
-# testbox_ab.sh for any fixture dir (config/ + data/, e.g. ~/bmrs-cpu/bench/real-opt): builds <checkout> before and
-# after `git apply <patch>`, renders interleaved under ~/bench.lock with user CPU and `instructions:u` per run, prints
-# the medians, then diffs the two webroots (rstate .dat holds timestamps, so only other differences are printed).
+# usage: testbox_cpu_ab.sh <checkout> <fixture dir> [runs=3] [base-ref=HEAD~1] [new-ref=HEAD]
+# testbox_ab.sh for any fixture dir (config/ + data/, e.g. ~/bmrs-cpu/bench/real-opt) and two commits (after
+# `testbox.py sync`, HEAD is the synced tree and HEAD~1 the local HEAD): builds both, renders interleaved under
+# ~/bench.lock with user CPU and `instructions:u` per run, prints the medians, then diffs the two webroots (rstate
+# .dat holds timestamps, so only other differences are printed).
 set -e
-CO=$1; PATCH=$2; FX=$3; RUNS=${4:-3}
+# run from a copy: checking out the base ref may rewrite this file while bash still reads it
+if [ -z "$AB_COPY" ]; then cp "$0" /tmp/cpu_ab.$$.sh; AB_COPY=1 exec bash /tmp/cpu_ab.$$.sh "$@"; fi
+CO=$1; FX=$2; RUNS=${3:-3}; BASE=${4:-HEAD~1}; NEW=${5:-HEAD}
 build() { (cd "$CO" && ~/.cargo/bin/cargo build -q --profile profiling -p bm-cli 2>&1 | tail -2); }
 
-git -C "$CO" checkout -q -- .
-build
-cp "$CO/target/profiling/bluemap" "$CO/bluemap.base"
-git -C "$CO" apply "$PATCH"
-build
-cp "$CO/target/profiling/bluemap" "$CO/bluemap.new"
-git -C "$CO" checkout -q -- .
+for b in base new; do
+  ref=$BASE; [ $b = new ] && ref=$NEW
+  git -C "$CO" checkout -q "$ref" -- .
+  build
+  cp "$CO/target/profiling/bluemap" "$CO/bluemap.$b"
+done
+git -C "$CO" checkout -q HEAD -- .
 
 cd "$FX"
 LOG=$(mktemp)
