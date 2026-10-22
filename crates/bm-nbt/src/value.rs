@@ -1,3 +1,4 @@
+use crate::index::Index;
 use crate::{BeArray, Error, MAX_DEPTH, Result, tag, take};
 
 #[derive(Clone, Copy, Debug)]
@@ -68,15 +69,25 @@ impl<'a> Tag<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Compound<'a> {
     body: &'a [u8],
+    index: Option<&'a Index>,
 }
 
 impl<'a> Compound<'a> {
     pub(crate) fn new(body: &'a [u8]) -> Self {
-        Self { body }
+        Self { body, index: None }
+    }
+
+    pub(crate) fn indexed(body: &'a [u8], index: &'a Index) -> Self {
+        Self { body, index: Some(index) }
     }
 
     pub fn entries(&self) -> Entries<'a> {
-        Entries { rest: self.body }
+        Entries { rest: self.body, index: self.index }
+    }
+
+    /// The payload bytes, END tag included: equal bytes mean equal contents.
+    pub fn bytes(&self) -> &'a [u8] {
+        self.body
     }
 
     /// Scans for `name`; use [`Compound::entries`] to read several fields in one pass.
@@ -103,6 +114,7 @@ impl<'a> Compound<'a> {
 
 pub struct Entries<'a> {
     rest: &'a [u8],
+    index: Option<&'a Index>,
 }
 
 impl<'a> Iterator for Entries<'a> {
@@ -116,7 +128,7 @@ impl<'a> Iterator for Entries<'a> {
         }
         let name_len = u16::from_be_bytes(take::<2>(rest, 0).ok()?) as usize;
         let name = rest.get(2..2 + name_len)?;
-        let (value, len) = parse(ty, &rest[2 + name_len..]).ok()?;
+        let (value, len) = parse(ty, &rest[2 + name_len..], self.index).ok()?;
         self.rest = &rest[2 + name_len + len..];
         Some((name, value))
     }
@@ -127,6 +139,7 @@ pub struct List<'a> {
     elem: u8,
     len: usize,
     body: &'a [u8],
+    index: Option<&'a Index>,
 }
 
 impl<'a> List<'a> {
@@ -143,9 +156,9 @@ impl<'a> List<'a> {
     }
 
     pub fn iter(self) -> impl Iterator<Item = Tag<'a>> + 'a {
-        let (elem, mut rest) = (self.elem, self.body);
+        let (elem, mut rest, index) = (self.elem, self.body, self.index);
         (0..self.len).map_while(move |_| {
-            let (value, len) = parse(elem, rest).ok()?;
+            let (value, len) = parse(elem, rest, index).ok()?;
             rest = &rest[len..];
             Some(value)
         })
@@ -153,13 +166,21 @@ impl<'a> List<'a> {
 
     /// The compound elements; empty if the list holds anything else.
     pub fn compounds(self) -> impl Iterator<Item = Compound<'a>> + 'a {
-        let list = if self.elem == tag::COMPOUND { self } else { Self { elem: tag::END, len: 0, body: &[] } };
+        let empty = Self { elem: tag::END, len: 0, body: &[], index: None };
+        let list = if self.elem == tag::COMPOUND { self } else { empty };
         list.iter().filter_map(|t| t.as_compound())
     }
 }
 
-fn parse(ty: u8, buf: &[u8]) -> Result<(Tag<'_>, usize)> {
-    let len = payload_len(ty, buf, 0)?;
+fn parse<'a>(ty: u8, buf: &'a [u8], index: Option<&'a Index>) -> Result<(Tag<'a>, usize)> {
+    let recorded = match ty {
+        tag::COMPOUND | tag::LIST => index.and_then(|i| i.len_at(buf)),
+        _ => None,
+    };
+    let len = match recorded {
+        Some(len) => len,
+        None => payload_len(ty, buf, 0)?,
+    };
     let b = &buf[..len];
     let tag = match ty {
         tag::BYTE => Tag::Byte(b[0] as i8),
@@ -172,9 +193,9 @@ fn parse(ty: u8, buf: &[u8]) -> Result<(Tag<'_>, usize)> {
         tag::STRING => Tag::String(&b[2..]),
         tag::LIST => {
             let n = i32::from_be_bytes(take(b, 1)?).max(0) as usize;
-            Tag::List(List { elem: b[0], len: if b[0] == tag::END { 0 } else { n }, body: &b[5..] })
+            Tag::List(List { elem: b[0], len: if b[0] == tag::END { 0 } else { n }, body: &b[5..], index })
         }
-        tag::COMPOUND => Tag::Compound(Compound::new(b)),
+        tag::COMPOUND => Tag::Compound(Compound { body: b, index }),
         tag::INT_ARRAY => Tag::IntArray(BeArray::new(&b[4..])),
         tag::LONG_ARRAY => Tag::LongArray(BeArray::new(&b[4..])),
         _ => return Err(Error::BadTag(ty)),
@@ -182,8 +203,32 @@ fn parse(ty: u8, buf: &[u8]) -> Result<(Tag<'_>, usize)> {
     Ok((tag, len))
 }
 
+/// Receives the start and length of every compound and list payload a validating walk passes.
+pub(crate) trait Record {
+    /// A slot for the payload starting at `at`, filled by [`Record::close`] once its length is known.
+    fn open(&mut self, at: &[u8]) -> usize;
+    fn close(&mut self, slot: usize, len: usize);
+}
+
+struct NoRecord;
+
+impl Record for NoRecord {
+    #[inline(always)]
+    fn open(&mut self, _: &[u8]) -> usize {
+        0
+    }
+
+    #[inline(always)]
+    fn close(&mut self, _: usize, _: usize) {}
+}
+
 /// Bytes taken by a payload of type `ty` at the start of `buf`, validating everything nested in it.
 pub(crate) fn payload_len(ty: u8, buf: &[u8], depth: u32) -> Result<usize> {
+    payload_len_with(ty, buf, depth, &mut NoRecord)
+}
+
+/// [`payload_len`], reporting every container it walks to `rec`.
+pub(crate) fn payload_len_with(ty: u8, buf: &[u8], depth: u32, rec: &mut impl Record) -> Result<usize> {
     if depth > MAX_DEPTH {
         return Err(Error::TooDeep);
     }
@@ -201,25 +246,30 @@ pub(crate) fn payload_len(ty: u8, buf: &[u8], depth: u32) -> Result<usize> {
         tag::INT_ARRAY => 4 + count(0)?.checked_mul(4).ok_or(Error::Truncated)?,
         tag::LONG_ARRAY => 4 + count(0)?.checked_mul(8).ok_or(Error::Truncated)?,
         tag::LIST => {
+            let slot = rec.open(buf);
             let elem = *buf.first().ok_or(Error::Truncated)?;
             let n = if elem == tag::END { 0 } else { count(1)? };
             let mut pos = 5;
             for _ in 0..n {
-                pos += payload_len(elem, buf.get(pos..).ok_or(Error::Truncated)?, depth + 1)?;
+                pos += payload_len_with(elem, buf.get(pos..).ok_or(Error::Truncated)?, depth + 1, rec)?;
             }
+            rec.close(slot, pos);
             pos
         }
         tag::COMPOUND => {
+            let slot = rec.open(buf);
             let mut pos = 0;
             loop {
                 let ty = *buf.get(pos).ok_or(Error::Truncated)?;
                 pos += 1;
                 if ty == tag::END {
-                    break pos;
+                    break;
                 }
                 pos += 2 + u16::from_be_bytes(take(buf, pos)?) as usize;
-                pos += payload_len(ty, buf.get(pos..).ok_or(Error::Truncated)?, depth + 1)?;
+                pos += payload_len_with(ty, buf.get(pos..).ok_or(Error::Truncated)?, depth + 1, rec)?;
             }
+            rec.close(slot, pos);
+            pos
         }
         _ => return Err(Error::BadTag(ty)),
     };
