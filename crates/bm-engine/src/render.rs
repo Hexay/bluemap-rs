@@ -1,6 +1,7 @@
 //! `WorldRegionUpdateTask.processTile` for a batch of tiles, in parallel: render (or skip, as BlueMap's tile
 //! preconditions say), write the hires tile and hand its lowres columns to the persistence thread.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::SyncSender;
 
 use bm_compress::Compression;
@@ -51,10 +52,12 @@ impl RegionRender<'_> {
             biomes: &self.ctx.biome_table,
             dimension: &self.ctx.world.dimension_type,
         };
+        // rayon makes fresh buffers per split; sized like the last tile, the mesh rarely grows (each growth copies)
+        let faces = AtomicUsize::new(0);
         jobs.par_iter()
             .map_init(
-                || (TileBuffers::default(), Vec::new(), Vec::new()),
-                |(buf, prbm, stored), job| match self.process(&renderer, job, buf, prbm, stored) {
+                || (TileBuffers::with_face_capacity(faces.load(Ordering::Relaxed)), Vec::new(), Vec::new()),
+                |(buf, prbm, stored), job| match self.process(&renderer, job, buf, prbm, stored, &faces) {
                     Ok((outcome, state)) => TileResult { tile: job.tile, state, outcome, error: None },
                     Err(e) => TileResult {
                         tile: job.tile,
@@ -74,6 +77,7 @@ impl RegionRender<'_> {
         buf: &mut TileBuffers,
         prbm: &mut Vec<u8>,
         stored: &mut Vec<u8>,
+        faces: &AtomicUsize,
     ) -> Result<(Outcome, TileState), Box<dyn std::error::Error + Send + Sync>> {
         match job.action.action {
             Action::None => unreachable!("tile jobs never carry Action::None"),
@@ -89,6 +93,7 @@ impl RegionRender<'_> {
                 let (states, grid) = (self.registry, &self.ctx.hires_grid);
                 if self.ctx.save_hires() {
                     renderer.render_tile(self.area, states, grid, job.tile, buf)?;
+                    faces.store(buf.faces(), Ordering::Relaxed);
                     buf.model.write_prbm(prbm)?;
                     if !self.stored_hires_equals(job.tile, prbm, stored) {
                         self.ctx.storage.write_grid(GridKey::Hires, job.tile, prbm)?;
