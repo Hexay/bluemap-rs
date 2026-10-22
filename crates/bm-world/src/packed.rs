@@ -23,14 +23,16 @@ impl Padded {
 
     /// Values `start`, `start + stride`, … (`count` of them), [`Padded::get`] each, with no division per value.
     pub fn strided(&self, start: usize, stride: usize, count: usize) -> impl Iterator<Item = u32> + '_ {
-        let per = self.per_long as usize;
-        let (step_long, step_slot) = (stride / per, stride % per);
-        let (mut long, mut slot) = (start / per, start % per);
+        // fields copied out and the slot kept as a bit shift: through `self` they were reloaded on every value
+        let (per, bits, mask, data) = (self.per_long as usize, u32::from(self.bits), self.mask, &self.data[..]);
+        let wrap = per as u32 * bits;
+        let (step_long, step_shift) = (stride / per, (stride % per) as u32 * bits);
+        let (mut long, mut shift) = (start / per, (start % per) as u32 * bits);
         (0..count).map(move |_| {
-            let v = self.data.get(long).map_or(0, |&l| ((l >> (slot * self.bits as usize)) & self.mask) as u32);
-            (long, slot) = (long + step_long, slot + step_slot);
-            if slot >= per {
-                (long, slot) = (long + 1, slot - per);
+            let v = data.get(long).map_or(0, |&l| ((l >> shift) & mask) as u32);
+            (long, shift) = (long + step_long, shift + step_shift);
+            if shift >= wrap {
+                (long, shift) = (long + 1, shift - wrap);
             }
             v
         })
