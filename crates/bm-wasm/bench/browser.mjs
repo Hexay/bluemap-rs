@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pageSocket } from "./devtools.mjs";
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -48,23 +49,12 @@ const server = createServer((req, res) => {
 await new Promise((resolve) => server.once("listening", resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
 
-const PORT = 9334;
 const profile = mkdtempSync(join(tmpdir(), "bm-wasm-bench-"));
-const child = spawn(browser, ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
+const child = spawn(browser, ["--headless=new", "--remote-debugging-port=0", `--user-data-dir=${profile}`,
   "--no-first-run", "about:blank"], { stdio: "ignore" });
 let exitCode = 1;
 try {
-  let ws;
-  for (let i = 0; i < 100 && !ws; i++) {
-    try {
-      const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-      ws = targets.find((t) => t.type === "page")?.webSocketDebuggerUrl;
-    } catch {
-      // not listening yet
-    }
-    if (!ws) await sleep(200);
-  }
-  const socket = new WebSocket(ws);
+  const socket = new WebSocket(await pageSocket(profile));
   await new Promise((resolve, reject) => ((socket.onopen = resolve), (socket.onerror = reject)));
   let nextId = 0;
   const pending = new Map();

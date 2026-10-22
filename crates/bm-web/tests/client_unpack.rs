@@ -113,7 +113,9 @@ fn index_loads_the_script_only_for_a_packing_storage() {
     assert!(String::from_utf8_lossy(&index.body).find(&script) < String::from_utf8_lossy(&index.body).find("module"));
     let js = get(packed.addr, &format!("/{script}"), &[]);
     assert_eq!((js.status, js.header("content-type")), (200, Some("text/javascript")));
+    assert_eq!(js.header("cache-control"), Some("public, max-age=31536000, immutable"));
     assert!(String::from_utf8_lossy(&js.body).contains("application/vnd.bluemap.bmq3"));
+    assert_eq!(get(packed.addr, "/index.html", &[]).header("cache-control"), None);
     let plain_index = get(serve(map(&compat, Format::Compat), &compat, true).addr, "/", &[]);
     assert_eq!(script_tag(&plain_index.body), None);
     assert_ne!(index.header("etag"), plain_index.header("etag"));

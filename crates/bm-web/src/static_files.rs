@@ -6,8 +6,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use axum::body::Body;
 use http::header::{
-    CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, LOCATION,
-    VARY,
+    CACHE_CONTROL, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH,
+    LAST_MODIFIED, LOCATION, VARY,
 };
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::io::ReaderStream;
@@ -126,6 +126,10 @@ impl StaticFiles {
             h.insert(LAST_MODIFIED, lm.clone());
         }
         header_static(&mut res, CONTENT_TYPE, content_type);
+        // its URL carries a hash of its body, so a page load need not revalidate it
+        if Arc::ptr_eq(&file, &CLIENT_SCRIPT) {
+            header_static(&mut res, CACHE_CONTROL, "public, max-age=31536000, immutable");
+        }
         res
     }
 }
