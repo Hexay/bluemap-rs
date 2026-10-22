@@ -48,12 +48,17 @@ pub(crate) fn etag_coding(coding: Compression) -> &'static str {
     }
 }
 
-/// `index_html` with the client script loaded ahead of the webapp's own (a module, so it runs later anyway);
-/// `None` if there is nothing to add it in front of or it is there already.
+/// `index_html` with the client script loaded ahead of the webapp's own; `None` if there is nothing to add it in
+/// front of or it is there already. `defer`: it downloads alongside the webapp's module script instead of
+/// holding up the parser for a round trip, and deferred and module scripts run in document order, ours first.
 pub(crate) fn with_script(index_html: &[u8]) -> Option<Vec<u8>> {
     let html = std::str::from_utf8(index_html).ok()?;
     let at = html.find("<script").filter(|_| !html.contains(SCRIPT_STEM))?;
-    Some(format!("{}<script src=\"./{}\"></script>\n      {}", &html[..at], SCRIPT.path, &html[at..]).into_bytes())
+    Some(format!("{}{}\n      {}", &html[..at], tag(), &html[at..]).into_bytes())
+}
+
+fn tag() -> String {
+    format!("<script src=\"./{}\" defer></script>", SCRIPT.path)
 }
 
 #[cfg(test)]
@@ -64,7 +69,7 @@ mod tests {
     fn script_goes_in_front_of_the_webapp_once() {
         let html = b"<head><title>x</title>\n<script type=\"module\" src=\"./assets/index.js\"></script></head>";
         let made = String::from_utf8(with_script(html).unwrap()).unwrap();
-        let tag = format!("<script src=\"./{}\"></script>", SCRIPT.path);
+        let tag = tag();
         assert!(made.find(&tag).unwrap() < made.find("type=\"module\"").unwrap());
         assert_eq!(made.replace(&tag, "").replace("\n      <script type", "<script type"), String::from_utf8_lossy(html));
         assert_eq!(with_script(made.as_bytes()), None);

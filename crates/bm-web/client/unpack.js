@@ -56,11 +56,14 @@ onmessage = async ({ data }) => {
   // an unpack function backed by workers, or null where workers cannot start (no Worker, CSP without blob:)
   function workerPool(module) {
     if (typeof Worker !== "function") return null;
-    let pool;
+    const pool = [];
     try {
       const url = URL.createObjectURL(new Blob([WORKER], { type: "text/javascript" }));
-      pool = Array.from({ length: workerCount() }, () => ({ worker: new Worker(url), jobs: new Map() }));
+      for (let i = 0; i < workerCount(); i++) pool.push({ worker: new Worker(url), jobs: new Map() });
+      // throws where a compiled module cannot be sent to a worker
+      pool.forEach((entry) => entry.worker.postMessage({ module }));
     } catch {
+      pool.forEach((entry) => entry.worker.terminate());
       return null;
     }
     let nextId = 0;
@@ -78,7 +81,6 @@ onmessage = async ({ data }) => {
         entry.jobs.clear();
         if (pool.every((e) => e.dead)) unpack = decoder(module);
       };
-      entry.worker.postMessage({ module });
     }
     return (body) => {
       const live = pool.filter((e) => !e.dead);
@@ -93,12 +95,11 @@ onmessage = async ({ data }) => {
   }
 
   let unpack = null;
-  const ready = WebAssembly.compile(Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0))).then(
-    (module) => {
+  const ready = WebAssembly.compile(Uint8Array.from(atob(WASM), (c) => c.charCodeAt(0)))
+    .then((module) => {
       unpack = workerPool(module) ?? decoder(module);
-    },
-    () => {},
-  );
+    })
+    .catch(() => {});
 
   // Hands the PRBM to arrayBuffer() as is. Without a body stream the webapp's loader reads arrayBuffer() directly
   // instead of re-streaming 1–2 MB through a second Response on the main thread.
