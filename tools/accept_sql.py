@@ -1,4 +1,4 @@
-"""Acceptance for SQL storage on real MariaDB/MySQL/PostgreSQL servers (tools/dbs.py), against Java BlueMap 5.28:
+"""Acceptance for SQL storage on real MariaDB/MySQL/PostgreSQL servers (tools/dbs.py), against Java BlueMap 5.29:
   java->rs  Java renders into SQL; our `-r` over it renders nothing; both webservers serve identical responses.
   rs->java  we render into SQL; Java's webserver serves it identically to ours and to Java's golden tiles;
             Java's `-r` over it starts no work; both implementations create the same schema.

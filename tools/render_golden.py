@@ -1,6 +1,6 @@
 """Render every fixture that has a world with Java BlueMap: the golden outputs bluemap-rs is diffed against.
 
-Usage: py -3 tools/render_golden.py [fixture ...] [--mc 26.3] [--bluemap 5.28]
+Usage: py -3 tools/render_golden.py [fixture ...] [--mc 26.3] [--bluemap 5.29]
 Output: <toolchain>/bluemap/<fixture>/web/maps/<id>/ (see render_serve.py for the layout).
 """
 import argparse

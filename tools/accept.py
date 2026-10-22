@@ -2,7 +2,7 @@
 with Java's golden one; then check incremental updates and drop-in over Java's render state.
 
 Usage: py -3 tools/accept.py [fixture ...] [--incremental vanilla ...] [--watch vanilla ...] [--no-build]
-Needs: work/bluemap/<fx>/{config,data,web} from tools/render_golden.py (Java BlueMap 5.28, MC 26.3).
+Needs: work/bluemap/<fx>/{config,data,web} from tools/render_golden.py (Java BlueMap 5.29, MC 26.3).
 Output: work/accept/<fx>/ (fresh each run). Exit 1 if any check fails.
 """
 import argparse

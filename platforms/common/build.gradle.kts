@@ -8,7 +8,7 @@ repositories {
     maven("https://libraries.minecraft.net")
 }
 
-// bluemap-api 2.8.1 is published as Java 25 class files: recompile its official sources jar for Java 21
+// bluemap-api 2.8.2 is published as Java 25 class files: recompile its official sources jar for Java 21
 val bluemapApiSources: Configuration by configurations.creating {
     isCanBeConsumed = false
     isTransitive = false
@@ -38,7 +38,7 @@ val bluemapApiJar by tasks.registering(Jar::class) {
 }
 
 dependencies {
-    bluemapApiSources("de.bluecolored:bluemap-api:2.8.1")
+    bluemapApiSources("de.bluecolored:bluemap-api:2.8.2")
     "bluemapApiCompileOnly"("com.google.code.gson:gson:2.11.0")
     "bluemapApiCompileOnly"("com.flowpowered:flow-math:1.0.3")
     "bluemapApiCompileOnly"("org.jetbrains:annotations:26.1.0")

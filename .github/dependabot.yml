@@ -11,7 +11,7 @@ updates:
     directory: /platforms
     schedule:
       interval: weekly
-    # pinned to what BlueMap 5.28 and the supported MC range ship (drop-in API surface)
+    # pinned to what BlueMap 5.29 and the supported MC range ship (drop-in API surface)
     ignore:
       - dependency-name: "de.bluecolored:bluemap-api"
       - dependency-name: "com.flowpowered:flow-math"

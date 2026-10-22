@@ -63,7 +63,7 @@ fn static_files_disk_wins_over_embedded() {
     assert!(String::from_utf8_lossy(&index.body).contains("<html"), "embedded index.html");
     assert_eq!(index.header("content-length").map(|l| l.parse::<usize>().unwrap()), Some(index.body.len()));
     assert!(index.header("etag").is_some() && index.header("last-modified").is_some());
-    assert_eq!(index.header("server"), Some("BlueMap/5.28"));
+    assert_eq!(index.header("server"), Some(format!("BlueMap/{}", bm_web::WEBAPP_VERSION).as_str()));
     assert_eq!(index.header("cache-control"), Some(CACHE));
 
     assert_eq!(get(a, "/assets/logo.png", &[]).body, b"custom logo");
@@ -79,7 +79,8 @@ fn static_files_disk_wins_over_embedded() {
     assert_eq!(get(a, "/%2e%2e/%2e%2e/x", &[]).status, 403);
     assert_eq!(request(a, "POST", "/index.html", &[("Content-Length", "0")]).status, 400);
     let not_found = get(a, "/nope", &[]);
-    assert_eq!((not_found.body.len(), not_found.header("cache-control")), (0, Some(CACHE)));
+    let not_found_body = format!("404 - Not Found\nBlueMap/{}", bm_web::WEBAPP_VERSION);
+    assert_eq!((&not_found.body, not_found.header("cache-control")), (&not_found_body.into_bytes(), Some(CACHE)));
 
     let etag = index.header("etag").unwrap().to_owned();
     assert_eq!(get(a, "/", &[("If-None-Match", &etag)]).status, 304);

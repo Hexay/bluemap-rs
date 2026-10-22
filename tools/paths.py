@@ -85,7 +85,7 @@ class Toolchain:
     def bluemap_root(self) -> Path:
         return self.work / "bluemap"
 
-DEFAULT = Toolchain(mc="26.3", bluemap="5.28", java_major=25, bluemap_java_major=25, work=WORK)
+DEFAULT = Toolchain(mc="26.3", bluemap="5.29", java_major=25, bluemap_java_major=25, work=WORK)
 
 
 def toolchain(mc: str, bluemap: str, java_major: int, bluemap_java_major: int) -> Toolchain:

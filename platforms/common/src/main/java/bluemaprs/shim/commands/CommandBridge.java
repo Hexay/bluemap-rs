@@ -62,7 +62,7 @@ public final class CommandBridge<S> {
     private final Function<S, Sender> senders;
     private final Map<Long, Pending> pending = new ConcurrentHashMap<>();
 
-    /** @param shimName shown by {@code /bluemap version}, e.g. {@code "Paper shim 5.28+rs.0.1.0"} */
+    /** @param shimName shown by {@code /bluemap version}, e.g. {@code "Paper shim 5.29+rs.0.1.0"} */
     public CommandBridge(CommandSpec spec, CoreLink link, Supplier<Mirror> mirror, Supplier<CoreControl> control,
                          String shimName, Function<S, Sender> senders) {
         this.spec = spec;

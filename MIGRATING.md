@@ -1,6 +1,6 @@
 # Switching from Java BlueMap
 
-bluemap-rs reads your existing BlueMap 5.28 setup as-is. You don't re-render, rewrite configs or touch your web
+bluemap-rs reads your existing BlueMap 5.28 or 5.29 setup as-is. You don't re-render, rewrite configs or touch your web
 setup.
 
 ## What carries over unchanged
@@ -12,7 +12,7 @@ setup.
 | nginx/apache in front of the file tree, `sql.php` | Same paths, file suffixes and SQL schema, as long as the storage stays `compat` (below) |
 | A customised `web/` folder | Left alone. The same webapp version is embedded and used only for files you don't have |
 | CLI scripts and systemd units | Same flags and exit codes (1: config error, 2: missing resources) |
-| Marker plugins (BlueMapAPI) and `depend: BlueMap` | The plugin is named `BlueMap` (Fabric: mod id `bluemap`, version `5.28+rs.…`) and ships the real API classes |
+| Marker plugins (BlueMapAPI) and `depend: BlueMap` | The plugin is named `BlueMap` (Fabric: mod id `bluemap`, version `5.29+rs.…`) and ships the real API classes |
 | `/bluemap …` commands and permissions | Same command tree and permission nodes |
 
 You can switch back to Java BlueMap later; see "Switching back" below.

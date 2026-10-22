@@ -1,5 +1,5 @@
 """End-to-end test of the Paper plugin (docs/13) on a real Paper 26.3 server, plus an optional comparison run with
-upstream BlueMap 5.28 on a copy of the same world.
+upstream BlueMap 5.29 on a copy of the same world.
 
     py -3 tools/e2e_paper.py [--skip-build | --core BIN | --jar JAR] [--keep] [--no-upstream] [--server folia] [--mc 26.2]
 

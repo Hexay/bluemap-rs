@@ -1,4 +1,4 @@
-//! Oracle: file storages written by Java BlueMap 5.28 (`work/bluemap/<fixture>/web/maps`, see
+//! Oracle: file storages written by Java BlueMap 5.29 (`work/bluemap/<fixture>/web/maps`, see
 //! `tools/render_golden.py`). Read-only on the originals. Run: `cargo test -p bm-storage --test oracle -- --ignored`.
 
 mod common;

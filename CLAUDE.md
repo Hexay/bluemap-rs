@@ -30,7 +30,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   bundles in `optimized/bundle`); in-place conversion `bluemap --convert-storage <id> --to <format>`; golden oracle
   `cargo test -p bm-storage --release --test oracle_optimized -- --ignored`
 - `bm-config` — HOCON parser (Configurate-compatible), typed BlueMap configs, template generation
-- `bm-web` — axum server: embedded BlueMap 5.28 webapp, storage-backed map routes, live JSON + SSE; conformance vs
+- `bm-web` — axum server: embedded BlueMap 5.29 webapp, storage-backed map routes, live JSON + SSE; conformance vs
   Java's server: `cargo test -p bm-web --test conformance -- --ignored`; optimized hires tiles go out packed to
   browsers running `client/unpack.js` (docs/18)
 - `bm-wasm` — the BMQ3 unpacker for that script; its build is checked in (`crates/bm-web/client/unpack.wasm`):
@@ -47,8 +47,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
 - Beyond parity (pause reasons, `memory-limit`, MSPT pausing, low-priority render threads): `docs/15`,
   `crates/bm-cli/src/throttle/`
 - `platforms/` — one Gradle build (run on JDK 25): `common` (loader-neutral shim `bluemaprs.shim`, Java 21, BlueMapAPI
-  2.8.1 proxy), `paper` (Java 21), `fabric` (Java 25, no-remap Loom, dedicated servers only; docs/16); jars bundle the
-  core from `platforms/natives/<target>/`; version `5.28+rs.<crate>`
+  2.8.2 proxy), `paper` (Java 21), `fabric` (Java 25, no-remap Loom, dedicated servers only; docs/16); jars bundle the
+  core from `platforms/natives/<target>/`; version `5.29+rs.<crate>`
 - `bm-golden` — test oracle: PRBM parser, render diff, webroot reader, `diff-render` / `compare-webroots` CLI
 
 ## Commands
@@ -58,14 +58,14 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   `--release`
 - Testbox (sync the tree as on disk to `~/bmrs-<name>`, run there, block until exit, print the log tail; run it in
   the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`
-- Golden renders (Java BlueMap 5.28, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
+- Golden renders (Java BlueMap 5.29, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
 - Acceptance (our CLI on Java's fixture configs, webroot vs Java's, incremental, drop-in): `py -3 tools/accept.py`
   (`--watch <fx>` for `-u`); optimized storage: `py -3 tools/accept_optimized.py`
 - Real-scale world (4096², testbox, under `flock ~/bench.lock`): `py -3 tools/real_world.py gen|edit|render|update|compare`
   (docs/14)
-- Older MC versions (world per version's server, Java 5.28 vs ours): `py -3 tools/accept_versions.py [mc …]`. A hung command times out and
+- Older MC versions (world per version's server, Java 5.29 vs ours): `py -3 tools/accept_versions.py [mc …]`. A hung command times out and
   is minidumped with its stacks (`tools/hangdump.py`, any pid: `py -3 tools/hangdump.py <pid>`)
 - SQL servers (portable MariaDB/MySQL/PostgreSQL in `work/db`): `py -3 tools/dbs.py start|stop|status [mariadb mysql postgres]`;
   tests: `BM_TEST_MYSQL_URL=… BM_TEST_POSTGRES_URL=… cargo test -p bm-storage --test sql_remote -- --ignored`; vs Java

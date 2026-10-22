@@ -56,12 +56,15 @@ impl fmt::Display for Comparison {
     }
 }
 
+/// Files our webapp install adds to BlueMap's (see `crates/bm-web/NOTICE`).
+const ADDED_FILES: [&str; 1] = ["assets/OFL.txt"];
+
 pub fn compare_webroots(golden: &Path, candidate: &Path) -> Result<Comparison> {
     let mut sections = Vec::new();
     let mut listing = Section::default();
     let (g, c) = (data_files(golden)?, data_files(candidate)?);
     let missing: Vec<&String> = g.difference(&c).collect();
-    let extra: Vec<&String> = c.difference(&g).collect();
+    let extra: Vec<&String> = c.difference(&g).filter(|f| !ADDED_FILES.contains(&f.as_str())).collect();
     listing.check(
         missing.is_empty() && extra.is_empty(),
         format!("{} files golden, {} candidate: {} missing, {} extra", g.len(), c.len(), missing.len(), extra.len()),

@@ -1,4 +1,4 @@
-//! Parity with Java BlueMap 5.28 on MC 26.3: the textures it loaded for `work/bluemap/vanilla`, and the
+//! Parity with Java BlueMap 5.29 on MC 26.3: the textures it loaded for `work/bluemap/vanilla`, and the
 //! `textures.json` it wrote.
 
 use std::collections::{HashMap, HashSet};

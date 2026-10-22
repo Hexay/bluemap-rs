@@ -12,8 +12,9 @@ pub use path::format_path;
 
 use crate::template::ConfigTemplate;
 
-/// The BlueMap release whose templates (and `${version}`) we reproduce.
-pub const BLUEMAP_VERSION: &str = "5.28";
+/// The BlueMap release this build is a drop-in for: its templates and `${version}`, the `settings.json` version,
+/// the embedded webapp and the `Server` header.
+pub const BLUEMAP_VERSION: &str = "5.29";
 
 const CORE: &str = include_str!("../../templates/bluemap/core.conf");
 const WEBSERVER: &str = include_str!("../../templates/bluemap/webserver.conf");

@@ -37,8 +37,8 @@ DOWNLOADS = {
     # server-side fake players that show up in getOnlinePlayers()
     "bots": ("BetterStresstestbots-2.0.0-26.3.jar",
              "https://cdn.modrinth.com/data/DQNKpytv/versions/AMkho9sK/BetterStresstestbots-2.0.0-26.3.jar", None),
-    "upstream": ("bluemap-5.28-paper.jar",
-                 "https://cdn.modrinth.com/data/swbUV1cr/versions/pILlMIlN/bluemap-5.28-paper.jar", None),
+    "upstream": ("bluemap-5.29-paper.jar",
+                 "https://cdn.modrinth.com/data/swbUV1cr/versions/uHQIrUdf/bluemap-5.29-paper.jar", None),
     "fabric-installer": ("fabric-installer-1.1.2.jar",
                          "https://maven.fabricmc.net/net/fabricmc/fabric-installer/1.1.2/fabric-installer-1.1.2.jar",
                          None),
@@ -51,8 +51,8 @@ DOWNLOADS = {
     "offline-markers": ("bluemap-offline-player-markers-2026.9.1.jar",
                         "https://cdn.modrinth.com/data/4h9u0qdE/versions/safOEocx/bluemap-offline-player-markers-2026.9.1.jar",
                         None),
-    "upstream-fabric": ("bluemap-5.28-fabric.jar",
-                        "https://cdn.modrinth.com/data/swbUV1cr/versions/bbzcTCOs/bluemap-5.28-fabric.jar", None),
+    "upstream-fabric": ("bluemap-5.29-fabric.jar",
+                        "https://cdn.modrinth.com/data/swbUV1cr/versions/SX74rxzP/bluemap-5.29-fabric.jar", None),
 }
 
 RESULTS: list[tuple[str, bool, str]] = []

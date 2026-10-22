@@ -1,7 +1,15 @@
 # Changelog
 
-Versions follow `<crate version>`; the plugin and mod jars report `5.28+rs.<crate version>`, the BlueMap version
-they replace.
+Versions follow `<crate version>`; the plugin and mod jars report `<BlueMap version>+rs.<crate version>`, the
+BlueMap version they replace.
+
+## Unreleased
+
+- Drop-in target is now BlueMap 5.29: its webapp, `core.conf` template (`region-file-check-interval`) and
+  BlueMapAPI 2.8.2; jars report `5.29+rs.<crate version>`. Hires and lowres output is unchanged (5.29 renders
+  the same tiles as 5.28).
+- Webserver: error responses carry 5.29's `<code> - <message>` body; `Accept-Encoding` honours `*` and treats an
+  unparsable `q` as 0, like 5.29.
 
 ## 0.2.0 — 2026-10-09
 
