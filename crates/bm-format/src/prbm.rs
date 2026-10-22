@@ -178,13 +178,19 @@ const SQUARABLE: std::ops::Range<f32> = 1e-12..1e12;
 #[inline(always)]
 pub(crate) fn normal_bytes(p: &[f32; 9]) -> [u8; 3] {
     let n = plane(p);
-    let zero = n.map(|c| u8::from(c == 0.0));
-    let squarable = n.map(|c| u8::from(SQUARABLE.contains(&c.abs())));
+    let zero = each3(n, |c| u8::from(c == 0.0));
+    let squarable = each3(n, |c| u8::from(SQUARABLE.contains(&c.abs())));
     let exact = (zero[0] | squarable[0]) & (zero[1] | squarable[1]) & (zero[2] | squarable[2]);
     if zero[0] + zero[1] + zero[2] == 2 && exact == 1 {
-        return n.map(|c| u8::from(c > 0.0) * 127 + u8::from(c < 0.0) * 128);
+        return each3(n, |c| u8::from(c > 0.0) * 127 + u8::from(c < 0.0) * 128);
     }
-    surface_normal(p).map(normal_byte)
+    each3(surface_normal(p), normal_byte)
+}
+
+/// `v.map(f)` as an array literal: the wasm build of the BMQ3 decoder leaves array::map's closures as calls.
+#[inline(always)]
+fn each3<T: Copy, U>(v: [T; 3], f: impl Fn(T) -> U) -> [U; 3] {
+    [f(v[0]), f(v[1]), f(v[2])]
 }
 
 #[cfg(test)]

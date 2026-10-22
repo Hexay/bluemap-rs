@@ -63,7 +63,7 @@ impl Grid {
         self.bits[i / 64] >> (i % 64) & 1 != 0
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn predict(&self, probes: &Probes, base: usize) -> [u8; 4] {
         probes.predict(base, |i| self.get(i))
     }
@@ -102,17 +102,19 @@ impl Probes {
     }
 
     /// Predicted occluder count of the 4 vertices, `hit` telling whether a grid index is occluding.
-    #[inline]
+    #[inline(always)]
     pub fn predict(&self, base: usize, hit: impl Fn(usize) -> bool) -> [u8; 4] {
         if !self.any {
             return [0; 4];
         }
-        self.at.map(|vertex| {
+        let count = |vertex: &[isize; 4]| {
             let test = |d: isize| d != DISABLED && hit(base.wrapping_add_signed(d));
             let edges = u8::from(test(vertex[0])) + u8::from(test(vertex[1])) + u8::from(test(vertex[2]));
             let corner = vertex[3] != DISABLED && (edges >= 2 || test(vertex[3]));
             (edges + u8::from(corner)).min(3)
-        })
+        };
+        // not array::map, whose closures the wasm build leaves as calls; `count` itself staying one call is faster
+        [count(&self.at[0]), count(&self.at[1]), count(&self.at[2]), count(&self.at[3])]
     }
 }
 
@@ -121,6 +123,7 @@ pub(super) fn pack(codes: [u8; 4]) -> u8 {
     codes[0] | codes[1] << 2 | codes[2] << 4 | codes[3] << 6
 }
 
+#[inline(always)]
 pub(super) fn unpack(byte: u8) -> [u8; 4] {
     [byte & 3, byte >> 2 & 3, byte >> 4 & 3, byte >> 6]
 }
