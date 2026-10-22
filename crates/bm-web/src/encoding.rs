@@ -8,33 +8,40 @@ use http::header::ACCEPT_ENCODING;
 
 use crate::transcode;
 
-/// The codings named in `Accept-Encoding`. Java matches whole comma-separated tokens case-insensitively, so
-/// `gzip;q=1.0` never matched there; here parameters are stripped and `q=0` means refused.
+/// `MapStorageRequestHandler.acceptsEncoding`: a coding's first listing decides (accepted when its `q` > 0), an
+/// unlisted one is accepted when `*` is; the first `q=` parameter counts and an unparsable one means 0.
 /// Only codings we can produce or pass through are tracked (a bit per [`Compression`]).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Accepted(u8);
+pub struct Accepted {
+    listed: u8,
+    accepted: u8,
+    wildcard: bool,
+}
 
 impl Accepted {
     pub fn from_headers(headers: &HeaderMap) -> Self {
-        let mut bits = 0;
+        let mut out = Self::default();
         for value in headers.get_all(ACCEPT_ENCODING) {
             let Ok(value) = value.to_str() else { continue };
             for item in value.split(',') {
                 let mut parts = item.split(';').map(str::trim);
-                let Some(bit) = parts.next().and_then(bit) else { continue };
-                let refused = parts.any(|p| {
-                    p.split_once('=').is_some_and(|(k, v)| k.trim().eq_ignore_ascii_case("q") && is_zero_q(v.trim()))
-                });
-                if !refused {
-                    bits |= bit;
+                let coding = parts.next().unwrap_or_default();
+                let positive = quality(parts) > 0.0;
+                if coding == "*" {
+                    out.wildcard = positive;
+                } else if let Some(bit) = bit(coding).filter(|b| out.listed & b == 0) {
+                    out.listed |= bit;
+                    if positive {
+                        out.accepted |= bit;
+                    }
                 }
             }
         }
-        Self(bits)
+        out
     }
 
     pub fn accepts(&self, coding: &str) -> bool {
-        bit(coding).is_some_and(|b| self.0 & b != 0)
+        bit(coding).is_some_and(|b| if self.listed & b != 0 { self.accepted & b != 0 } else { self.wildcard })
     }
 }
 
@@ -42,8 +49,10 @@ fn bit(coding: &str) -> Option<u8> {
     Compression::ALL.iter().position(|c| c.id().eq_ignore_ascii_case(coding)).map(|i| 1 << i)
 }
 
-fn is_zero_q(q: &str) -> bool {
-    q.parse::<f32>().is_ok_and(|v| v == 0.0)
+fn quality<'a>(mut params: impl Iterator<Item = &'a str>) -> f32 {
+    params
+        .find_map(|p| p.get(..2).filter(|k| k.eq_ignore_ascii_case("q=")).map(|_| &p[2..]))
+        .map_or(1.0, |q| q.trim().parse().unwrap_or(0.0))
 }
 
 #[derive(Debug, PartialEq, Eq)]

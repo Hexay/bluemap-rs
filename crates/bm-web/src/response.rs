@@ -1,7 +1,8 @@
-//! Response helpers and `BlueMapResponseModifier`: `Server: BlueMap/<ver>`, then `additional-headers` only where
-//! the handler set nothing (so live data keeps `no-store`).
+//! Response helpers and `BlueMapResponseModifier`: a `<code> - <message>\n<server>` body on bodiless errors,
+//! `Server: BlueMap/<ver>`, then `additional-headers` only where the handler set nothing (so live data keeps
+//! `no-store`).
 
-use axum::body::Body;
+use axum::body::{Body, HttpBody as _};
 use http::header::{CONTENT_LENGTH, HeaderName, SERVER, TRANSFER_ENCODING};
 use http::{HeaderValue, Response, StatusCode};
 
@@ -38,7 +39,20 @@ impl ExtraHeaders {
     }
 }
 
+/// Java's `HttpStatusCode` message, which differs from the IANA reason phrase for 505.
+pub(crate) fn status_message(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::HTTP_VERSION_NOT_SUPPORTED => "HTTP Version not supported",
+        _ => status.canonical_reason().unwrap_or(""),
+    }
+}
+
 pub(crate) fn finish(res: &mut Response<Body>, server: &HeaderValue, extra: &ExtraHeaders) {
+    let status = res.status();
+    if status.as_u16() >= 400 && res.body().size_hint().exact() == Some(0) {
+        let server_name = server.to_str().unwrap_or_default();
+        *res.body_mut() = Body::from(format!("{} - {}\n{server_name}", status.as_u16(), status_message(status)));
+    }
     let headers = res.headers_mut();
     headers.insert(SERVER, server.clone());
     for (name, value) in &extra.0 {

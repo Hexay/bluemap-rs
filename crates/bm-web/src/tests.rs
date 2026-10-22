@@ -91,6 +91,13 @@ fn accept_encoding_tokens() {
     assert!(!accepted("gzip;q=0").accepts("gzip"));
     assert!(!accepted("x-gzip").accepts("gzip"));
     assert!(!Accepted::default().accepts("gzip"));
+    assert!(accepted("*").accepts("zstd"));
+    assert!(!accepted("gzip;q=0, *").accepts("gzip"));
+    assert!(accepted("gzip;q=0, *").accepts("deflate"));
+    assert!(!accepted("gzip;q=0, gzip").accepts("gzip"), "first listing decides");
+    assert!(!accepted("gzip;q=abc").accepts("gzip"));
+    assert!(accepted("gzip; Q=0.001").accepts("gzip"));
+    assert!(!accepted("gzip;é=1;q=0").accepts("gzip"));
 }
 
 #[test]

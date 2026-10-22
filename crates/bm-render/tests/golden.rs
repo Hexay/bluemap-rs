@@ -1,4 +1,4 @@
-//! Re-renders golden fixtures (Java BlueMap 5.28 output under `work/`) and requires byte-identical PRBM.
+//! Re-renders golden fixtures (Java BlueMap 5.29 output under `work/`) and requires byte-identical PRBM.
 //! Skipped when the fixtures or the client jar are absent (`py -3 tools/render_golden.py` makes them).
 
 #[path = "../examples/render_map/conf.rs"]

@@ -11,8 +11,7 @@ use crate::map::MapContext;
 use crate::resources::{ResourceOptions, Resources};
 use crate::storage::Storages;
 
-/// The BlueMap release this build is a drop-in for; written as the webapp `settings.json` version.
-pub const BLUEMAP_VERSION: &str = "5.28";
+pub use bm_config::generate::BLUEMAP_VERSION;
 
 pub struct Service {
     pub config: BlueMapConfig,

@@ -70,7 +70,7 @@ def zig_env() -> dict[str, str]:
 
 
 def release_version() -> str:
-    """bluemap-rs version stamped into the core (`--version`, IPC `coreVersion`) and the jars (`5.28+rs.<this>`):
+    """bluemap-rs version stamped into the core (`--version`, IPC `coreVersion`) and the jars (`5.29+rs.<this>`):
     $BLUEMAP_RS_VERSION, else the pushed `v*` tag (CI) or a `v*` tag on HEAD, else Cargo's workspace version."""
     if version := os.environ.get("BLUEMAP_RS_VERSION"):
         return version

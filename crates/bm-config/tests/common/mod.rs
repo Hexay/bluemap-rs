@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-/// `work/bluemap/<fixture>` dirs holding configs Java BlueMap 5.28 generated (`tools/render_serve.py`). Found by
+/// `work/bluemap/<fixture>` dirs holding configs Java BlueMap 5.29 generated (`tools/render_serve.py`). Found by
 /// walking up from the crate, so it works from git worktrees too. Empty when the golden renders don't exist.
 pub fn bluemap_fixtures() -> Vec<PathBuf> {
     let Some(root) =

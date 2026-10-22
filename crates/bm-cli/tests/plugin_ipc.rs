@@ -85,7 +85,7 @@ fn lifecycle_without_resources() {
     let dump = std::fs::read_to_string(dir.path().join("dump.json")).unwrap();
     assert!(dump.starts_with("{\n \"system-info\": {\n  \""), "StateDumper's layout and indent: {dump}");
     let dump: serde_json::Value = serde_json::from_str(&dump).unwrap();
-    assert_eq!(dump["system-info"]["bluemap-version"], "5.28");
+    assert_eq!(dump["system-info"]["bluemap-version"], bm_engine::BLUEMAP_VERSION);
     let plugin = dump["dump"][0]["#identity"].as_str().unwrap();
     assert!(plugin.starts_with("de.bluecolored.bluemap.common.plugin.Plugin@"), "{plugin}");
     assert_eq!(dump["dump"][0]["loaded"], false);

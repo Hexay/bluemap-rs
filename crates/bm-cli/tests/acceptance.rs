@@ -1,4 +1,4 @@
-//! Drop-in acceptance: `bluemap -c <Java BlueMap's config copy> -r` must produce Java BlueMap 5.28's webroot for every
+//! Drop-in acceptance: `bluemap -c <Java BlueMap's config copy> -r` must produce Java BlueMap 5.29's webroot for every
 //! golden fixture (map data and settings; webapp files excluded). Incremental checks live in `tools/accept.py`.
 //! Run: `cargo test -p bm-cli --release --test acceptance -- --ignored --nocapture`
 
@@ -61,7 +61,7 @@ fn prepare(fixture: &str) -> PathBuf {
 }
 
 #[test]
-#[ignore = "needs Java BlueMap 5.28 golden renders under work/bluemap (tools/render_golden.py)"]
+#[ignore = "needs Java BlueMap 5.29 golden renders under work/bluemap (tools/render_golden.py)"]
 fn renders_like_java_bluemap() {
     let mut failed = Vec::new();
     for fixture in FIXTURES {

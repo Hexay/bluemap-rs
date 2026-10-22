@@ -4,12 +4,12 @@ Thanks for helping. Bug reports, parity differences against Java BlueMap and pul
 
 ## The one rule: drop-in beats clean
 
-bluemap-rs replaces BlueMap 5.28 without users changing anything. Configs, paths, tile files (PRBM, PNG, JSON), render
+bluemap-rs replaces BlueMap 5.29 without users changing anything. Configs, paths, tile files (PRBM, PNG, JSON), render
 state, the SQL schema, command output and the webapp's view of the data stay byte-compatible with upstream, even when
 a cleaner design is obvious. Copy BlueMap's visual quirks; never copy its robustness bugs (crashes, leaks, hangs; see
 `docs/08-github-issues.md`). Deliberate deviations are listed in `MIGRATING.md` and `docs/15-beyond-parity.md`.
 
-When upstream's behaviour is unclear, read its source (BlueMap 5.28) rather than guess. `docs/00-overview.md` is the
+When upstream's behaviour is unclear, read its source (BlueMap 5.29) rather than guess. `docs/00-overview.md` is the
 map of the design docs.
 
 ## Setup
@@ -53,4 +53,4 @@ map of the design docs.
 
 Use the issue templates. For a server, `/bluemap debug dump` writes a `dump.json` with the config and state that
 helps most; check it for anything private before attaching it. If the same setup renders correctly with Java BlueMap
-5.28, say so: that makes it a parity bug, which we treat as high priority.
+5.29, say so: that makes it a parity bug, which we treat as high priority.

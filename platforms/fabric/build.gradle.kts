@@ -3,7 +3,7 @@ plugins {
     id("net.fabricmc.fabric-loom") version "1.18.3"
 }
 
-// compiled against the oldest supported version, as upstream 5.28 (fabric.mod.json allows 26.1–26.3)
+// compiled against the oldest supported version, as upstream 5.29 (fabric.mod.json allows 26.1–26.3)
 val minecraftVersion = "26.1"
 val fabricLoaderVersion = "0.18.4"
 val fabricApiVersion = "0.144.0+26.1"

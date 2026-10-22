@@ -26,6 +26,6 @@ steps or a request that reproduces the problem.
 
 - Bugs in BlueMap itself (report those [upstream](https://github.com/BlueMap-Minecraft/BlueMap)), unless bluemap-rs
   copied them. We copy BlueMap's visual quirks on purpose but not its robustness bugs.
-- The webapp's own code (we ship BlueMap 5.28's webapp unchanged); report webapp issues upstream too.
+- The webapp's own code (we ship BlueMap 5.29's webapp unchanged); report webapp issues upstream too.
 - TLS. The webserver speaks plain HTTP like BlueMap's. Put it behind a reverse proxy for HTTPS.
 - Denial of service that needs write access to the server's world or config folders.

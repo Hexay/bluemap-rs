@@ -1,4 +1,4 @@
-//! Configs written by Java BlueMap 5.28 (CLI, then edited by tools/render_serve.py) load into typed structs.
+//! Configs written by Java BlueMap 5.29 (CLI, then edited by tools/render_serve.py) load into typed structs.
 
 mod common;
 

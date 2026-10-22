@@ -10,7 +10,7 @@ dependencies or the bundled C libraries change.
 
 == Embedded BlueMap webapp, resource extensions and BlueMapAPI ==
 
-BlueMap 5.28 (webapp build, sql.php, resourceExtensions, BlueMapAPI 2.8.1)
+BlueMap 5.29 (webapp build, sql.php, resourceExtensions, BlueMapAPI 2.8.2)
 https://github.com/BlueMap-Minecraft/BlueMap
 Copyright (c) Blue (Lukas Rieger) <https://bluecolored.de>
 Copyright (c) contributors
@@ -37,7 +37,7 @@ fabric-permissions-api 0.7.0 (Fabric)    https://github.com/lucko/fabric-permiss
                                          Copyright (c) lucko (Luck) <luck@lucko.me>; Copyright (c) contributors   MIT
 flow-math 1.0.3 (Fabric)                 https://github.com/flow/math
                                          Copyright (c) Flow Powered; Copyright (c) SpongePowered; Copyright (c) contributors   MIT
-BlueMapAPI 2.8.1 (both)                  see BlueMap above                                                       MIT
+BlueMapAPI 2.8.2 (both)                  see BlueMap above                                                       MIT
 
 
 == C libraries compiled into the bluemap binary ==

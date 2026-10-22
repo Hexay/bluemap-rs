@@ -1,4 +1,4 @@
-//! Oracle for the optimized format on Java BlueMap 5.28 storages (`work/bluemap/<fixture>/web/maps`, copied to
+//! Oracle for the optimized format on Java BlueMap 5.29 storages (`work/bluemap/<fixture>/web/maps`, copied to
 //! a temp dir): compat → optimized → compat in place reproduces the Java tree (hires compared decompressed: our
 //! gzip bytes differ from Java's zlib), and every tile reads back as the Java PRBM. Prints hires sizes.
 //! Run: `cargo test -p bm-storage --release --test oracle_optimized -- --ignored --nocapture`.

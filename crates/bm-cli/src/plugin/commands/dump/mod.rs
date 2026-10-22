@@ -17,8 +17,8 @@ use super::Say;
 use crate::log;
 use java::Ids;
 
-/// `BlueMap.GIT_HASH` of the 5.28 release whose behaviour and webapp this core reproduces.
-const BLUEMAP_GIT_HASH: &str = "0f3a9fbfb87ecfafc809d673b11254634e734ae2";
+/// `BlueMap.GIT_HASH` of the [`bm_engine::BLUEMAP_VERSION`] release whose behaviour and webapp this core reproduces.
+const BLUEMAP_GIT_HASH: &str = "a61e143fe1e069c536159e0bc79410d5b6da3885";
 
 pub fn dump(core: &Core, say: Say) -> i32 {
     let session = core.session();

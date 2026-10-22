@@ -13,7 +13,7 @@ use crate::WebError;
 use crate::paths::join;
 
 /// BlueMap release the embedded webapp (and our `Server` header) comes from.
-pub const WEBAPP_VERSION: &str = "5.28";
+pub use bm_config::generate::BLUEMAP_VERSION as WEBAPP_VERSION;
 
 #[derive(RustEmbed)]
 #[folder = "webapp/"]

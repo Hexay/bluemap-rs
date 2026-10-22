@@ -1,4 +1,4 @@
-//! Our first-start files equal what Java BlueMap 5.28's CLI generated, once the edits tools/render_serve.py made
+//! Our first-start files equal what Java BlueMap 5.29's CLI generated, once the edits tools/render_serve.py made
 //! afterwards (`set_conf`) are replayed on ours and our `format` block is set aside.
 
 mod common;

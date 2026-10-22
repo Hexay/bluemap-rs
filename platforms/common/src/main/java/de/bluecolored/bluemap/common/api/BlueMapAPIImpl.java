@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
 /** Upstream's class name so casts succeed; backed by the core's mirror, see docs/13 §3. */
 public class BlueMapAPIImpl extends BlueMapAPI {
 
-    public static final String BLUEMAP_VERSION = "5.28";
+    public static final String BLUEMAP_VERSION = "5.29";
 
     static final String NOT_AVAILABLE = " is not available in bluemap-rs; the core runs out of process";
 

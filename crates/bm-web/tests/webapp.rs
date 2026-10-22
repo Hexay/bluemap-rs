@@ -13,7 +13,7 @@ fn install_writes_bundled_files_and_keeps_user_files() {
 
     assert!(install_webapp(&web, false).unwrap());
     let files: Vec<String> = webapp_files().map(|f| f.into_owned()).collect();
-    for must in ["index.html", "sql.php", "lang/en.conf", "lang/settings.conf", "assets/index-BhhubAws.js"] {
+    for must in ["index.html", "sql.php", "lang/en.conf", "lang/settings.conf", "assets/index-CiYMyZas.js"] {
         assert!(files.iter().any(|f| f == must), "{must} bundled");
         assert!(web.join(must).is_file(), "{must} written");
     }
@@ -36,7 +36,7 @@ fn settings_merge_or_rewrite() {
     let config = WebappConfig { scripts: vec!["a.js".into()], ..WebappConfig::default() };
     write_settings(web, WEBAPP_VERSION, &config, &[("world", 0), ("nether", -1)]).unwrap();
     let json = std::fs::read_to_string(web.join("settings.json")).unwrap();
-    assert!(json.starts_with("{\"version\":\"5.28\""), "{json}");
+    assert!(json.starts_with(&format!("{{\"version\":\"{WEBAPP_VERSION}\"")), "{json}");
     assert!(json.contains("\"maps\":[\"nether\",\"world\"]") && json.contains("\"scripts\":[\"a.js\"]"), "{json}");
 
     std::fs::write(web.join("settings.json"), json.replace("\"scripts\":[\"a.js\"]", "\"scripts\":[\"mine.js\"]"))

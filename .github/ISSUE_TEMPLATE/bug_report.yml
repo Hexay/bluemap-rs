@@ -20,7 +20,7 @@ body:
   - type: dropdown
     id: parity
     attributes:
-      label: Does Java BlueMap 5.28 behave correctly with the same world and config?
+      label: Does Java BlueMap 5.29 behave correctly with the same world and config?
       options: ["Yes, only bluemap-rs is wrong", "No, Java BlueMap has the same problem", "Not tried"]
     validations:
       required: true

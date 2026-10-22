@@ -60,7 +60,7 @@ fn fresh_cli_install() {
 
     let core = std::fs::read_to_string(dir.path().join("config/core.conf")).unwrap();
     assert!(core.contains("# 2026-10-06T12:00:01\n") && core.contains("Only when the -u flag is used."));
-    assert!(core.contains("{\"implementation\":\"bukkit\",\"version\":\"5.28\",\"mcVersion\":\"?\"}"));
+    assert!(core.contains("{\"implementation\":\"bukkit\",\"version\":\"5.29\",\"mcVersion\":\"?\"}"));
 
     // a second start changes nothing
     let again = BlueMapConfig::load(&options(dir.path(), ConfigOptions::cli(dir.path().join("config")))).unwrap();

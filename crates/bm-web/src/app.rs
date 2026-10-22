@@ -21,7 +21,7 @@ use crate::access_log::{AccessLog, FileSink, LogSink, RequestInfo, StdoutSink};
 use crate::map_handler::{self, MapRoute};
 use crate::paths::{decode_path, java_query_string};
 use crate::registry::MapRegistry;
-use crate::response::{ExtraHeaders, finish};
+use crate::response::{ExtraHeaders, finish, status_message};
 use crate::static_files::StaticFiles;
 use crate::webapp::WEBAPP_VERSION;
 
@@ -174,7 +174,7 @@ async fn dispatch(State(app): State<Arc<WebApp>>, req: Request) -> Response<Body
     finish(&mut res, &app.server, &app.extra);
     if app.log.is_enabled() {
         let status = res.status();
-        app.log.log(&request_info(&req, &path, &query), status.as_u16(), status.canonical_reason().unwrap_or(""));
+        app.log.log(&request_info(&req, &path, &query), status.as_u16(), status_message(status));
     }
     res
 }

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A Rust reimplementation of [BlueMap](https://github.com/BlueMap-Minecraft/BlueMap), the 3D web map for Minecraft,
-built as a **drop-in replacement for BlueMap 5.28**. Keep your configs, rendered maps, web setup, commands and marker
+built as a **drop-in replacement for BlueMap 5.29**. Keep your configs, rendered maps, web setup, commands and marker
 plugins; get the same map for a fraction of the CPU and memory.
 
 > **Status: beta.** Builds are pre-releases. Not affiliated with the BlueMap project.
@@ -72,7 +72,7 @@ as `compat` on every row.
 | **Fabric mod** | Dedicated servers, Fabric 26.1–26.3 (verified on 26.3) |
 | **Worlds** | Every chunk format from Minecraft 1.13 to 26.x; checked against Java BlueMap on 1.16.5–26.3 worlds |
 | **Storage** | File and SQL (SQLite, MySQL/MariaDB, PostgreSQL), the same layout and schema as BlueMap. Opt-in `optimized` format, about 12× smaller |
-| **Web** | BlueMap 5.28's webapp, unchanged, from the built-in webserver or your own nginx/Apache. For `optimized` storage the built-in webserver adds one script so browsers unpack tiles themselves |
+| **Web** | BlueMap 5.29's webapp, unchanged, from the built-in webserver or your own nginx/Apache. For `optimized` storage the built-in webserver adds one script so browsers unpack tiles themselves |
 
 Folia 26.2 passes the plugin tests (maps, commands, addon markers), but nothing has tested it with players online.
 Not yet: Spigot, NeoForge/Forge, Fabric singleplayer, and BlueMap's Java native addons (resource packs from

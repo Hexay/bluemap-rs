@@ -1,5 +1,5 @@
-"""Parity on older Minecraft versions: per version, its vanilla server generates the fixture world, Java BlueMap 5.28
-renders it (`-v <mc>`: that version's client jar, plus 1.19.4's for data packs before 1.19.4), our `bluemap` renders a
+"""Parity on older Minecraft versions: per version, its vanilla server generates the fixture world, Java BlueMap
+(`paths.DEFAULT`) renders it (`-v <mc>`: that version's client jar, plus 1.19.4's for data packs before 1.19.4), our `bluemap` renders a
 copy of the same config; the webroots must be identical and `-r` over Java's webroot must render nothing.
 
 Usage: py -3 tools/accept_versions.py [mc ...] [--fixture vanilla] [--rerender] [--no-build]
@@ -13,11 +13,12 @@ from pathlib import Path
 
 from accept import ROOT, bluemap, check, compare, prepare
 from make_world import make_world
+from paths import DEFAULT
 from setup import resolve, setup
 
 TOOLS = Path(__file__).resolve().parent
 VERSIONS = ["1.20.1", "1.21.1", "1.21.4"]
-BLUEMAP = "5.28"
+BLUEMAP = DEFAULT.bluemap
 
 
 def accept_version(mc: str, fixture: str, rerender: bool, failures: list[str]) -> None:

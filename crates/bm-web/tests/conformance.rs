@@ -1,13 +1,12 @@
-//! Wire conformance against Java BlueMap 5.28's own webserver (`-w`) on the same Java-rendered webroot.
-//! `cargo test -p bm-web --test conformance -- --ignored --nocapture`
+//! Wire conformance against Java BlueMap's own webserver (`-w`, release [`WEBAPP_VERSION`]) on the same
+//! Java-rendered webroot. `cargo test -p bm-web --test conformance -- --ignored --nocapture`
 //! Needs `work/` (found by walking up from this crate, or `BLUEMAP_RS_WORK`): `downloads/jdk25`,
-//! `downloads/bluemap-5.28-cli.jar`, `bluemap/vanilla/{config,web}`. The golden dirs are only read.
+//! `downloads/bluemap-<version>-cli.jar`, `bluemap/vanilla/{config,web}`. The golden dirs are only read.
 //!
 //! Compared per request: status, all non-framing headers, body after undoing `Content-Encoding` (and gunzipped
 //! for `.gz` URLs, whose gzip bytes come from different encoders). Intended differences (not compared):
 //! - framing: Java always sends `Transfer-Encoding: chunked` (or `Content-Length: 0` without a body); we send the
 //!   real `Content-Length` (download progress in the webapp) and none on 204/304, as HTTP requires.
-//! - `Accept-Encoding` q-values: Java ignores `gzip;q=1.0` (exact token match), we honour it.
 //! - `ETag`/`Vary` on map data, where Java sends neither (no revalidation, docs/11): ours are only compared where
 //!   Java sends the header too, e.g. its static-file ETag.
 //! - requests Java can't parse (it drops the connection) get a 400 from hyper.
@@ -20,7 +19,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use bm_storage::{Compression, FileStorage, Storage};
-use bm_web::{MapRoute, WebApp, WebOptions};
+use bm_web::{MapRoute, WEBAPP_VERSION, WebApp, WebOptions};
 use common::{Reply, Served, gunzip, request};
 
 const FRAMING: [&str; 3] = ["transfer-encoding", "content-length", "connection"];
@@ -80,7 +79,7 @@ fn start_java(work: &Path, web: &Path, dir: &Path, port: u16) -> Java {
     let child = Command::new(java)
         .args([
             "-jar",
-            &work.join("downloads/bluemap-5.28-cli.jar").to_string_lossy(),
+            &work.join(format!("downloads/bluemap-{WEBAPP_VERSION}-cli.jar")).to_string_lossy(),
             "-c",
             "config",
             "-v",
@@ -142,7 +141,7 @@ fn requests(web: &Path, port: u16) -> Vec<Probe> {
         "/lang/settings.conf",
         "/assets/logo.png",
         "/assets/poi.svg",
-        "/assets/index-BhhubAws.js",
+        "/assets/index-CiYMyZas.js",
         "/assets/index-C6zAnFcX.css",
         "/assets/Quicksand-BuVPtn-J.ttf",
         "/assets/manifest-vz4Wm4Dd.webmanifest",
@@ -204,6 +203,12 @@ fn requests(web: &Path, port: u16) -> Vec<Probe> {
         add("GET", &format!("/maps/vanilla/{p}"), gz());
     }
     add("GET", "/maps/other/settings.json", gz());
+    let tile = sample_tiles(web, 0, 1).pop().expect("a hires tile");
+    for accept in ["gzip;q=1.0", "GZIP; Q=0.5", "*", "gzip;q=0, *", "*;q=0", "gzip;q=abc", "deflate, gzip;q=0"] {
+        for p in ["textures.json", tile.as_str()] {
+            add("GET", &format!("/maps/vanilla/{p}"), vec![("Accept-Encoding", accept.to_owned())]);
+        }
+    }
     r
 }
 
