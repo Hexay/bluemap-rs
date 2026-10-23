@@ -151,6 +151,9 @@ impl Report {
                 log::error(&format!("Failed to update map '{}': {e}", task.map));
             }
         }
+        if finished && queue.pending() == 0 {
+            crate::alloc::release_free_memory();
+        }
         if finished && !self.up_to_date && queue.pending() == 0 && !queue.is_stopped() {
             self.up_to_date = true;
             log::info("Your maps are now all up-to-date!");

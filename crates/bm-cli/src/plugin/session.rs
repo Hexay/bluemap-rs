@@ -192,7 +192,13 @@ impl Session {
             .name("bluemap-render".into())
             .spawn(move || {
                 if let Ok(resources) = service.resources() {
-                    run_queue(&queue, &maps, resources, false, &mut log_task_event);
+                    run_queue(&queue, &maps, resources, false, &mut |event| {
+                        let finished = matches!(event, TaskEvent::Finished(..));
+                        log_task_event(event);
+                        if finished && queue.pending() == 0 {
+                            crate::alloc::release_free_memory();
+                        }
+                    });
                 }
             })
             .expect("spawn render worker");
