@@ -36,10 +36,11 @@
 //! version's index would then trust offsets into the new file. Compare bundles by their decoded tiles (or by the
 //! bytes after the 16-byte header of compacted/converted bundles), never whole files.
 
+mod cache;
 mod log;
 mod writer;
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -47,6 +48,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bm_format::grid::Tile;
 
+use self::cache::BundleCache;
 use self::log::{Index, Local, SHIFT};
 use super::HiresStore;
 use crate::api::Version;
@@ -54,8 +56,6 @@ use crate::error::{Error, IoContext, Result};
 use crate::file::fsops;
 use crate::locks::KeyLocks;
 
-/// Cached bundle states before the cache is dropped (each index holds ≤ 256 entries).
-const CACHE_CAP: usize = 4096;
 /// Write handles kept open by one store.
 pub(crate) const MAX_WRITERS: usize = 64;
 const EXT: &str = ".bmb";
@@ -72,7 +72,7 @@ pub(crate) struct BundleStore {
     dir: PathBuf,
     read_only: bool,
     writers: KeyLocks,
-    cache: Mutex<HashMap<Tile, Arc<Mutex<Bundle>>>>,
+    cache: Mutex<BundleCache>,
     /// Bundles that may hold a writer, oldest first.
     open: Mutex<VecDeque<Tile>>,
 }
@@ -110,11 +110,7 @@ impl BundleStore {
     }
 
     fn bundle(&self, bundle: Tile) -> Arc<Mutex<Bundle>> {
-        let mut cache = lock(&self.cache);
-        if cache.len() >= CACHE_CAP && !cache.contains_key(&bundle) {
-            cache.clear();
-        }
-        cache.entry(bundle).or_default().clone()
+        lock(&self.cache).get_or_insert(bundle)
     }
 
     fn open_read(path: &Path) -> io::Result<Option<File>> {
@@ -124,7 +120,9 @@ impl BundleStore {
         }
     }
 
-    /// Brings `ix` up to date with the file behind `f` (another version, or records appended elsewhere).
+    /// Brings `ix` up to date with the file behind `f` (another version, or records appended elsewhere). The new
+    /// records are read in one sequential read: indexing by record heads alone (positional reads of 12 bytes)
+    /// defeats readahead and was 2× slower disk-cold on an HDD (docs/22).
     fn refresh(f: &mut File, ix: &mut Index) -> io::Result<u64> {
         let len = f.metadata()?.len();
         let Some(generation) = log::read_generation(f, len)? else {
@@ -140,19 +138,31 @@ impl BundleStore {
         Ok(len)
     }
 
-    /// Runs `op` on a read handle and the refreshed index of an existing bundle file.
-    fn with_index<T>(
-        &self,
-        tile: Tile,
-        op: impl FnOnce(&mut File, &Index, Local) -> io::Result<T>,
-    ) -> Result<Option<T>> {
+    /// Runs `op` on the refreshed index of an existing bundle file and returns its result with the read handle the
+    /// index was refreshed from. The bundle's lock is held only for the refresh and `op`, so callers read records
+    /// in parallel; the handle keeps reading the indexed file version even if it is replaced meanwhile.
+    fn with_index<T>(&self, tile: Tile, op: impl FnOnce(&Index, Local) -> T) -> Result<Option<(File, T)>> {
         let (bundle, local) = split(tile);
         let path = self.path(bundle);
         let Some(mut f) = Self::open_read(&path).ctx("read", &path)? else { return Ok(None) };
         let state = self.bundle(bundle);
         let mut b = lock(&state);
         Self::refresh(&mut f, &mut b.ix).ctx("read", &path)?;
-        op(&mut f, &b.ix, local).map(Some).ctx("read", &path)
+        let out = op(&b.ix, local);
+        drop(b);
+        Ok(Some((f, out)))
+    }
+
+    /// The blob of `tile` and its version, reading the record outside the bundle's lock. `Err(())`: the record
+    /// does not match its index entry.
+    fn read_record(&self, tile: Tile) -> Result<Option<std::result::Result<(Vec<u8>, Version), ()>>> {
+        let found = self.with_index(tile, |ix, local| {
+            ix.entries.get(&local).map(|&(offset, len)| (local, offset, len, record_version(ix, offset, len)))
+        })?;
+        let Some((f, Some((local, offset, len, version)))) = found else { return Ok(None) };
+        let path = self.path(split(tile).0);
+        let read = log::read_record(&f, offset, local, len).ctx("read", &path)?;
+        Ok(Some(read.map(|d| (d, version)).ok_or(())))
     }
 
     fn bundles(&self) -> Result<Vec<Tile>> {
@@ -181,16 +191,9 @@ impl HiresStore for BundleStore {
     }
 
     fn read_versioned(&self, tile: Tile) -> Result<Option<(Vec<u8>, Option<Version>)>> {
-        let found = self.with_index(tile, |f, ix, local| match ix.entries.get(&local) {
-            Some(&(offset, len)) => {
-                let version = record_version(ix, offset, len);
-                log::read_record(f, offset, local, len).map(|r| Some(r.map(|d| (d, Some(version))).ok_or(())))
-            }
+        match self.read_record(tile)? {
             None => Ok(None),
-        })?;
-        match found.flatten() {
-            None => Ok(None),
-            Some(Ok(read)) => Ok(Some(read)),
+            Some(Ok((data, version))) => Ok(Some((data, Some(version)))),
             Some(Err(())) => Err(Error::CorruptBundle {
                 path: self.path(split(tile).0),
                 reason: "record does not match its index entry",
@@ -207,21 +210,21 @@ impl HiresStore for BundleStore {
     }
 
     fn exists(&self, tile: Tile) -> Result<bool> {
-        Ok(self.with_index(tile, |_, ix, local| Ok(ix.entries.contains_key(&local)))?.unwrap_or(false))
+        Ok(self.with_index(tile, |ix, local| ix.entries.contains_key(&local))?.is_some_and(|(_, hit)| hit))
     }
 
     fn version(&self, tile: Tile) -> Result<Option<Version>> {
-        let found = self.with_index(tile, |_, ix, local| {
-            Ok(ix.entries.get(&local).map(|&(offset, len)| record_version(ix, offset, len)))
+        let found = self.with_index(tile, |ix, local| {
+            ix.entries.get(&local).map(|&(offset, len)| record_version(ix, offset, len))
         })?;
-        Ok(found.flatten())
+        Ok(found.and_then(|(_, v)| v))
     }
 
     fn list(&self) -> Result<Vec<Tile>> {
         let mut tiles = Vec::new();
         for bundle in self.bundles()? {
-            let locals = self.with_index(join(bundle, (0, 0)), |_, ix, _| Ok(ix.entries.keys().copied().collect()))?;
-            tiles.extend(locals.unwrap_or_else(Vec::new).into_iter().map(|l: Local| join(bundle, l)));
+            let locals = self.with_index(join(bundle, (0, 0)), |ix, _| ix.entries.keys().copied().collect());
+            tiles.extend(locals?.map_or_else(Vec::new, |(_, l)| l).into_iter().map(|l: Local| join(bundle, l)));
         }
         Ok(tiles)
     }
@@ -235,7 +238,7 @@ impl HiresStore for BundleStore {
     }
 
     fn release(&self) {
-        let states: Vec<_> = lock(&self.cache).drain().map(|(_, s)| s).collect();
+        let states = lock(&self.cache).drain();
         lock(&self.open).clear();
         for state in states {
             lock(&state).writer = None;

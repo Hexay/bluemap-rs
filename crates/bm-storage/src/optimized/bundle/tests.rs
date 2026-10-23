@@ -102,6 +102,43 @@ fn torn_tail_is_ignored_then_truncated() {
 }
 
 #[test]
+fn torn_tail_with_a_whole_payload_is_never_served() {
+    let (_dir, s) = store();
+    s.write((2, 2), b"good").unwrap();
+    s.release();
+    let path = s.path((0, 0));
+    let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+    // a put of (2,2) whose payload landed but whose checksum (last 4 head bytes) is wrong
+    f.write_all(&[1, 2, 2, 0, 3, 0, 0, 0, 9, 9, 9, 9, b'b', b'a', b'd']).unwrap();
+    drop(f);
+    let reader = BundleStore::new(s.dir.clone(), true);
+    assert!(reader.exists((2, 2)).unwrap());
+    assert_eq!(reader.read((2, 2)).unwrap().unwrap(), b"good");
+    let writer = BundleStore::new(s.dir.clone(), false);
+    assert_eq!(writer.read((2, 2)).unwrap().unwrap(), b"good");
+    writer.write((3, 3), b"new").unwrap();
+    let again = BundleStore::new(s.dir.clone(), true);
+    assert_eq!((again.read((2, 2)).unwrap().unwrap(), again.read((3, 3)).unwrap().unwrap()), (b"good".to_vec(), b"new".to_vec()));
+}
+
+#[test]
+fn a_full_cache_drops_least_recently_used_bundles() {
+    let (_dir, s) = store();
+    let n = cache::CACHE_CAP as i32 + 8;
+    for b in 0..n {
+        s.write((b << 4, 0), &b.to_le_bytes()).unwrap();
+    }
+    s.release();
+    for b in 0..n {
+        assert_eq!(s.read((b << 4, 0)).unwrap().unwrap(), b.to_le_bytes());
+        // bundle 0 stays in use, so eviction never picks it
+        s.read((0, 0)).unwrap();
+    }
+    let cached = lock(&s.cache).get((0, 0));
+    assert!(cached.is_some_and(|b| lock(&b).ix.generation != 0), "the hot bundle survived the evictions");
+}
+
+#[test]
 #[ignore = "timing probe"]
 fn probe_write_costs() {
     let (dir, s) = store();
