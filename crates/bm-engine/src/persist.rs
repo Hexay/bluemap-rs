@@ -17,6 +17,10 @@ use crate::map::TileListener;
 /// Tiles' worth of column batches that may wait; a full queue makes workers wait for the writer, not each other.
 const QUEUE: usize = 1024;
 
+/// Memory for dirty lowres tiles (2 MB each at the default size). An update's open tiles form a front whose length
+/// grows with map extent; past this, tiles are spilled to storage (`LowresTileManager::with_budget`, docs/22).
+const LOWRES_BUDGET: usize = 128 << 20;
+
 /// One block column for the lowres layer, colour already straight ARGB.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Column {
@@ -84,7 +88,9 @@ fn run(
 ) -> Result<PersistStats> {
     let size = s.tile_size as usize;
     let store = StorageLowres { storage: storage.clone(), tile_size: [size, size], png: Vec::new(), saves: 0, on_save };
-    let mut lowres = LowresTileManager::new(store, [s.tile_size; 2], s.lod_count, s.lod_factor);
+    let tile_bytes = (size + 1).pow(2) * 2 * size_of::<u32>();
+    let mut lowres =
+        LowresTileManager::new(store, [s.tile_size; 2], s.lod_count, s.lod_factor).with_budget(LOWRES_BUDGET / tile_bytes);
     let mut stats = PersistStats::default();
     // keep going after a failure so one bad tile doesn't lose the rest; report the first
     let mut first_err: Option<Error> = None;

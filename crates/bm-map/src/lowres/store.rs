@@ -20,6 +20,11 @@ pub trait LowresStore {
         tiles.iter().map(|&(tile, data)| self.save(lod, tile, data)).collect()
     }
 
+    /// Persists a tile evicted from memory before it is final; [`Self::load`] must return it as saved.
+    fn spill(&mut self, lod: u32, tile: Tile, data: &LowresTile) -> Result<(), Self::Error> {
+        self.save(lod, tile, data)
+    }
+
     /// Called instead of [`Self::save`] when a flushed tile's pixels equal the ones loaded from the store.
     fn unchanged(&mut self, _lod: u32, _tile: Tile) {}
 }
