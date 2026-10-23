@@ -35,9 +35,13 @@ for r in $(seq "$ROUNDS"); do
 done
 [ -n "$NOOP" ] && for k in "${!REFS[@]}"; do mkdir -p web.$k; done
 if [ -n "$CONVERT" ]; then
+  # the conversion also rewrites the storage config's `format`
+  cp config/storages/file.conf /tmp/lad.conf.$$
   for k in "${!REFS[@]}"; do
     rm -rf web; mv web.$k web; "$CO/bluemap.0" -c config --convert-storage file --to compat >/dev/null 2>&1; mv web web.$k
+    cp /tmp/lad.conf.$$ config/storages/file.conf
   done
+  rm -f /tmp/lad.conf.$$
 fi
 med() { awk -v k=$1 -v c=$2 '$1 == k {print $c}' "$LOG" | sort -g | sed -n "$(( (ROUNDS + 1) / 2 ))p"; }
 pct() { awk -v a="$1" -v b="$2" 'BEGIN {printf "%+.2f%%", (b/a-1)*100}'; }
