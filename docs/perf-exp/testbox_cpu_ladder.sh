@@ -5,6 +5,7 @@
 # ref and the step to the previous ref. Round 1's webroots are diffed against the first ref's: optimized bundles hold
 # records in completion order, so with CONVERT=1 each is first converted to compat (`--convert-storage file`).
 # rstate .dat holds timestamps and is left out. Keep rounds under ~15 min of lock: refs × one render.
+# NOOP=1 times a no-op update instead: one forced render first, then every run is `-r` over that webroot.
 set -e
 # run from a copy: checking out a ref may rewrite this file while bash still reads it
 if [ -z "$AB_COPY" ]; then cp "$0" /tmp/cpu_ladder.$$.sh; AB_COPY=1 exec bash /tmp/cpu_ladder.$$.sh "$@"; fi
@@ -18,15 +19,21 @@ git -C "$CO" checkout -q HEAD -- .
 
 cd "$FX"
 LOG=$(mktemp)
+ARGS="-c config -v 26.3 -r -f"; CLEAN="rm -rf web data/logs"
+if [ -n "$NOOP" ]; then
+  rm -rf web data/logs; "$CO/bluemap.0" $ARGS >/dev/null 2>&1
+  ARGS="-c config -v 26.3 -r"; CLEAN="rm -rf data/logs"
+fi
 for r in $(seq "$ROUNDS"); do
   order=""; for i in $(seq 0 $((N - 1))); do order="$order $(( (i + r) % N ))"; done
-  flock ~/bench.lock bash -c "for k in $order; do rm -rf web data/logs
+  flock ~/bench.lock bash -c "for k in $order; do $CLEAN
       perf stat -x, -e instructions:u,cycles:u -o /tmp/lad.stat.\$\$ /usr/bin/time -f '%U %S %e %M' -o /tmp/lad.time.\$\$ \
-        $CO/bluemap.\$k -c config -v 26.3 -r -f >/dev/null 2>&1
+        $CO/bluemap.\$k $ARGS >/dev/null 2>&1
       echo \$k \$(cat /tmp/lad.time.\$\$) \$(grep -E 'instructions|cycles' /tmp/lad.stat.\$\$ | cut -d, -f1); rm -f /tmp/lad.*.\$\$
-      [ $r = 1 ] && { rm -rf web.\$k; mv web web.\$k; } || true
+      [ $r = 1 ] && [ -z '$NOOP' ] && { rm -rf web.\$k; mv web web.\$k; } || true
     done" | tee -a "$LOG"
 done
+[ -n "$NOOP" ] && for k in "${!REFS[@]}"; do mkdir -p web.$k; done
 if [ -n "$CONVERT" ]; then
   for k in "${!REFS[@]}"; do
     rm -rf web; mv web.$k web; "$CO/bluemap.0" -c config --convert-storage file --to compat >/dev/null 2>&1; mv web web.$k
