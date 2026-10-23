@@ -13,6 +13,7 @@ fn pack(values: &[u32], bits: u32) -> Vec<u64> {
 struct Fixture {
     states: BlockStates,
     biomes: Biomes,
+    palette: PaletteCache,
 }
 
 impl Fixture {
@@ -21,14 +22,27 @@ impl Fixture {
         states
             .add_defaults_json(r#"{"minecraft:lever": "minecraft:lever[face=wall,facing=north,powered=false]"}"#)
             .unwrap();
-        Self { states, biomes: Biomes::default() }
+        Self { states, biomes: Biomes::default(), palette: PaletteCache::default() }
     }
 
+    /// Parses without the palette cache, then twice with it, and checks that every block reads the same.
     fn parse(&self, nbt: &[u8]) -> Result<Chunk> {
-        Chunk::parse(
-            nbt,
-            &ChunkContext { states: &self.states, biomes: &self.biomes, dimension: &DimensionType::OVERWORLD },
-        )
+        let ctx = |palette| ChunkContext {
+            states: &self.states,
+            biomes: &self.biomes,
+            dimension: &DimensionType::OVERWORLD,
+            palette,
+        };
+        let plain = Chunk::parse(nbt, &ctx(None))?;
+        for _ in 0..2 {
+            let cached = Chunk::parse(nbt, &ctx(Some(&self.palette))).unwrap();
+            for (x, y, z) in
+                (0..16).flat_map(|x| (plain.min_y()..=plain.max_y()).flat_map(move |y| (0..16).map(move |z| (x, y, z))))
+            {
+                assert_eq!(cached.block(x, y, z), plain.block(x, y, z), "{x} {y} {z}");
+            }
+        }
+        Ok(plain)
     }
 }
 

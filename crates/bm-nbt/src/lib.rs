@@ -1,12 +1,15 @@
 //! Zero-copy, lazy NBT reader. Compounds and lists are views over the input bytes and are only parsed when
 //! iterated, so a reader that wants three fields of a chunk walks the rest without allocating anything.
-//! Nesting is capped at Minecraft's 512 so malformed data can't overflow the stack.
+//! Nesting is capped at Minecraft's 512 so malformed data can't overflow the stack. Readers that descend several
+//! levels use [`Document`], whose views skip nested containers without walking them again.
 
 mod array;
+mod index;
 mod value;
 mod writer;
 
 pub use array::BeArray;
+pub use index::Document;
 pub use value::{Compound, Entries, List, Tag};
 pub use writer::Writer;
 

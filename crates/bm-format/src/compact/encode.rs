@@ -3,11 +3,11 @@
 use super::ao::{Grid, LEVELS, Probes, pack};
 use super::bytes::stream;
 use super::cells::{self, Frame};
-use super::decode::predict_normals;
 use super::face::Face;
 use super::shapes::Shapes;
 use super::view::{self, AO, BLOCKLIGHT, COLOR, NORMAL, POSITION, PrbmView, QV, SUNLIGHT, UV};
 use super::{Groups, trim};
+use crate::prbm::normal_bytes;
 
 #[derive(Default)]
 pub(super) struct Scratch {
@@ -65,32 +65,23 @@ pub(super) fn quads(prbm: &[u8], origin: Option<[i32; 2]>, body: &mut Vec<u8>, s
     ao_stream(body, ao, s);
 
     let (pos, normal, color) = (v.attrs[POSITION], v.attrs[NORMAL], v.attrs[COLOR]);
+    let (pos, normal, color) = (pos.as_chunks::<72>().0, normal.as_chunks::<18>().0, color.as_chunks::<18>().0);
+    let (block, sun) = (block.as_chunks::<6>().0, sun.as_chunks::<6>().0);
+    exceptions(body, quads, |q| normals_predicted(&pos[q], &normal[q]), |q, out| out.extend(&normal[q]));
+    stream(body, |out| (0..3).for_each(|c| out.extend(color.iter().map(|row| row[c]))));
+    // a row equal to itself shifted by one vertex repeats vertex 0; comparing in place avoids a store-forward stall
+    exceptions(body, quads, |q| color[q][3..] == color[q][..15], |q, out| out.extend(&color[q]));
+    let uniform = |row: &[u8; 6]| row[1..] == row[..5];
     exceptions(
         body,
         quads,
-        18,
-        |q, row| row.copy_from_slice(&normal[18 * q..18 * q + 18]),
-        |q, pred| predict_normals(&pos[72 * q..72 * q + 72], pred),
-    );
-    stream(body, |out| (0..3).for_each(|c| out.extend((0..quads).map(|q| color[18 * q + c]))));
-    exceptions(
-        body,
-        quads,
-        18,
-        |q, row| row.copy_from_slice(&color[18 * q..18 * q + 18]),
-        |q, pred| {
-            pred.as_chunks_mut::<3>().0.iter_mut().for_each(|vert| vert.copy_from_slice(&color[18 * q..18 * q + 3]))
+        |q| uniform(&block[q]) && uniform(&sun[q]),
+        |q, out| {
+            out.extend(&block[q]);
+            out.extend(&sun[q]);
         },
     );
-    let light_row = |q: usize, row: &mut [u8]| {
-        row[..6].copy_from_slice(&block[6 * q..6 * q + 6]);
-        row[6..].copy_from_slice(&sun[6 * q..6 * q + 6]);
-    };
-    exceptions(body, quads, 12, light_row, |q, pred| {
-        pred[..6].fill(block[6 * q]);
-        pred[6..].fill(sun[6 * q]);
-    });
-    stream(body, |out| out.extend((0..quads).map(|q| block[6 * q] << 4 | sun[6 * q])));
+    stream(body, |out| out.extend(block.iter().zip(sun).map(|(b, s)| b[0] << 4 | s[0])));
 
     trim(&mut s.marker);
     s.grid.trim();
@@ -156,28 +147,22 @@ fn ao_stream(body: &mut Vec<u8>, ao: &[u8], s: &mut Scratch) {
     debug_assert!(LEVELS.iter().enumerate().all(|(n, &l)| usize::from((255 - l) / 64) == n));
 }
 
-/// Quads whose `size`-byte row differs from its prediction, verbatim: `u32 n, u32 index[n], rows[n]`.
-fn exceptions(
-    body: &mut Vec<u8>,
-    quads: usize,
-    size: usize,
-    actual: impl Fn(usize, &mut [u8]),
-    predict: impl Fn(usize, &mut [u8]),
-) {
-    let (mut row, mut pred) = (vec![0; size], vec![0; size]);
-    let mut bad = Vec::new();
-    for q in 0..quads {
-        actual(q, &mut row);
-        predict(q, &mut pred);
-        if pred != row {
-            bad.extend(&row);
-            bad.extend((q as u32).to_le_bytes());
-        }
-    }
-    let n = bad.len() / (size + 4);
+/// Whether a quad's 18 normal bytes are PRBMWriter's for its two triangles (the decoder's `predict_normals`).
+#[inline(always)]
+fn normals_predicted(pos: &[u8; 72], normal: &[u8; 18]) -> bool {
+    let f = |i: usize| f32::from_le_bytes(pos[4 * i..4 * i + 4].try_into().unwrap());
+    (0..2).all(|t| {
+        let n = normal_bytes(&std::array::from_fn(|i| f(9 * t + i)));
+        normal[9 * t..9 * t + 9].as_chunks::<3>().0.iter().all(|v| *v == n)
+    })
+}
+
+/// Quads whose row differs from its prediction, verbatim: `u32 n, u32 index[n]`, then `row` of each.
+fn exceptions(body: &mut Vec<u8>, quads: usize, predicted: impl Fn(usize) -> bool, row: impl Fn(usize, &mut Vec<u8>)) {
+    let bad: Vec<u32> = (0..quads).filter(|&q| !predicted(q)).map(|q| q as u32).collect();
     stream(body, |out| {
-        out.extend((n as u32).to_le_bytes());
-        bad.chunks_exact(size + 4).for_each(|e| out.extend(&e[size..]));
-        bad.chunks_exact(size + 4).for_each(|e| out.extend(&e[..size]));
+        out.extend((bad.len() as u32).to_le_bytes());
+        bad.iter().for_each(|q| out.extend(q.to_le_bytes()));
+        bad.iter().for_each(|&q| row(q as usize, out));
     });
 }
