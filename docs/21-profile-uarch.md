@@ -101,6 +101,7 @@ On a 300k² map the ingest share is the terrain one, so expect about −3% of re
 
   Candidates: one key computation shared by both forms, an integer `on_grid` test on the f32 bits (exponent ≥
   −4 and low mantissa bits zero), and skipping the hashed form for axes the plain shape already serves.
+  Since done: see [Shapes::build](#shapesbuild) (−36% of its instructions).
 - **Volume fill is load-latency bound** (bm-render `view.rs` + `Chunk::column_into`). It reads x → z → y columns
   out of y → z → x sections, so each value is a 256-stride gather. In the annotate, samples sit on the long load
   (14%) and the dependent palette load (13%). Register-resident fields didn't help (reverted, below). A real fix
@@ -153,3 +154,64 @@ perf record -e '{cycles:u,instructions:u}' -F 999 …; perf report --group --sor
 ```
 Each phase cost is the `--reps 4` count minus the `--reps 1` count, divided by 3. Avoid `perf report
 --percent-limit 0` on these recordings: it ran for hours, so use the top-60 listing.
+
+## Shapes::build
+
+Second round, 2026-10-23, on master + finest-first shapes (docs/19) + this round's branch (`5f6735f`). Scope:
+the BMQ3 encoder's `compact/shapes/` only. Output unchanged throughout: blob hashes `28428af5a839cf27`
+(`compact_bench work/exp/real`), `9ad87007f0da7a05` (testbox, every 16th tile of the 4096² render) and
+`1cd433a4a56c64a9` (golden fixtures, `--step 2`); `oracle_optimized` passes (14.1× smaller, as before); the real
+render's webroots match after conversion to compat (16,641 tiles; the optimized bundles differ only in record
+order, which follows the render threads).
+
+Encode instructions per quad (testbox, every 16th tile, 10.18 M quads, `shapes_instr.sh`):
+
+| step | encode instr/quad |
+|---|---:|
+| base | 3662 |
+| key ids recorded per quad by the first pass; u128 keys; f32 local values; bit-test `on_grid` | 3358 |
+| SSE2 key and `on_grid` (4 lanes); `build` out of line | 3133 |
+| SSE2 shape-fits test | 3053 |
+| key ids and picks in one per-quad record (`fbe68fe`) | **3038 (−17.0%)** |
+
+`Shapes::build` itself (`perf record -e instructions:u` share): 1661 → 1068 instr/quad (**−36%**).
+
+| | base | branch |
+|---|---:|---:|
+| encode cycles/quad, locked (`EVENTS=instructions,cycles LOCK=1`), 3 pairs, median | 1542 | 1279 (**−17%**) |
+| encode ns/quad (`compact_bench --encode-reps-only`, locked, 5 pairs, median) | 433 | 292 |
+| real render `-r -f` optimized, user CPU s (locked, 3 pairs, median) | 292.1 | 276.0 (**−5.5%**) |
+| real render, instructions:u | 1589.4 G | 1489.9 G (**−6.3%**) |
+
+The render saves ~610 instructions per quad, the encode bench's figure. On a 300k² map (~400 render CPU-hours)
+that is ~20 CPU-hours. The box ran at load 15–40 from other sessions; ns/quad pairs ranged 351–526 (base) and
+284–368 (branch), so treat the timings as direction and the counters as the size.
+
+- **Key ids:** the first pass hashes each (axis, form) key once, records its id in the quad's record and makes
+  key id k the first candidate k of the arena. The second pass walks candidates from that id: no hashing and no
+  key recomputation. The arena's internal numbering changed (planted in id order, not hash-map order); tables
+  are numbered by first use in `assign`, so the output is the same.
+- **u128 keys:** rustc-hash 2 hashes `[i32; 4]` and `[u32; 8]` through its byte-slice path; packed integers
+  take a multiply per 64 bits (`lanes::pack`). This applies to the key, uv and template maps.
+- **f32 local values:** `(f64(v) - f64(b)) as f32` equals `v - b` in f32. f64 has more than 2 × 24 + 2
+  significand bits, so rounding the f64 difference to f32 is the f32 difference (no double rounding). The same
+  holds for the hashed form's `- d`.
+- **SSE2 lanes** (`shapes/lanes.rs`, x86-64 only, scalar twins elsewhere and as the test oracle): the key is
+  `cvttps2dq` of `l × 4096`. A lane of `i32::MIN` (NaN, out of range, or exactly −2^31) falls back to the
+  saturating scalar cast, so keys keep Rust's `as` semantics. `on_grid` compares truncate-and-back in 4 lanes
+  and also accepts |l × 16| = 2^31, the one value the saturating cast maps onto itself and truncation does not.
+  `fits` adds and compares 4 vertices at once.
+- **`#[inline(never)]` on `build`:** inlined into `encode::quads` it ran +45 instr/quad.
+- **Tried and dropped:** last-value caches for uv rows and templates (net ~+85 instr/quad, cause not
+  examined); `offer` with its hash path split into a never-inlined function and the hit path
+  `inline(always)` (+65); `offer` without its one-entry last-key cache (+13, cache kept).
+- **What is left** is flat: `cell_of`'s f64 cross product and floor (~2% of the bench's instruction samples), the uv and
+  template hash lookups per quad, and Vec pushes of the per-quad records.
+
+Reproduce (testbox; `~/bmrs-shapes-base` is a checkout of the base):
+```
+bash docs/perf-exp/shapes_instr.sh <checkout>…                     # encode instr/quad + blob hash
+EVENTS=instructions,cycles LOCK=1 bash docs/perf-exp/shapes_instr.sh <base> <new>
+bash docs/perf-exp/shapes_bench.sh <base> <new> 5                 # locked ns/quad pairs
+bash docs/perf-exp/shapes_render_ab.sh <base> <new> 3             # locked render pairs + output check
+```
