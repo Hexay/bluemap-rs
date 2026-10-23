@@ -20,19 +20,14 @@ use super::view::QV;
 use arena::{Arena, NONE};
 use lanes::{fits, on_grid, pack};
 
-/// A quad's candidate per axis in the plain form and, for x and z, in the hashed form.
-struct Pick {
-    plain: [u32; 3],
-    hashed: [u32; 2],
-    uv: u32,
-}
-
-/// A quad's key id per axis and, for an off-grid x or z with a known origin, the key id of its value relative to
-/// the block's hash offset (else `NONE`) and that offset.
-struct Located {
+/// Per axis, a quad's key id in the plain form and, for an off-grid x or z with a known origin, in the hashed form
+/// (else `NONE`) with the block's hash offset. The second pass replaces the key ids by the candidates the quad
+/// takes, and sets its uv shape.
+struct Quad {
     plain: [u32; 3],
     hashed: [u32; 2],
     offset: [f32; 2],
+    uv: u32,
 }
 
 #[derive(Default)]
@@ -41,8 +36,7 @@ pub(super) struct Shapes {
     hashed: [Arena; 2],
     uv: FxHashMap<(u128, u128), u32>,
     templates: FxHashMap<u128, u32>,
-    located: Vec<Located>,
-    picks: Vec<Pick>,
+    quads: Vec<Quad>,
     pub cells: Vec<[i32; 3]>,
     /// Template of every quad.
     pub ids: Vec<u32>,
@@ -83,8 +77,7 @@ impl Shapes {
         self.plain.iter_mut().chain(&mut self.hashed).for_each(Arena::clear);
         self.uv.clear();
         self.templates.clear();
-        self.located.clear();
-        self.picks.clear();
+        self.quads.clear();
         self.cells.clear();
         self.ids.clear();
         self.tables.clear();
@@ -100,23 +93,23 @@ impl Shapes {
         for quad_pos in pos.as_chunks::<72>().0 {
             let p = stored::<3>(quad_pos).map(|v| v.map(f32::from_bits));
             let cell = cell_of(&p)?;
-            let mut located = Located { plain: [NONE; 3], hashed: [NONE; 2], offset: [0.0; 2] };
+            let mut quad = Quad { plain: [NONE; 3], hashed: [NONE; 2], offset: [0.0; 2], uv: NONE };
             let mut offset = None;
             for a in 0..3 {
                 let b = cell[a] as f32;
                 let local = p.map(|v| v[a] - b);
-                located.plain[a] = self.plain[a].offer(&local, b);
+                quad.plain[a] = self.plain[a].offer(&local, b);
                 if let (Some(origin), true) = (origin, a != 1)
                     && !on_grid(&local)
                 {
                     let d = offset.get_or_insert_with(|| {
                         hash_offset(origin[0].wrapping_add(cell[0]), origin[1].wrapping_add(cell[2]))
                     })[a / 2];
-                    located.hashed[a / 2] = self.hashed[a / 2].offer(&local.map(|l| l - d), b);
-                    located.offset[a / 2] = d;
+                    quad.hashed[a / 2] = self.hashed[a / 2].offer(&local.map(|l| l - d), b);
+                    quad.offset[a / 2] = d;
                 }
             }
-            self.located.push(located);
+            self.quads.push(quad);
             self.cells.push(cell);
         }
         self.plain.iter_mut().chain(&mut self.hashed).for_each(Arena::plant);
@@ -124,28 +117,27 @@ impl Shapes {
         let (mut block, mut last) = (0u32, None);
         let quads = pos.as_chunks::<72>().0.iter().zip(uv.as_chunks::<48>().0);
         for (q, (quad_pos, quad_uv)) in quads.enumerate() {
-            let (cell, located) = (self.cells[q], &self.located[q]);
+            let cell = self.cells[q];
             if last != Some(cell) {
                 block += 1;
                 last = Some(cell);
             }
             let bits = stored::<3>(quad_pos);
-            let uv = stored::<2>(quad_uv);
-            let mut pick = Pick { plain: [NONE; 3], hashed: [NONE; 2], uv: NONE };
+            let uv = self.uv_id(stored::<2>(quad_uv).as_flattened());
+            let quad = &mut self.quads[q];
             for a in 0..3 {
                 let b = cell[a] as f32;
                 let want = bits.map(|v| v[a]);
                 let local = want.map(|w| f32::from_bits(w) - b);
-                pick.plain[a] = self.plain[a].find(located.plain[a], local, block, |s| fits(s, None, b, &want));
-                let head = if a == 1 { NONE } else { located.hashed[a / 2] };
+                quad.plain[a] = self.plain[a].find(quad.plain[a], local, block, |s| fits(s, None, b, &want));
+                let head = if a == 1 { NONE } else { quad.hashed[a / 2] };
                 if head != NONE {
-                    let d = located.offset[a / 2];
-                    pick.hashed[a / 2] =
+                    let d = quad.offset[a / 2];
+                    quad.hashed[a / 2] =
                         self.hashed[a / 2].find(head, local.map(|l| l - d), block, |s| fits(s, Some(d), b, &want));
                 }
             }
-            pick.uv = self.uv_id(uv.as_flattened());
-            self.picks.push(pick);
+            quad.uv = uv;
         }
         self.assign(pos)
     }
@@ -163,7 +155,7 @@ impl Shapes {
     /// Decides each quad's form per axis and numbers shapes and templates by first use.
     fn assign(&mut self, pos: &[u8]) -> Option<()> {
         let mut zero = [NONE; 3];
-        for (q, pick) in self.picks.iter().enumerate() {
+        for (q, pick) in self.quads.iter().enumerate() {
             let mut template = [0, 0, 0, pick.uv];
             for a in 0..3 {
                 let (p, h) = (pick.plain[a], if a == 1 { NONE } else { pick.hashed[a / 2] });
