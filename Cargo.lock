@@ -404,6 +404,7 @@ name = "bm-wasm"
 version = "0.2.0"
 dependencies = [
  "bm-format",
+ "flate2",
 ]
 
 [[package]]
