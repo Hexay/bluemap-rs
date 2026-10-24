@@ -93,7 +93,8 @@ rows cannot be re-run; `examples/compact_bench.rs` reports BMQ3 alone.)
 - The occluder flags come from one voting pass (a vertex without occlusion clears the marked cells it looks at),
   not the Python search, and predict AO equally well (0.80 bits/quad).
 - Block-local values carry rotation noise (5.96e-8 for 0, 0.99999994 for 1); the AO face test snaps within 1/4096.
-- Shapes are found greedily in quad order instead of finest-first: template ids cost 1.41 instead of 1.31 bits/quad.
+- Shapes were found greedily in quad order (template ids 1.41 bits/quad); finest-first discovery landed later
+  (docs/19).
 
 ## How it is wired
 - The tile's world origin: `MapStorage::set_hires_grid` (called by the engine's `MapContext` and by
@@ -107,7 +108,8 @@ rows cannot be re-run; `examples/compact_bench.rs` reports BMQ3 alone.)
   never correctness: every prediction is checked by the encoder and has a verbatim fallback.
 
 ## Not done
-- Finest-first shape discovery (~1.5%), template ids interleaved with cells (~3% at level 9), a higher zstd level.
+- Measured in docs/19: finest-first shape discovery (landed), template ids interleaved with cells (rejected), a
+  higher zstd level.
 
 ## Caveats
 - The real corpus is fresh vanilla terrain (plants, trees, no builds). The hash-offset step matters less on built-up

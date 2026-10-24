@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::chunk::{Chunk, ChunkContext};
+use crate::chunk::{Chunk, ChunkContext, PaletteCache};
 use crate::dimension::{DimensionType, dimension_folder, load_dimension_type};
 use crate::region::{Region, list_regions};
 use crate::registry::{BiomeId, Biomes, BlockStates, StateId};
@@ -88,7 +88,6 @@ impl World {
 
     /// Decodes every chunk in the rectangle, in parallel. Region headers that can't be read fail their chunks only.
     pub fn load_area(&self, x0: i32, z0: i32, width: i32, depth: i32) -> ChunkArea {
-        let ctx = ChunkContext { states: &self.states, biomes: &self.biomes, dimension: &self.dimension_type };
         let (rx0, rz0) = (x0.div_euclid(32), z0.div_euclid(32));
         let (rx1, rz1) = ((x0 + width - 1).div_euclid(32), (z0 + depth - 1).div_euclid(32));
         let coords: Vec<(i32, i32)> = (rx0..=rx1).flat_map(|rx| (rz0..=rz1).map(move |rz| (rx, rz))).collect();
@@ -110,8 +109,14 @@ impl World {
         let slots = (0..width * depth)
             .into_par_iter()
             .map_init(
-                || (Vec::new(), Vec::new()),
-                |(raw, nbt), i| {
+                || (Vec::new(), Vec::new(), PaletteCache::default()),
+                |(raw, nbt, palette), i| {
+                    let ctx = ChunkContext {
+                        states: &self.states,
+                        biomes: &self.biomes,
+                        dimension: &self.dimension_type,
+                        palette: Some(palette),
+                    };
                     let (cx, cz) = (x0 + i % width, z0 + i / width);
                     let (lx, lz) = (cx.rem_euclid(32) as usize, cz.rem_euclid(32) as usize);
                     let region = match region_of(cx, cz) {

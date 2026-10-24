@@ -77,7 +77,44 @@ fn every_truncation_is_an_error() {
     let buf = chunk();
     for cut in 0..buf.len() {
         assert!(read_root(&buf[..cut]).is_err(), "cut at {cut}");
+        assert!(Document::parse(&buf[..cut]).is_err(), "cut at {cut}");
     }
+}
+
+/// Every tag of a compound, nested ones flattened depth first, as text.
+fn dump(c: Compound, out: &mut Vec<String>) {
+    for (name, tag) in c.entries() {
+        out.push(format!("{}={tag:?}", String::from_utf8_lossy(name)).split(" index").next().unwrap().to_owned());
+        match tag {
+            Tag::Compound(c) => dump(c, out),
+            Tag::List(l) => l.iter().for_each(|t| match t {
+                Tag::Compound(c) => dump(c, out),
+                Tag::List(inner) => out.push(format!("list of {}", inner.len())),
+                t => out.push(format!("{t:?}")),
+            }),
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn indexed_views_read_like_plain_ones() {
+    let mut w = W::default();
+    w.named(tag::COMPOUND, "");
+    w.named(tag::LIST, "lists").byte(tag::LIST).i32(2);
+    w.byte(tag::COMPOUND).i32(1).named(tag::INT, "a").i32(1).end();
+    w.byte(tag::END).i32(0);
+    w.named(tag::COMPOUND, "empty").end();
+    w.named(tag::LIST, "strings").byte(tag::STRING).i32(2).str("x").str("yz");
+    w.0.extend(&chunk()[3..chunk().len() - 1]);
+    w.end();
+    let (mut plain, mut indexed) = (Vec::new(), Vec::new());
+    dump(read_root(&w.0).unwrap(), &mut plain);
+    let doc = Document::parse(&w.0).unwrap();
+    dump(doc.root(), &mut indexed);
+    assert_eq!(indexed, plain);
+    assert_eq!(plain.len(), 15, "{plain:?}");
+    assert_eq!(doc.root().list("sections").unwrap().compounds().nth(1).unwrap().i64("Y"), Some(0));
 }
 
 #[test]
