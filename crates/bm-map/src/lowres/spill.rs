@@ -36,11 +36,11 @@ impl<S: LowresStore> LowresTileManager<S> {
         let i = lod as usize - 1;
         let dirty = self.layers[i].remove(&tile).expect("picked from the layer");
         // an unchanged tile is already in the store as it is
-        if !dirty.unchanged() {
-            if let Err(source) = self.store.spill(lod, tile, &dirty.data) {
-                self.layers[i].insert(tile, dirty);
-                return Err(LowresLayerError::Save { lod, tile, source });
-            }
+        if !dirty.unchanged()
+            && let Err(source) = self.store.spill(lod, tile, &dirty.data)
+        {
+            self.layers[i].insert(tile, dirty);
+            return Err(LowresLayerError::Save { lod, tile, source });
         }
         self.spilled[i].insert(tile);
         Ok(())
