@@ -58,6 +58,20 @@ fn bundled_bluemap_defaults_load() {
 }
 
 #[test]
+fn snapshots_keep_their_states_while_the_registry_grows() {
+    let r = BlockStates::default();
+    let stone = r.intern("stone", &mut []);
+    let (a, b) = (r.snapshot(), r.snapshot());
+    let dirt = r.intern("dirt", &mut []);
+    r.add_default(dirt);
+    assert_eq!((a.len(), b.len(), r.len()), (3, 3, 4));
+    assert_eq!(a.intern("stone", &mut []), stone);
+    assert_eq!(a.default_state("dirt"), a.intern("dirt", &mut []));
+    assert_eq!(&*r.get(r.default_state("dirt")).key, "minecraft:dirt[]");
+    assert_eq!(b.len(), 3);
+}
+
+#[test]
 fn biomes_intern() {
     let b = Biomes::default();
     let plains = b.intern("plains");

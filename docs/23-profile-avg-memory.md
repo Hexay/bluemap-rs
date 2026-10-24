@@ -145,3 +145,45 @@ memset is fast; low priority.
     builds are not the shipped core.
   - `mmap_threshold=256K` cuts RSS 52% but costs +13% CPU.
   - Periodic `mi_collect` in the webserver: no effect.
+
+## Result: chunk-parse churn (bm-world)
+
+Re-profiled on master 5e1109a first: the NBT `Document` and `PaletteCache` had landed since the table above, so
+`real` (glibc, `-r -f`, heaptrack) was at 5.26 M calls (316/tile). The chunk parser was still the largest share:
+`collect_sections` + per-section palette `collect` were about 52%, palette-cache misses about 10%.
+
+Landed (bm-world):
+1. **Flat per-chunk arrays** (`chunk/sections.rs`): a first pass reads each section's tags into a `RawSection` (still
+   pointing into the NBT), then block words, palettes, nibble arrays and biome cells each go into one exact-size
+   allocation per chunk, and sections hold spans and indices into them. `Padded` is now only a layout, and
+   heightmaps, biome indices and spanning (1.13–1.15) arrays decode from the NBT in place. Before this, each section
+   needed 5–7 boxes. Parse went from 17.5 to 13.4 µs/chunk (`chunk_bench`). `chunk_bench --full-digest` (every
+   block, light, biome and heightmap value) gives the same digest on 6 regions of the real world.
+2. **Per-thread scratch kept for the `World`'s lifetime** (`world.rs`): read buffers plus `PaletteCache`, one per
+   pool thread. `map_init` made fresh ones per rayon split, so the caches restarted many times per region (100–450k
+   misses per run, each costing a key box, a `pairs` Vec and a `state_key` String). The scratch is sized on first
+   `load_area`, because asking rayon for its thread count at `World::open` would start the global pool before the
+   CLI configures it.
+3. **Copy-on-write registry snapshot** (`registry.rs`): `RwLock<Arc<StatesInner>>` with `Arc<str>` keys.
+   `snapshot()` is now an `Arc` clone. Nearly every region interns some new state while the previous region's
+   snapshot is alive, so one copy per region still happens, but with `Arc<str>` keys it costs 3 allocations instead
+   of about 2 per state (about 216k calls per run before).
+
+| `real`, glibc | base 5e1109a | 04d150f |
+|---|---|---|
+| allocation calls (heaptrack) | 5.26 M (316/tile) | **3.48 M (209/tile, −34%)** |
+| temporary allocations | 1.64 M | **0.67 M (−59%)** |
+| chunk-parse sites, calls | ≈ 3.5 M | ≈ 0.69 M (≈ 9 per chunk) |
+| user CPU s, locked median of 3 | 265.4 | 263.0 (−0.9%) |
+| instructions:u | 1.4353e12 | 1.4309e12 (−0.31%) |
+| cycles:u | 1.0464e12 | 1.0406e12 (−0.55%) |
+| RSS mean / max MiB, 2 paired unlocked runs | 711, 783 / 901, 902 | 746, 730 / 909, 924 |
+
+The webroots match after conversion to compat (`testbox_cpu_ladder.sh`, `CONVERT=1`: 0 non-rstate differences).
+RSS is unchanged within noise. The heap peak is the `write_prbm` buffers queued for persistence (73–81% of it), and
+chunk data is about 2 MB of it in both runs. heaptrack's peak-heap figure swings by ±200 MB between runs with the
+race between rendering and persistence, so use sampled RSS instead (`heaptrack_sites.py --cost peak` ranks the peak).
+
+Not done (each ≤ 1 call per chunk): the `Document` index `Vec` (could reuse a scratch, but that needs a bm-nbt API),
+the `RawSection` Vec, and the two heightmap boxes (could fold into `Arrays`). The `state_key` `&mut String` scratch
+and a reused `pairs` were dropped: with the per-thread cache, resolving a palette entry is no longer hot.

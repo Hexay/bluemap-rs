@@ -1,12 +1,13 @@
 //! 1.18+ chunks (DataVersion ≥ 2844, BlueMap's `Chunk_1_18`): flat root, `sections[].block_states` and per-section
 //! biomes, padded index arrays.
 
-use bm_nbt::{Compound, List, Tag};
+use bm_nbt::{BeArray, Compound, List, Tag};
 
-use super::{BlockEntity, Blocks, Chunk, ChunkContext, Light, Section, SectionBiomes};
+use super::sections::{RawLight, RawSection, build_from};
+use super::{BlockEntity, Chunk, ChunkContext};
 use crate::Result;
-use crate::packed::{Padded, ceil_log2, padded_block_bits};
-use crate::registry::{BiomeId, StateId};
+use crate::packed::{Padded, ceil_log2};
+use crate::registry::StateId;
 
 pub const MIN_DATA_VERSION: i32 = 2844;
 
@@ -27,19 +28,20 @@ pub fn parse(root: Compound, data_version: i32, ctx: &ChunkContext) -> Result<Ch
     let dim = ctx.dimension;
     let heightmap = |key: &str| {
         let data = heightmaps?.get(key)?.as_long_array()?;
-        let bits = ceil_log2(dim.height as usize + 1) as u8;
-        let packed = Padded::new(bits, data.iter().collect());
-        packed.holds(256).then(|| Box::new(std::array::from_fn(|i| (packed.get(i) as i32 + dim.min_y) as i16)))
+        let packed = Padded::new(ceil_log2(dim.height as usize + 1) as u8);
+        packed
+            .holds(data.len(), 256)
+            .then(|| Box::new(std::array::from_fn(|i| (packed.get_with(|l| data.get(l), i) as i32 + dim.min_y) as i16)))
     };
-    let (min_section, sections) =
-        collect_sections(sections.into_iter().flat_map(|l| l.compounds()).filter_map(|c| parse_section(c, ctx)));
+    let sections = build_from(sections, raw_section, ctx);
     Ok(Chunk {
         data_version,
         generated: status != "empty",
         has_light: status == "full",
         inhabited_time,
-        min_section,
-        sections,
+        min_section: sections.min,
+        sections: sections.sections,
+        arrays: sections.arrays,
         legacy_biomes: None,
         sky_default: if dim.has_skylight { 15 } else { 0 },
         world_surface: heightmap("WORLD_SURFACE"),
@@ -48,50 +50,34 @@ pub fn parse(root: Compound, data_version: i32, ctx: &ChunkContext) -> Result<Ch
     })
 }
 
-/// Sections by y, contiguous from the lowest one, gaps `None`.
-pub(super) fn collect_sections(parsed: impl Iterator<Item = (i32, Section)>) -> (i32, Vec<Option<Section>>) {
-    let parsed: Vec<(i32, Section)> = parsed.collect();
-    let Some(min) = parsed.iter().map(|(y, _)| *y).min() else { return (0, Vec::new()) };
-    let max = parsed.iter().map(|(y, _)| *y).max().unwrap();
-    let mut sections: Vec<Option<Section>> = (min..=max).map(|_| None).collect();
-    for (y, section) in parsed {
-        sections[(y - min) as usize] = Some(section);
-    }
-    (min, sections)
-}
-
-fn parse_section(c: Compound, ctx: &ChunkContext) -> Option<(i32, Section)> {
+fn raw_section(c: Compound) -> Option<RawSection> {
     let (mut y, mut block_states, mut biomes, mut block_light, mut sky_light) = (None, None, None, None, None);
     for (name, tag) in c.entries() {
         match name {
             b"Y" => y = tag.as_i64(),
             b"block_states" => block_states = tag.as_compound(),
             b"biomes" => biomes = tag.as_compound(),
-            b"BlockLight" => block_light = tag.as_byte_array().and_then(Light::from_nibbles),
-            b"SkyLight" => sky_light = tag.as_byte_array().and_then(Light::from_nibbles),
+            b"BlockLight" => block_light = tag.as_byte_array().and_then(RawLight::from_nibbles),
+            b"SkyLight" => sky_light = tag.as_byte_array().and_then(RawLight::from_nibbles),
             _ => {}
         }
     }
-    let section = Section {
-        blocks: block_states.map_or(Blocks::Single(StateId::AIR), |b| parse_blocks(b, ctx)),
-        biomes: biomes.map_or(SectionBiomes::Single(BiomeId::DEFAULT), |b| parse_biomes(b, ctx)),
-        block_light,
-        sky_light,
-    };
-    Some((y? as i32, section))
+    let (palette, data) = palette_and_data(block_states);
+    let (biome_palette, biome_data) = palette_and_data(biomes);
+    Some(RawSection { y: y? as i32, palette, data, spanning: false, biome_palette, biome_data, block_light, sky_light })
 }
 
-fn parse_blocks(c: Compound, ctx: &ChunkContext) -> Blocks {
-    let palette: Box<[StateId]> =
-        c.list("palette").map(|l| l.iter().map(|t| palette_state(t, ctx)).collect()).unwrap_or_default();
-    match (palette.len(), c.get("data").and_then(|t| t.as_long_array())) {
-        (0, _) => Blocks::Single(StateId::AIR),
-        (1, _) | (_, None) => Blocks::Single(palette[0]),
-        (n, Some(data)) => {
-            let bits = padded_block_bits(n, data.len());
-            Blocks::Paletted { palette, indices: Padded::new(bits, data.iter().collect()) }
+/// `palette` and `data` of a paletted container.
+fn palette_and_data(c: Option<Compound>) -> (Option<List>, Option<BeArray<8>>) {
+    let (mut palette, mut data) = (None, None);
+    for (name, tag) in c.iter().flat_map(|c| c.entries()) {
+        match name {
+            b"palette" => palette = tag.as_list(),
+            b"data" => data = tag.as_long_array(),
+            _ => {}
         }
     }
+    (palette, data)
 }
 
 /// A palette entry: `{Name, Properties}` (≤ 26.2), `{id, properties}` (26.3+), or a bare name / `{"": name}`
@@ -128,23 +114,6 @@ fn resolve_state(tag: Tag, ctx: &ChunkContext) -> StateId {
                 .filter_map(|(k, v)| Some((std::str::from_utf8(k).ok()?, v.as_str()?)))
                 .collect();
             ctx.states.intern(n, &mut pairs)
-        }
-    }
-}
-
-fn parse_biomes(c: Compound, ctx: &ChunkContext) -> SectionBiomes {
-    let palette: Vec<BiomeId> = c
-        .list("palette")
-        .map(|l| l.iter().map(|t| t.as_str().map_or(BiomeId::DEFAULT, |n| ctx.biomes.intern(n))).collect())
-        .unwrap_or_default();
-    match (palette.len(), c.get("data").and_then(|t| t.as_long_array())) {
-        (0, _) => SectionBiomes::Single(BiomeId::DEFAULT),
-        (1, _) | (_, None) => SectionBiomes::Single(palette[0]),
-        (n, Some(data)) => {
-            let indices = Padded::new(ceil_log2(n).max(1) as u8, data.iter().collect());
-            let cells =
-                std::array::from_fn(|i| palette.get(indices.get(i) as usize).copied().unwrap_or(BiomeId::DEFAULT));
-            SectionBiomes::Cells(Box::new(cells))
         }
     }
 }

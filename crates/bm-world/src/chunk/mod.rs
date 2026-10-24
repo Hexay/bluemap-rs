@@ -5,6 +5,7 @@ mod legacy;
 mod legacy_biomes;
 mod modern;
 mod palette;
+mod sections;
 
 pub use palette::PaletteCache;
 
@@ -12,6 +13,7 @@ use crate::dimension::DimensionType;
 use crate::packed::Padded;
 use crate::registry::{BiomeId, Biomes, BlockStates, StateId};
 use crate::{Error, Result};
+use sections::{Arrays, Span};
 
 /// Everything a chunk needs from outside to decode.
 pub struct ChunkContext<'a> {
@@ -33,6 +35,7 @@ pub struct Chunk {
     min_section: i32,
     /// Contiguous from `min_section`; `None` for gaps.
     sections: Vec<Option<Section>>,
+    arrays: Arrays,
     /// 1.13–1.17 store biomes for the whole chunk, not per section.
     legacy_biomes: Option<LegacyBiomes>,
     /// Light returned where nothing is stored: 15 with sky light, else 0.
@@ -42,22 +45,23 @@ pub struct Chunk {
     pub block_entities: Vec<BlockEntity>,
 }
 
-pub struct Section {
-    pub blocks: Blocks,
+/// Indices into the chunk's [`Arrays`].
+struct Section {
+    blocks: Blocks,
     biomes: SectionBiomes,
     block_light: Option<Light>,
     sky_light: Option<Light>,
 }
 
-pub enum Blocks {
+enum Blocks {
     Single(StateId),
-    Paletted { palette: Box<[StateId]>, indices: Padded },
+    Paletted { palette: Span, words: Span, indices: Padded },
 }
 
 enum SectionBiomes {
     Single(BiomeId),
     /// 4×4×4 cells, index `(y/4)*16 + (z/4)*4 + x/4`.
-    Cells(Box<[BiomeId; 64]>),
+    Cells(u32),
 }
 
 enum LegacyBiomes {
@@ -67,10 +71,9 @@ enum LegacyBiomes {
     Cells(Box<[BiomeId; 64]>),
 }
 
-/// A nibble array, or one value for all 4096 blocks (most sections are fully dark or fully lit).
 enum Light {
     Uniform(u8),
-    Nibbles(Box<[u8; 2048]>),
+    Nibbles(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,18 +109,25 @@ impl Chunk {
     }
 
     pub fn block(&self, x: i32, y: i32, z: i32) -> StateId {
-        self.section(y).map_or(StateId::AIR, |s| s.blocks.get(block_index(x, y, z)))
+        self.section(y).map_or(StateId::AIR, |s| match s.blocks {
+            Blocks::Single(s) => s,
+            Blocks::Paletted { palette, words, indices } => {
+                let p = indices.get(words.of(&self.arrays.words), block_index(x, y, z));
+                palette.of(&self.arrays.palettes).get(p as usize).copied().unwrap_or(StateId::MISSING)
+            }
+        })
     }
 
     pub fn biome(&self, x: i32, y: i32, z: i32) -> BiomeId {
+        let cell = ((y & 12) << 2 | z & 12 | (x & 12) >> 2) as usize;
         match &self.legacy_biomes {
             Some(LegacyBiomes::Columns(ids)) => return ids[column_index(x, z)],
-            Some(LegacyBiomes::Cells(cells)) => return cells[((y & 12) << 2 | z & 12 | (x & 12) >> 2) as usize],
+            Some(LegacyBiomes::Cells(cells)) => return cells[cell],
             None => {}
         }
-        self.section(y).map_or(BiomeId::DEFAULT, |s| match &s.biomes {
-            SectionBiomes::Single(b) => *b,
-            SectionBiomes::Cells(cells) => cells[((y & 12) << 2 | z & 12 | (x & 12) >> 2) as usize],
+        self.section(y).map_or(BiomeId::DEFAULT, |s| match s.biomes {
+            SectionBiomes::Single(b) => b,
+            SectionBiomes::Cells(k) => self.arrays.biomes[k as usize][cell],
         })
     }
 
@@ -135,7 +145,8 @@ impl Chunk {
             Ok(s) if s.block_light.is_none() && s.sky_light.is_none() => (0, 0),
             Ok(s) => {
                 let i = block_index(x, y, z);
-                (s.sky_light.as_ref().map_or(0, |l| l.get(i)), s.block_light.as_ref().map_or(0, |l| l.get(i)))
+                let get = |l: &Option<Light>| l.as_ref().map_or(0, |l| l.get(&self.arrays, i));
+                (get(&s.sky_light), get(&s.block_light))
             }
             Err(below) if below < 0 => (0, 0),
             Err(_) => (self.sky_default, 0),
@@ -152,11 +163,14 @@ impl Chunk {
             let section = self.section(y);
             match section {
                 Ok(Section { blocks: Blocks::Single(s), .. }) => states.extend(std::iter::repeat_n(*s, n)),
-                Ok(Section { blocks: Blocks::Paletted { palette, indices }, .. }) => states.extend(
-                    indices
-                        .strided(block_index(x, y, z), 256, n)
-                        .map(|p| palette.get(p as usize).copied().unwrap_or(StateId::MISSING)),
-                ),
+                Ok(Section { blocks: Blocks::Paletted { palette, words, indices }, .. }) => {
+                    let palette = palette.of(&self.arrays.palettes);
+                    states.extend(
+                        indices
+                            .strided(words.of(&self.arrays.words), block_index(x, y, z), 256, n)
+                            .map(|p| palette.get(p as usize).copied().unwrap_or(StateId::MISSING)),
+                    )
+                }
                 Err(_) => states.extend(std::iter::repeat_n(StateId::AIR, n)),
             }
             let uniform = match section {
@@ -169,7 +183,8 @@ impl Chunk {
                 (Some(l), _) => light.extend(std::iter::repeat_n(l, n)),
                 (None, Ok(s)) => {
                     let i = block_index(x, y, z);
-                    let (sky, block) = (Light::column(&s.sky_light, i, n), Light::column(&s.block_light, i, n));
+                    let column = |l: &Option<Light>| Light::column(l, &self.arrays, i, n);
+                    let (sky, block) = (column(&s.sky_light), column(&s.block_light));
                     light.extend(sky[..n].iter().zip(&block[..n]).map(|(&s, &b)| [s, b]));
                 }
                 (None, Err(_)) => unreachable!("absent sections have uniform light"),
@@ -197,7 +212,7 @@ impl Chunk {
             let end = (y | 15).min(y1);
             max = max.max(match self.section(y).map(|s| &s.block_light) {
                 Ok(Some(Light::Uniform(v))) => *v,
-                Ok(Some(l)) => (y..=end).map(|y| l.get(block_index(x, y, z))).max().unwrap_or(0),
+                Ok(Some(l)) => (y..=end).map(|y| l.get(&self.arrays, block_index(x, y, z))).max().unwrap_or(0),
                 Ok(None) | Err(_) => 0,
             });
             y = end + 1;
@@ -225,46 +240,26 @@ impl Chunk {
     }
 }
 
-impl Blocks {
-    pub fn get(&self, i: usize) -> StateId {
-        match self {
-            Self::Single(s) => *s,
-            Self::Paletted { palette, indices } => {
-                palette.get(indices.get(i) as usize).copied().unwrap_or(StateId::MISSING)
-            }
-        }
-    }
-}
-
 impl Light {
-    fn from_nibbles(bytes: &[u8]) -> Option<Self> {
-        let nibbles: &[u8; 2048] = bytes.try_into().ok()?;
-        let first = nibbles[0];
-        Some(if first & 15 == first >> 4 && nibbles.iter().all(|&b| b == first) {
-            Self::Uniform(first & 15)
-        } else {
-            Self::Nibbles(Box::new(*nibbles))
-        })
-    }
-
-    fn get(&self, i: usize) -> u8 {
+    fn get(&self, arrays: &Arrays, i: usize) -> u8 {
         match self {
             Self::Uniform(v) => *v,
-            Self::Nibbles(n) => (n[i >> 1] >> ((i & 1) * 4)) & 15,
+            Self::Nibbles(k) => (arrays.light[*k as usize][i >> 1] >> ((i & 1) * 4)) & 15,
         }
     }
 
     /// Values `start`, `start + 256`, … (`n` ≤ 16 of them: one column within the section); absent light reads as 0.
-    fn column(light: &Option<Self>, start: usize, n: usize) -> [u8; 16] {
+    fn column(light: &Option<Self>, arrays: &Arrays, start: usize, n: usize) -> [u8; 16] {
         let mut out = [0; 16];
         match light {
             None => {}
             Some(Self::Uniform(v)) => out = [*v; 16],
-            Some(Self::Nibbles(nibbles)) => {
+            Some(Self::Nibbles(k)) => {
+                let nibbles = &arrays.light[*k as usize];
                 // a 256 stride keeps the nibble half fixed: 128 bytes apart
                 let shift = (start & 1) * 4;
-                for (k, o) in out[..n].iter_mut().enumerate() {
-                    *o = (nibbles[(start >> 1) + 128 * k] >> shift) & 15;
+                for (j, o) in out[..n].iter_mut().enumerate() {
+                    *o = (nibbles[(start >> 1) + 128 * j] >> shift) & 15;
                 }
             }
         }

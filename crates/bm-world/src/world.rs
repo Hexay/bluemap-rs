@@ -2,7 +2,7 @@
 //! in parallel into a flat array (docs/01 §7 "Working set"), instead of BlueMap's global hashed chunk cache.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use rayon::prelude::*;
 
@@ -20,6 +20,23 @@ pub struct World {
     region_dir: PathBuf,
     states: Arc<BlockStates>,
     biomes: Arc<Biomes>,
+    /// One per pool thread, kept across [`World::load_area`] calls; sized on first use, since asking rayon for its
+    /// thread count would start the global pool before the binary configures it.
+    scratch: OnceLock<Box<[Mutex<Scratch>]>>,
+}
+
+/// A thread's chunk read buffers and palette cache.
+#[derive(Default)]
+struct Scratch {
+    raw: Vec<u8>,
+    nbt: Vec<u8>,
+    palette: PaletteCache,
+}
+
+/// The current pool thread's [`Scratch`], or a fresh one off the pool (or if it is somehow taken).
+enum Held<'a> {
+    Shared(MutexGuard<'a, Scratch>),
+    Own(Box<Scratch>),
 }
 
 pub enum ChunkSlot {
@@ -57,6 +74,7 @@ impl World {
             dimension,
             states,
             biomes,
+            scratch: OnceLock::new(),
         })
     }
 
@@ -106,11 +124,14 @@ impl World {
         let region_of = |cx: i32, cz: i32| {
             &regions[((cx.div_euclid(32) - rx0) * (rz1 - rz0 + 1) + (cz.div_euclid(32) - rz0)) as usize]
         };
+        let scratch =
+            self.scratch.get_or_init(|| (0..rayon::current_num_threads()).map(|_| Mutex::default()).collect());
         let slots = (0..width * depth)
             .into_par_iter()
             .map_init(
-                || (Vec::new(), Vec::new(), PaletteCache::default()),
-                |(raw, nbt, palette), i| {
+                || Held::new(scratch),
+                |held, i| {
+                    let Scratch { raw, nbt, palette } = held.get();
                     let ctx = ChunkContext {
                         states: &self.states,
                         biomes: &self.biomes,
@@ -135,6 +156,20 @@ impl World {
             )
             .collect();
         ChunkArea { x0, z0, width, depth, slots }
+    }
+}
+
+impl<'a> Held<'a> {
+    fn new(all: &'a [Mutex<Scratch>]) -> Self {
+        let mine = rayon::current_thread_index().and_then(|i| all.get(i)?.try_lock().ok());
+        mine.map_or_else(|| Self::Own(Box::default()), Self::Shared)
+    }
+
+    fn get(&mut self) -> &mut Scratch {
+        match self {
+            Self::Shared(guard) => guard,
+            Self::Own(scratch) => scratch,
+        }
     }
 }
 
