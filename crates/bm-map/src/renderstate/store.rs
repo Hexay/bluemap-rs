@@ -124,7 +124,12 @@ impl<C: Cell, S: CellIo> CellStore<C, S> {
             if c.is_modified() {
                 let kind = C::KIND;
                 let written = c.encode().and_then(|bytes| {
-                    self.io.write_cell(kind, *pos, &bytes).map_err(|source| Error::Io { op: "write", kind, cell: *pos, source })
+                    self.io.write_cell(kind, *pos, &bytes).map_err(|source| Error::Io {
+                        op: "write",
+                        kind,
+                        cell: *pos,
+                        source,
+                    })
                 });
                 if let Err(e) = written {
                     first_err.get_or_insert(e);

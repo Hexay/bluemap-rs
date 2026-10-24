@@ -60,7 +60,11 @@ fn release_writes_modified_cells_and_drops_them() {
     chunks.set(5, 5, 42);
     chunks.get(200, 0);
     chunks.release(&[(0, 0), (1, 0), (9, 9)]).unwrap();
-    assert_eq!((chunks.loaded(), io.list_cells(CellKind::Chunks).unwrap()), (0, vec![(0, 0)]), "clean cells aren't written");
+    assert_eq!(
+        (chunks.loaded(), io.list_cells(CellKind::Chunks).unwrap()),
+        (0, vec![(0, 0)]),
+        "clean cells aren't written"
+    );
     assert_eq!(chunks.get(5, 5), 42);
 
     let failing = MemIo { fail_writes: true, ..MemIo::default() };

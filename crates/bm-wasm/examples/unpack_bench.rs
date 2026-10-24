@@ -27,7 +27,9 @@ fn main() {
         .split('{')
         .skip(1)
         .enumerate()
-        .map(|(i, e)| (std::fs::read(dir.join(format!("{i}.body"))).expect("body"), field(e, "quads"), field(e, "fnv") as u32))
+        .map(|(i, e)| {
+            (std::fs::read(dir.join(format!("{i}.body"))).expect("body"), field(e, "quads"), field(e, "fnv") as u32)
+        })
         .collect();
     let mut unpacker = BodyUnpacker::default();
     let mut out = Vec::new();

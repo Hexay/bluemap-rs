@@ -25,8 +25,10 @@ fn prbm() -> Vec<u8> {
     let mut m = TileModel::default();
     for q in 0..40 {
         let (x, z) = ((q % 8) as f32, (q / 8) as f32);
-        for tri in [[[x, 64., z], [x, 64., z + 1.], [x + 1., 64., z + 1.]], [[x, 64., z], [x + 1., 64., z + 1.], [x + 1., 64., z]]]
-        {
+        for tri in [
+            [[x, 64., z], [x, 64., z + 1.], [x + 1., 64., z + 1.]],
+            [[x, 64., z], [x + 1., 64., z + 1.], [x + 1., 64., z]],
+        ] {
             tri.iter().for_each(|p| m.position.extend(p));
             m.color.extend([0.5, 0.5, 1.]);
             m.sunlight.push(15);

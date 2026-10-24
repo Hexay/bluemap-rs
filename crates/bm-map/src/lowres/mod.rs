@@ -159,7 +159,8 @@ impl<S: LowresStore> LowresTileManager<S> {
     /// A tile whose save or cascade fails stays dirty, so a later flush retries it; the first failure is returned.
     pub fn flush_lod(&mut self, lod: u32, mut select: impl FnMut(Tile) -> bool) -> Result<(), S> {
         let i = lod as usize - 1;
-        let mut tiles: Vec<Tile> = self.layers[i].keys().chain(&self.spilled[i]).copied().filter(|&t| select(t)).collect();
+        let mut tiles: Vec<Tile> =
+            self.layers[i].keys().chain(&self.spilled[i]).copied().filter(|&t| select(t)).collect();
         tiles.sort_unstable();
         // spilled tiles are reloaded to flush, so a batch's worth at a time keeps within budget
         let batch = if self.budget == usize::MAX { tiles.len().max(1) } else { self.budget.div_ceil(2) };

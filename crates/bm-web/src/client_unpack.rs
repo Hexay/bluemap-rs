@@ -71,7 +71,10 @@ mod tests {
         let made = String::from_utf8(with_script(html).unwrap()).unwrap();
         let tag = tag();
         assert!(made.find(&tag).unwrap() < made.find("type=\"module\"").unwrap());
-        assert_eq!(made.replace(&tag, "").replace("\n      <script type", "<script type"), String::from_utf8_lossy(html));
+        assert_eq!(
+            made.replace(&tag, "").replace("\n      <script type", "<script type"),
+            String::from_utf8_lossy(html)
+        );
         assert_eq!(with_script(made.as_bytes()), None);
         assert_eq!(with_script(b"<html></html>"), None);
         assert!(!SCRIPT.body.windows(WASM_PLACEHOLDER.len()).any(|w| w == WASM_PLACEHOLDER.as_bytes()));

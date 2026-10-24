@@ -118,7 +118,10 @@ fn torn_tail_with_a_whole_payload_is_never_served() {
     assert_eq!(writer.read((2, 2)).unwrap().unwrap(), b"good");
     writer.write((3, 3), b"new").unwrap();
     let again = BundleStore::new(s.dir.clone(), true);
-    assert_eq!((again.read((2, 2)).unwrap().unwrap(), again.read((3, 3)).unwrap().unwrap()), (b"good".to_vec(), b"new".to_vec()));
+    assert_eq!(
+        (again.read((2, 2)).unwrap().unwrap(), again.read((3, 3)).unwrap().unwrap()),
+        (b"good".to_vec(), b"new".to_vec())
+    );
 }
 
 #[test]

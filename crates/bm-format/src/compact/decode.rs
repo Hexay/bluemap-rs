@@ -219,12 +219,7 @@ fn payloads(out: &mut [u8], at: [usize; 7], quads: usize) -> [&mut [u8]; 7] {
 }
 
 /// Applies an exception stream (`u32 n, u32 index[n], rows[n]`) via `apply(quad, row)`.
-fn patch(
-    exc: &mut Reader,
-    quads: usize,
-    size: usize,
-    mut apply: impl FnMut(usize, &[u8]),
-) -> Result<(), CompactError> {
+fn patch(exc: &mut Reader, quads: usize, size: usize, mut apply: impl FnMut(usize, &[u8])) -> Result<(), CompactError> {
     let n = exc.u32()? as usize;
     let index = exc.take(n.checked_mul(4).ok_or(CompactError::Corrupt("count"))?)?;
     let rows = exc.take(n.checked_mul(size).ok_or(CompactError::Corrupt("count"))?)?;

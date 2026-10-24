@@ -123,7 +123,9 @@ fn settings_json_matches_java() {
         let map_refs: Vec<(&str, i32)> = maps.iter().map(|(id, s)| (id.as_str(), *s)).collect();
         let golden = fx.join("web/settings.json");
         let existing = fs::read_to_string(&golden).unwrap();
-        let settings = WebappSettings::create_or_update(bm_config::generate::BLUEMAP_VERSION, &webapp, &map_refs, Some(&existing)).unwrap();
+        let settings =
+            WebappSettings::create_or_update(bm_config::generate::BLUEMAP_VERSION, &webapp, &map_refs, Some(&existing))
+                .unwrap();
         assert_eq!(settings.to_json().unwrap(), existing, "{}", golden.display());
         compared += 1;
     }

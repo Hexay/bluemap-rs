@@ -169,7 +169,8 @@ fn scattered(budget: Option<usize>) -> MemoryStore {
     for step in 0..4000 {
         seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
         let (x, z) = ((seed >> 33) as i32 % 40 - 20, (seed >> 45) as i32 % 40 - 20);
-        let (argb, height, light) = ((seed >> 7) as u32 | 0xFF00_0000, (seed >> 20) as i32 % 300, (seed >> 50) as i32 & 15);
+        let (argb, height, light) =
+            ((seed >> 7) as u32 | 0xFF00_0000, (seed >> 20) as i32 % 300, (seed >> 50) as i32 & 15);
         m.set_argb(x, z, argb, height, light).unwrap();
         if step % 500 == 499 {
             let row = step / 500 - 5;

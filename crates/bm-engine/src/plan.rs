@@ -136,7 +136,10 @@ impl Plan {
         let (bx0, bz0) = self.hires.tile_min(first);
         let (bx1, bz1) = self.hires.tile_min(last);
         let (bx1, bz1) = (bx1 + self.hires.size[0] - 1, bz1 + self.hires.size[1] - 1);
-        [cell_rect(CellKind::Tiles, first, last), cell_rect(CellKind::Chunks, (bx0 >> 4, bz0 >> 4), (bx1 >> 4, bz1 >> 4))]
+        [
+            cell_rect(CellKind::Tiles, first, last),
+            cell_rect(CellKind::Chunks, (bx0 >> 4, bz0 >> 4), (bx1 >> 4, bz1 >> 4)),
+        ]
     }
 }
 

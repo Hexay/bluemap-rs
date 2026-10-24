@@ -89,8 +89,8 @@ fn run(
     let size = s.tile_size as usize;
     let store = StorageLowres { storage: storage.clone(), tile_size: [size, size], png: Vec::new(), saves: 0, on_save };
     let tile_bytes = (size + 1).pow(2) * 2 * size_of::<u32>();
-    let mut lowres =
-        LowresTileManager::new(store, [s.tile_size; 2], s.lod_count, s.lod_factor).with_budget(LOWRES_BUDGET / tile_bytes);
+    let mut lowres = LowresTileManager::new(store, [s.tile_size; 2], s.lod_count, s.lod_factor)
+        .with_budget(LOWRES_BUDGET / tile_bytes);
     let mut stats = PersistStats::default();
     // keep going after a failure so one bad tile doesn't lose the rest; report the first
     let mut first_err: Option<Error> = None;

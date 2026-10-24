@@ -64,7 +64,9 @@ fn run(name: &str, threads: usize, work: impl Fn(&mut Rng) -> Option<(Duration, 
     let wall = start.elapsed().as_secs_f64();
     let mut lat = lat.into_inner().unwrap();
     lat.sort_unstable();
-    let pct = |p: f64| lat.get(((lat.len() as f64 * p) as usize).min(lat.len().saturating_sub(1))).map_or(0, |d| d.as_micros());
+    let pct = |p: f64| {
+        lat.get(((lat.len() as f64 * p) as usize).min(lat.len().saturating_sub(1))).map_or(0, |d| d.as_micros())
+    };
     println!(
         "{name}: {} reads ({} found) in {wall:.2}s = {:.0} req/s; p50 {} µs, p99 {} µs, max {} µs",
         lat.len(),
