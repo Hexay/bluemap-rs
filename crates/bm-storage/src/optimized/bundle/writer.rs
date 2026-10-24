@@ -136,7 +136,7 @@ impl BundleStore {
         };
         // the state mutex alone guards the handle; taking the writer key lock here could deadlock
         if let Some(old) = evict.filter(|&old| old != bundle)
-            && let Some(state) = lock(&self.cache).get(&old).cloned()
+            && let Some(state) = lock(&self.cache).get(old)
         {
             lock(&state).writer = None;
         }

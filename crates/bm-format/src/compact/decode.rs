@@ -127,8 +127,10 @@ pub(super) fn quads(body: &[u8], out: &mut Vec<u8>, s: &mut Scratch) -> Result<(
 
         let predicted = grid.predict(&s.probes[id as usize], grid.index(c));
         let codes = unpack(residual);
-        let level = [0, 1, 2, 3].map(|v| LEVELS[usize::from((predicted[v] + codes[v]) & 3)]);
-        *ao_row = EXPAND.map(|v| level[v]);
+        // array literals, not array::map: the wasm build leaves map's closures as calls
+        let level = |v: usize| LEVELS[usize::from((predicted[v] + codes[v]) & 3)];
+        let level = [level(0), level(1), level(2), level(3)];
+        *ao_row = [level[0], level[1], level[2], level[0], level[2], level[3]];
     }
     for (q, row) in color_out.as_chunks_mut::<18>().0.iter_mut().enumerate() {
         let c = [color[q], color[quads + q], color[2 * quads + q]];
@@ -217,12 +219,7 @@ fn payloads(out: &mut [u8], at: [usize; 7], quads: usize) -> [&mut [u8]; 7] {
 }
 
 /// Applies an exception stream (`u32 n, u32 index[n], rows[n]`) via `apply(quad, row)`.
-fn patch(
-    exc: &mut Reader,
-    quads: usize,
-    size: usize,
-    mut apply: impl FnMut(usize, &[u8]),
-) -> Result<(), CompactError> {
+fn patch(exc: &mut Reader, quads: usize, size: usize, mut apply: impl FnMut(usize, &[u8])) -> Result<(), CompactError> {
     let n = exc.u32()? as usize;
     let index = exc.take(n.checked_mul(4).ok_or(CompactError::Corrupt("count"))?)?;
     let rows = exc.take(n.checked_mul(size).ok_or(CompactError::Corrupt("count"))?)?;

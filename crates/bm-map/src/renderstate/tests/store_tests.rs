@@ -54,6 +54,27 @@ fn save_writes_only_modified_cells_and_reloads() {
 }
 
 #[test]
+fn release_writes_modified_cells_and_drops_them() {
+    let io = MemIo::default();
+    let mut chunks = MapChunkState::new(&io);
+    chunks.set(5, 5, 42);
+    chunks.get(200, 0);
+    chunks.release(&[(0, 0), (1, 0), (9, 9)]).unwrap();
+    assert_eq!(
+        (chunks.loaded(), io.list_cells(CellKind::Chunks).unwrap()),
+        (0, vec![(0, 0)]),
+        "clean cells aren't written"
+    );
+    assert_eq!(chunks.get(5, 5), 42);
+
+    let failing = MemIo { fail_writes: true, ..MemIo::default() };
+    let mut chunks = MapChunkState::new(&failing);
+    chunks.set(5, 5, 42);
+    assert!(matches!(chunks.release(&[(0, 0)]), Err(Error::Io { op: "write", .. })));
+    assert_eq!(chunks.loaded(), 1, "a failed cell stays for the next save");
+}
+
+#[test]
 fn failed_save_keeps_cell_modified() {
     let io = MemIo { fail_writes: true, ..MemIo::default() };
     let mut chunks = MapChunkState::new(&io);

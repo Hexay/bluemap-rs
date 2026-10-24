@@ -7,7 +7,7 @@ pub mod lz4_block;
 use std::io::{self, Read, Write};
 use std::sync::{Mutex, PoisonError};
 
-use flate2::read::{MultiGzDecoder, ZlibDecoder};
+use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -157,6 +157,9 @@ impl Compression {
     }
 
     pub fn decompress_into(self, data: &[u8], limit: usize, out: &mut Vec<u8>) -> Result<()> {
+        if self == Self::Deflate {
+            return inflate_zlib(data, limit, out);
+        }
         out.clear();
         match self {
             Self::None => read_capped(data, limit, out, self),
@@ -165,7 +168,7 @@ impl Compression {
                 out.reserve(gzip_size_hint(data, limit));
                 read_capped(MultiGzDecoder::new(data), limit, out, self)
             }
-            Self::Deflate => read_capped(ZlibDecoder::new(data), limit, out, self),
+            Self::Deflate => unreachable!("handled above"),
             Self::Zstd => {
                 let decoder = zstd::stream::read::Decoder::new(data).map_err(|e| Error::Corrupt(self, e))?;
                 read_capped(decoder, limit, out, self)
@@ -228,6 +231,36 @@ fn deflate_into(data: &[u8], out: &mut Vec<u8>, zlib: bool) -> io::Result<()> {
         unreachable!("the bound always fits")
     };
     DEFLATERS.with(|| Ok(libdeflater::Compressor::new(level)), compress).and_then(|written| written)
+}
+
+static INFLATERS: Pool<libdeflater::Decompressor> = Pool::new();
+
+/// One zlib stream (trailing bytes ignored, as region sector padding needs) with a pooled libdeflate
+/// decompressor. It needs the whole output up front: a buffer too small is retried twice as large. The first
+/// guess grows from the reused buffer's last length, since everything past it is zeroed first.
+fn inflate_zlib(data: &[u8], limit: usize, out: &mut Vec<u8>) -> Result<()> {
+    let corrupt = |e: libdeflater::DecompressionError| Error::Corrupt(Compression::Deflate, io::Error::other(e));
+    let inflate = |d: &mut libdeflater::Decompressor| {
+        let guess = (out.len() + out.len() / 4).max(data.len().saturating_mul(8)).max(1 << 16);
+        let mut size = guess.min(limit.saturating_add(1));
+        loop {
+            out.resize(size, 0);
+            match d.zlib_decompress(data, out) {
+                Ok(n) => {
+                    out.truncate(n);
+                    return if n > limit { Err(Error::TooLarge { limit }) } else { Ok(()) };
+                }
+                Err(libdeflater::DecompressionError::InsufficientSpace) if size <= limit => {
+                    size = size.saturating_mul(2).min(limit.saturating_add(1));
+                }
+                Err(libdeflater::DecompressionError::InsufficientSpace) => return Err(Error::TooLarge { limit }),
+                Err(e) => return Err(corrupt(e)),
+            }
+        }
+    };
+    INFLATERS
+        .with(|| Ok(libdeflater::Decompressor::new()), inflate)
+        .map_err(|e| Error::Corrupt(Compression::Deflate, e))?
 }
 
 fn gzip_size_hint(data: &[u8], limit: usize) -> usize {

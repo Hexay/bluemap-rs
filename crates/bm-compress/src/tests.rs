@@ -96,6 +96,20 @@ fn incompressible_input_outgrows_the_first_output_guess() {
 }
 
 #[test]
+fn zlib_streams_ignore_sector_padding_and_grow_past_guesses() {
+    let zeros = vec![0u8; 3 << 20];
+    let mut out = b"stale bytes longer than nothing".to_vec();
+    for (data, limit) in [(&zeros[..], 3 << 20), (TILE, LIMIT), (&zeros[..1000], 1000), (b"", 0)] {
+        let mut padded = Compression::Deflate.compress(data).unwrap();
+        padded.resize(padded.len().next_multiple_of(4096) + 4096, 0);
+        Compression::Deflate.decompress_into(&padded, limit, &mut out).unwrap();
+        assert_eq!(out, data);
+    }
+    let e = Compression::Deflate.decompress(&Compression::Deflate.compress(&zeros).unwrap(), (3 << 20) - 1);
+    assert!(matches!(e, Err(Error::TooLarge { .. })));
+}
+
+#[test]
 fn into_variants_replace_buffer_contents() {
     let mut buf = b"stale".to_vec();
     for c in COMPRESSED {

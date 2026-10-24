@@ -16,3 +16,4 @@ bm-format = { path = "../bm-format", default-features = false }
 
 [dev-dependencies]
 bm-format.workspace = true
+flate2.workspace = true

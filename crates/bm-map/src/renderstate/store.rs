@@ -1,10 +1,10 @@
 //! `CellStorage` and its three subclasses: lazily loaded cells over a storage-agnostic byte API.
 
-use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
 use bm_format::grid::Tile;
+use rustc_hash::FxHashMap;
 
 use super::cells::{Cell, ChunkInfoRegion, IntCell, IntField, RegionInfoRegion, TileInfo, TileInfoRegion};
 use super::{CellKind, Error, Result};
@@ -56,13 +56,13 @@ pub type MapRegionState<S> = CellStore<RegionInfoRegion, S>;
 /// (self-healing), and every failure is queued for [`CellStore::take_load_errors`] instead of being logged.
 pub struct CellStore<C, S> {
     io: S,
-    cells: HashMap<Tile, C>,
+    cells: FxHashMap<Tile, C>,
     load_errors: Vec<Error>,
 }
 
 impl<C: Cell, S: CellIo> CellStore<C, S> {
     pub fn new(io: S) -> Self {
-        Self { io, cells: HashMap::new(), load_errors: Vec::new() }
+        Self { io, cells: FxHashMap::default(), load_errors: Vec::new() }
     }
 
     /// The cell at cell coordinates `pos`, loading it on first access.
@@ -113,6 +113,37 @@ impl<C: Cell, S: CellIo> CellStore<C, S> {
     /// Drops unmodified cells from memory; they reload from storage on next access.
     pub fn evict_clean(&mut self) {
         self.cells.retain(|_, c| c.is_modified());
+    }
+
+    /// Writes `cells` if modified and drops them from memory. A failed cell stays loaded for the next save; the
+    /// first failure is returned. Reloading a released cell is only safe once its write has reached storage.
+    pub fn release(&mut self, cells: &[Tile]) -> Result<()> {
+        let mut first_err = None;
+        for pos in cells {
+            let Some(c) = self.cells.get(pos) else { continue };
+            if c.is_modified() {
+                let kind = C::KIND;
+                let written = c.encode().and_then(|bytes| {
+                    self.io.write_cell(kind, *pos, &bytes).map_err(|source| Error::Io {
+                        op: "write",
+                        kind,
+                        cell: *pos,
+                        source,
+                    })
+                });
+                if let Err(e) = written {
+                    first_err.get_or_insert(e);
+                    continue;
+                }
+            }
+            self.cells.remove(pos);
+        }
+        first_err.map_or(Ok(()), Err)
+    }
+
+    /// Cells currently in memory.
+    pub fn loaded(&self) -> usize {
+        self.cells.len()
     }
 
     /// Forgets all loaded cells without saving (`MapPurgeTask`, after the storage was deleted).

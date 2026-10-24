@@ -4,6 +4,9 @@
 mod legacy;
 mod legacy_biomes;
 mod modern;
+mod palette;
+
+pub use palette::PaletteCache;
 
 use crate::dimension::DimensionType;
 use crate::packed::Padded;
@@ -15,6 +18,8 @@ pub struct ChunkContext<'a> {
     pub states: &'a BlockStates,
     pub biomes: &'a Biomes,
     pub dimension: &'a DimensionType,
+    /// Resolved palette entries to reuse, if the caller keeps them.
+    pub palette: Option<&'a PaletteCache>,
 }
 
 pub struct Chunk {
@@ -79,7 +84,8 @@ pub struct BlockEntity {
 impl Chunk {
     /// Decodes chunk NBT of any supported version.
     pub fn parse(nbt: &[u8], ctx: &ChunkContext) -> Result<Self> {
-        let root = bm_nbt::read_root(nbt)?;
+        let doc = bm_nbt::Document::parse(nbt)?;
+        let root = doc.root();
         let data_version = root.i64("DataVersion").unwrap_or(0) as i32;
         if data_version >= modern::MIN_DATA_VERSION {
             modern::parse(root, data_version, ctx)

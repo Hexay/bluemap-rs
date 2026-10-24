@@ -97,6 +97,13 @@ fn parse_blocks(c: Compound, ctx: &ChunkContext) -> Blocks {
 /// A palette entry: `{Name, Properties}` (≤ 26.2), `{id, properties}` (26.3+), or a bare name / `{"": name}`
 /// meaning the block's default state. Anything malformed is `MISSING` rather than failing the chunk.
 pub(super) fn palette_state(tag: Tag, ctx: &ChunkContext) -> StateId {
+    match ctx.palette {
+        Some(cache) => cache.get_or(tag, || resolve_state(tag, ctx)),
+        None => resolve_state(tag, ctx),
+    }
+}
+
+fn resolve_state(tag: Tag, ctx: &ChunkContext) -> StateId {
     let c = match tag {
         Tag::String(_) => return tag.as_str().map_or(StateId::MISSING, |n| ctx.states.default_state(n)),
         Tag::Compound(c) => c,

@@ -29,7 +29,8 @@ Code: `crates/bm-web/src/client_unpack.rs`, `map_data::serve`, `transcode::packe
 
 `crates/bm-web/client/unpack.js`, with the WASM unpacker (`crates/bm-wasm`, 46 KB) inlined as base64. The webapp
 bundle is not modified: BlueMap 5.28 loads tiles through `fetch`, so the script wraps `fetch`, adds the `Accept`
-header to hires tile requests, and hands the webapp a `Response` holding the unpacked PRBM. Any failure (WASM
+header to hires tile requests, unpacks in workers, and hands the webapp a `Response` holding the unpacked PRBM
+(docs/24). Any failure (WASM
 unavailable, corrupt body) falls back to an ordinary request.
 
 - The server adds `<script src="./assets/bluemap-rs-unpack-<hash>.js">` in front of the webapp's module script
@@ -80,7 +81,7 @@ node tools/check_client_unpack_browser.mjs "http://<host>:<port>/#<map>:0:70:0:6
     <chrome or edge exe> [screenshot.png]
 ```
 
-Not measured: the browser's unpack time per tile (natively the same code takes ~1 ms for these tiles).
+Browser unpack time, workers and the hand-over to the webapp: docs/24.
 
 ## Limits
 

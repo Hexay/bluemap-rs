@@ -57,10 +57,13 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
     let unpacks = req.unpacks == Some(true) && !req.gz_url;
     let coding_id = |coding: Compression| (coding != Compression::None).then(|| coding.id());
     let tag = |v: Version, c| {
-        etag(v, match packed {
-            Some((_, coding)) => coding_id(coding),
-            None => body_coding(c, req.is_png, req.gz_url, &req.accepted),
-        })
+        etag(
+            v,
+            match packed {
+                Some((_, coding)) => coding_id(coding),
+                None => body_coding(c, req.is_png, req.gz_url, &req.accepted),
+            },
+        )
     };
     if let Some(inm) = &req.if_none_match {
         let (version, compression) = match &req.target {
@@ -87,7 +90,11 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
             });
         }
         let encoded = Encoded { body: transcode::packed(&blob, coding)?, content_encoding };
-        return Ok(Reply::Found { encoded, etag: version.map(|v| tag(v, coding)), negotiated: negotiated(OCTET_STREAM) });
+        return Ok(Reply::Found {
+            encoded,
+            etag: version.map(|v| tag(v, coding)),
+            negotiated: negotiated(OCTET_STREAM),
+        });
     }
     let read = match (&req.target, req.etags) {
         (Target::Tile(grid, tile), true) => storage.read_grid_versioned(*grid, *tile)?,

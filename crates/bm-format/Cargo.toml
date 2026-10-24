@@ -22,6 +22,10 @@ zstd = { workspace = true, optional = true }
 name = "compact_bench"
 required-features = ["codec"]
 
+[[example]]
+name = "compact_exp"
+required-features = ["codec"]
+
 [[test]]
 name = "compact_corpus"
 required-features = ["codec"]

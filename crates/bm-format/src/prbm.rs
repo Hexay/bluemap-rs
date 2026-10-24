@@ -61,7 +61,7 @@ impl TileModel {
         floats(out, &self.position);
 
         attribute(out, "normal", 0x63);
-        per_triangle(out, &self.position, |p: &[f32; 9]| surface_normal(p).map(normal_byte));
+        per_triangle(out, &self.position, normal_bytes);
 
         attribute(out, "color", 0x67);
         per_triangle(out, &self.color, |c: &[f32; 3]| c.map(unit_byte));
@@ -175,16 +175,18 @@ const SQUARABLE: std::ops::Range<f32> = 1e-12..1e12;
 /// within a few ulp of ±1, which [`normal_byte`] maps to one byte per sign. Which axis a face looks along is
 /// unpredictable, so the test and the bytes are computed without branches.
 // always inlined: as a call, loading the 9 floats the caller just stored one by one stalls on store forwarding
+// no `array::map` here: its closures were left as out-of-line calls in the encoder and decoder loops
 #[inline(always)]
 pub(crate) fn normal_bytes(p: &[f32; 9]) -> [u8; 3] {
     let n = plane(p);
-    let zero = n.map(|c| u8::from(c == 0.0));
-    let squarable = n.map(|c| u8::from(SQUARABLE.contains(&c.abs())));
-    let exact = (zero[0] | squarable[0]) & (zero[1] | squarable[1]) & (zero[2] | squarable[2]);
-    if zero[0] + zero[1] + zero[2] == 2 && exact == 1 {
-        return n.map(|c| u8::from(c > 0.0) * 127 + u8::from(c < 0.0) * 128);
+    let zero = |c: f32| u8::from(c == 0.0);
+    let exact = |c: f32| zero(c) | u8::from(SQUARABLE.contains(&c.abs()));
+    if zero(n[0]) + zero(n[1]) + zero(n[2]) == 2 && exact(n[0]) & exact(n[1]) & exact(n[2]) == 1 {
+        let byte = |c: f32| u8::from(c > 0.0) * 127 + u8::from(c < 0.0) * 128;
+        return [byte(n[0]), byte(n[1]), byte(n[2])];
     }
-    surface_normal(p).map(normal_byte)
+    let s = surface_normal(p);
+    [normal_byte(s[0]), normal_byte(s[1]), normal_byte(s[2])]
 }
 
 #[cfg(test)]

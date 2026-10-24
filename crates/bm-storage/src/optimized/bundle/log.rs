@@ -119,6 +119,25 @@ pub(super) fn scan(buf: &[u8], index: &mut Index) {
     }
 }
 
+/// Positional read of `buf.len()` bytes at `offset`, without moving a shared cursor.
+fn read_at(f: &File, offset: u64, buf: &mut [u8]) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::FileExt::read_exact_at(f, buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        let (mut done, mut offset) = (0, offset);
+        while done < buf.len() {
+            match std::os::windows::fs::FileExt::seek_read(f, &mut buf[done..], offset)? {
+                0 => return Err(io::ErrorKind::UnexpectedEof.into()),
+                n => (done, offset) = (done + n, offset + n as u64),
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Reads `[from, to)` of the file.
 pub(super) fn read_range(f: &mut File, from: u64, to: u64) -> io::Result<Vec<u8>> {
     let mut buf = vec![0; usize::try_from(to - from).map_err(|_| io::ErrorKind::InvalidData)?];
@@ -128,8 +147,9 @@ pub(super) fn read_range(f: &mut File, from: u64, to: u64) -> io::Result<Vec<u8>
 }
 
 /// Payload of the record at `offset` if it is the intact PUT of `local` (else `None`: the index is wrong).
-pub(super) fn read_record(f: &mut File, offset: u64, local: Local, len: u32) -> io::Result<Option<Vec<u8>>> {
-    let buf = read_range(f, offset, offset + RECORD_HEAD as u64 + u64::from(len))?;
+pub(super) fn read_record(f: &File, offset: u64, local: Local, len: u32) -> io::Result<Option<Vec<u8>>> {
+    let mut buf = vec![0; RECORD_HEAD + len as usize];
+    read_at(f, offset, &mut buf)?;
     let (head, data) = buf.split_at(RECORD_HEAD);
     let ok = head[..4] == [PUT, local.0, local.1, 0]
         && head[4..8] == len.to_le_bytes()

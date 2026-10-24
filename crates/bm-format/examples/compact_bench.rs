@@ -1,7 +1,8 @@
 //! The compact codec on stored compat tiles: size, bit-exact round trip and single-thread encode/decode time.
 //!
 //! Usage: `cargo run --release -p bm-format --example compact_bench -- <dir with x…/z….prbm.gz> [--level 9]
-//! [--reps 3] [--step 1] [--no-origin] [--streams]`. Tile coordinates come from the path; the world origin assumes
+//! [--reps 3] [--step 1] [--no-origin] [--streams] [--encode-reps-only]`. `--encode-reps-only` decodes each blob
+//! once, so the difference of two `perf stat` runs at different `--reps` is encode alone. Tile coordinates come from the path; the world origin assumes
 //! the default hires grid (32-block tiles offset by 2). Times are the fastest of `reps` runs per tile, summed. The
 //! last line hashes every blob: it must not change when only the codec's speed does.
 
@@ -42,6 +43,7 @@ fn main() {
     let (level, reps, step) = (flag("--level").unwrap_or(9), flag("--reps").unwrap_or(3), flag("--step").unwrap_or(1));
     let use_origin = !args.iter().any(|a| a == "--no-origin");
     let streams = args.iter().any(|a| a == "--streams");
+    let decode_reps = if args.iter().any(|a| a == "--encode-reps-only") { 1 } else { reps };
     let mut per_stream = [[0usize; 2]; STREAMS.len()];
     let root = PathBuf::from(args.first().expect("corpus directory"));
     let grid = Grid { size: [32; 2], offset: [2; 2] };
@@ -68,7 +70,7 @@ fn main() {
         encode += fastest(reps, || codec.encode_into(&prbm, origin, &mut blob).expect("encode"));
         bytes += blob.len();
         blob.hash(&mut blobs);
-        decode += fastest(reps, || codec.decode_into(&blob, &mut out).expect("decode"));
+        decode += fastest(decode_reps, || codec.decode_into(&blob, &mut out).expect("decode"));
         assert!(out == prbm, "round trip differs: {}", path.display());
         // an empty tile has nothing to model
         raw_mode += usize::from(blob[4] == 1 && prbm[2..5] != [0; 3]);

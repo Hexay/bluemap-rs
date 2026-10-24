@@ -18,7 +18,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   mesher, docs/17; corpus bench `cargo run --release -p bm-format --example compact_bench -- <tiles dir>`)
 - `bm-java` — bit-exact Java behaviour (`java.util.Random`, `String.hashCode`, `java.lang.Math` quirks, flow-math `TrigMath`,
   ImageIO PNG read/write behind feature `png` — madler zlib via `libz-sys`, since zlib-rs output differs)
-- `bm-map` — map layer: `lowres` (LODs, seams, single-writer flush via `LowresStore`), `renderstate` (rstate `.dat`
+- `bm-map` — map layer: `lowres` (LODs, seams, single-writer flush via `LowresStore`, memory budget with spills:
+  docs/22), `renderstate` (rstate `.dat`
   cells, TileState machine), `mask`, map/webroot `settings.json` writers and `markers` (`live/markers.json`) (Gson
   2.8.9 byte-identical); oracles
   `cargo test -p bm-map -- --ignored`
@@ -42,7 +43,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   watcher (`task`, `queue`, `runner`, `watch/`)
 - `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes/log format; `-u`, `--markers`, `--convert-storage`;
   hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`); musl builds
-  use tuned mimalloc (`src/alloc.rs`)
+  use tuned mimalloc (`src/alloc.rs`) and their own `memset` (`src/memfns.rs`: zig's is a byte loop, docs/23)
 - `bm-ipc` — shim↔core wire protocol (stdin/stdout frames, JSON headers); crate docs are the canonical spec
 - Beyond parity (pause reasons, `memory-limit`, MSPT pausing, low-priority render threads): `docs/15`,
   `crates/bm-cli/src/throttle/`
@@ -57,7 +58,11 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   `--release` test use `--profile fast` instead (release without LTO, `target/fast`); benches and acceptance stay on
   `--release`
 - Testbox (sync the tree as on disk to `~/bmrs-<name>`, run there, block until exit, print the log tail; run it in
-  the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`
+  the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`;
+  `stage <name>` once per checkout (and after a reboot) puts fixtures on tmpfs: from the shared HDD, fixture-reading
+  tests are disk-bound (oracle_optimized 565 s → 12 s); jobs use a shared sccache
+- Merge gates (clippy, tests in `fast`, oracles, acceptance on release; ~6 min): `py -3 tools/testbox.py run <name>
+  --sync -- python3 tools/gates.py [gate …]`
 - Golden renders (Java BlueMap 5.29, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`

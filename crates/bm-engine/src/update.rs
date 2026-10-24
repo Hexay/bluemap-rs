@@ -13,7 +13,7 @@ use bm_render::StateCache;
 use bm_world::ChunkArea;
 use rustc_hash::FxHashSet;
 
-use crate::actions::{Headers, TileJob, complete_region, tile_jobs};
+use crate::actions::{HeaderCache, Headers, TileJob, complete_region, tile_jobs};
 use crate::error::Result;
 use crate::io::QueuedCells;
 use crate::map::MapContext;
@@ -117,6 +117,7 @@ fn run(
     let Some(plan) = plan(ctx, job.regions, &mut states.regions, on_event)? else { return Ok(stats) };
     stats.regions = plan.regions.len();
     let mut cache = Arc::new(StateCache::new(&resources.pack, &ctx.gallery, &resources.states));
+    let mut header_cache = HeaderCache::new(&plan);
     let mut done = Done { ctx, persister, states, plan, stats, last_save: Instant::now(), on_event };
     std::thread::scope(|s| -> Result<()> {
         let mut in_flight: Option<InFlight> = None;
@@ -125,13 +126,12 @@ fn run(
                 done.stats.cancelled = true;
                 break;
             }
-            let headers = Headers::load(&ctx.world, &done.plan, region);
-            let jobs = match headers.region(region) {
-                Some(_) => {
-                    let States { tiles, chunks, .. } = &mut done.states;
-                    tile_jobs(ctx, &done.plan, region, &headers, tiles, chunks, job.strategy)
-                }
-                None => Vec::new(),
+            let headers = header_cache.load(&ctx.world, &done.plan, region);
+            let jobs = if headers.has(region) {
+                let States { tiles, chunks, .. } = &mut done.states;
+                tile_jobs(ctx, &done.plan, region, &headers, tiles, chunks, job.strategy)
+            } else {
+                Vec::new()
             };
             let area = (!jobs.is_empty()).then(|| (load_area(ctx, &jobs), resources.states.snapshot()));
             if area.as_ref().is_some_and(|(_, registry)| registry.len() > cache.len()) {
@@ -185,7 +185,7 @@ impl<S: CellIo> Done<'_, S> {
             None => Vec::new(),
         };
         let (ctx, region) = (self.ctx, f.region);
-        if f.headers.region(region).is_none() {
+        if !f.headers.has(region) {
             // like a cancelled region task: no tiles, no render state written
             (self.on_event)(UpdateEvent::Warning(format!("Failed to load chunks for region {region:?}")));
             return Ok(());
@@ -206,9 +206,11 @@ impl<S: CellIo> Done<'_, S> {
         let States { chunks, regions, .. } = &mut self.states;
         complete_region(ctx, region, &f.headers, chunks, regions, unix_now());
         let finished = self.plan.complete(region);
-        if !finished.is_empty() {
-            send_flush(self.persister, finished)?;
+        if !finished.lowres.is_empty() {
+            send_flush(self.persister, finished.lowres)?;
         }
+        self.states.tiles.release(&finished.tile_cells)?;
+        self.states.chunks.release(&finished.chunk_cells)?;
         if self.last_save.elapsed() >= SAVE_INTERVAL {
             self.states.save(self.on_event)?;
             self.last_save = Instant::now();

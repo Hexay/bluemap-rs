@@ -9,11 +9,11 @@ use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::sync::CancellationToken;
 
 use crate::encoding::Accepted;
-use crate::{client_unpack, content_type};
 use crate::live::LiveMap;
 use crate::map_data::{self, Reply, Target};
 use crate::response::{empty, header_static};
 use crate::validators::IfNoneMatch;
+use crate::{client_unpack, content_type};
 
 /// One served map: its storage and, when the app provides live data, its [`LiveMap`].
 #[derive(Clone)]

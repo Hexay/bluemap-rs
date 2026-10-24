@@ -5,6 +5,7 @@ use bm_math::VectorM3f;
 use bm_resources::model::Direction;
 
 use super::Renderer;
+use super::faces::Probes;
 
 impl Renderer<'_, '_, '_> {
     /// `makeRotationRelative`: the variant's rotation, if it has one.
@@ -15,36 +16,9 @@ impl Renderer<'_, '_, '_> {
         }
     }
 
-    fn occluding(&self, offset: [i32; 3]) -> bool {
-        self.block.neighbor_flags(self.ctx, self.v.relative.get(offset)).occluding()
-    }
-
-    /// `testAo`: one corner of a face, in element space.
-    pub(super) fn ao(&self, vertex: [f32; 3], dir: Direction) -> f32 {
-        let side = |c: f32| {
-            if c == 16.0 {
-                1
-            } else if c == 0.0 {
-                -1
-            } else {
-                0
-            }
-        };
-        let (x, y, z) = (side(vertex[0]), side(vertex[1]), side(vertex[2]));
-        let [dx, dy, dz] = dir.to_vector();
-        let mut occluding = 0;
-        if x * dx + y * dy > 0 && self.occluding([x, y, 0]) {
-            occluding += 1;
-        }
-        if x * dx + z * dz > 0 && self.occluding([x, 0, z]) {
-            occluding += 1;
-        }
-        if y * dy + z * dz > 0 && self.occluding([0, y, z]) {
-            occluding += 1;
-        }
-        if x * dx + y * dy + z * dz > 0 && self.occluding([x, y, z]) {
-            occluding += 1;
-        }
+    /// `testAo`: one corner of a face, from its resolved neighbour tests.
+    pub(super) fn ao(&self, probes: &Probes) -> f32 {
+        let occluding = probes.iter().filter(|&o| self.block.neighbor_flags(self.ctx, o).occluding()).count();
         (1.0 - occluding.min(3) as f32 * 0.25).clamp(0.0, 1.0)
     }
 

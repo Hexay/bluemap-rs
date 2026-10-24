@@ -25,8 +25,10 @@ fn prbm() -> Vec<u8> {
     let mut m = TileModel::default();
     for q in 0..40 {
         let (x, z) = ((q % 8) as f32, (q / 8) as f32);
-        for tri in [[[x, 64., z], [x, 64., z + 1.], [x + 1., 64., z + 1.]], [[x, 64., z], [x + 1., 64., z + 1.], [x + 1., 64., z]]]
-        {
+        for tri in [
+            [[x, 64., z], [x, 64., z + 1.], [x + 1., 64., z + 1.]],
+            [[x, 64., z], [x + 1., 64., z + 1.], [x + 1., 64., z]],
+        ] {
             tri.iter().for_each(|p| m.position.extend(p));
             m.color.extend([0.5, 0.5, 1.]);
             m.sunlight.push(15);
@@ -113,7 +115,9 @@ fn index_loads_the_script_only_for_a_packing_storage() {
     assert!(String::from_utf8_lossy(&index.body).find(&script) < String::from_utf8_lossy(&index.body).find("module"));
     let js = get(packed.addr, &format!("/{script}"), &[]);
     assert_eq!((js.status, js.header("content-type")), (200, Some("text/javascript")));
+    assert_eq!(js.header("cache-control"), Some("public, max-age=31536000, immutable"));
     assert!(String::from_utf8_lossy(&js.body).contains("application/vnd.bluemap.bmq3"));
+    assert_eq!(get(packed.addr, "/index.html", &[]).header("cache-control"), None);
     let plain_index = get(serve(map(&compat, Format::Compat), &compat, true).addr, "/", &[]);
     assert_eq!(script_tag(&plain_index.body), None);
     assert_ne!(index.header("etag"), plain_index.header("etag"));

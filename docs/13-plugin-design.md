@@ -279,7 +279,7 @@ setting beats musl malloc on both axes. `MIMALLOC_*` env vars still override it.
 byte-identical across all variants (optimized `.bmb` bundles differ in record order between any two renders; see
 "Determinism" in `bm-storage/src/optimized/bundle/mod.rs`). The
 remaining gap to glibc (+27 % wall) is the price of one portable binary; a `gnu.2.17` build is the fallback if it
-matters.
+matters. Most of that gap was zig's byte-loop `memset`; with ours it is +15 % CPU and wall (docs/23).
 macOS: binaries need at least an ad-hoc signature on arm64 (rustc/ld does this by default). For quarantine, see
 the limits note above.
 

@@ -1,12 +1,13 @@
 //! `bluemap`: drop-in for `java -jar bluemap-cli.jar` (`BlueMapCLI.main`): same options, config folder handling and
 //! exit codes (1 configuration/IO error, 2 missing resources).
 
-#[cfg(target_env = "musl")]
 mod alloc;
 mod args;
 mod convert;
 mod eta;
 mod log;
+#[cfg(any(target_env = "musl", test))]
+mod memfns;
 mod plugin;
 mod render;
 mod resume;
@@ -33,7 +34,6 @@ pub const VERSION: &str = match option_env!("BLUEMAP_RS_VERSION") {
 };
 
 fn main() -> ExitCode {
-    #[cfg(target_env = "musl")]
     alloc::tune();
     let args = match Args::try_parse() {
         Ok(args) => args,
