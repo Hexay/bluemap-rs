@@ -153,16 +153,17 @@ impl BundleStore {
         Ok(Some((f, out)))
     }
 
-    /// The blob of `tile` and its version, reading the record outside the bundle's lock. `Err(())`: the record
-    /// does not match its index entry.
-    fn read_record(&self, tile: Tile) -> Result<Option<std::result::Result<(Vec<u8>, Version), ()>>> {
+    /// The blob of `tile` and its version, reading the record outside the bundle's lock.
+    fn read_record(&self, tile: Tile) -> Result<Option<(Vec<u8>, Version)>> {
         let found = self.with_index(tile, |ix, local| {
             ix.entries.get(&local).map(|&(offset, len)| (local, offset, len, record_version(ix, offset, len)))
         })?;
         let Some((f, Some((local, offset, len, version)))) = found else { return Ok(None) };
         let path = self.path(split(tile).0);
-        let read = log::read_record(&f, offset, local, len).ctx("read", &path)?;
-        Ok(Some(read.map(|d| (d, version)).ok_or(())))
+        match log::read_record(&f, offset, local, len).ctx("read", &path)? {
+            Some(data) => Ok(Some((data, version))),
+            None => Err(Error::CorruptBundle { path, reason: "record does not match its index entry" }),
+        }
     }
 
     fn bundles(&self) -> Result<Vec<Tile>> {
@@ -191,14 +192,7 @@ impl HiresStore for BundleStore {
     }
 
     fn read_versioned(&self, tile: Tile) -> Result<Option<(Vec<u8>, Option<Version>)>> {
-        match self.read_record(tile)? {
-            None => Ok(None),
-            Some(Ok((data, version))) => Ok(Some((data, Some(version)))),
-            Some(Err(())) => Err(Error::CorruptBundle {
-                path: self.path(split(tile).0),
-                reason: "record does not match its index entry",
-            }),
-        }
+        Ok(self.read_record(tile)?.map(|(data, version)| (data, Some(version))))
     }
 
     fn write(&self, tile: Tile, blob: &[u8]) -> Result<()> {
