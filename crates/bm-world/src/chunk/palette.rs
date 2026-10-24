@@ -12,7 +12,7 @@ use crate::registry::StateId;
 const MAX_ENTRIES: usize = 1 << 14;
 
 /// One per thread (see [`super::ChunkContext::palette`]). Valid while the registry's block defaults stay as they
-/// are, i.e. for one area load.
+/// are: a [`crate::World`] keeps its caches for its lifetime, as resources load all defaults before worlds open.
 #[derive(Default)]
 pub struct PaletteCache {
     compounds: RefCell<FxHashMap<Box<[u8]>, StateId>>,
