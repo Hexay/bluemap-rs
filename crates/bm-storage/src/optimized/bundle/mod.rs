@@ -75,7 +75,6 @@ use crate::locks::KeyLocks;
 /// Write handles kept open by one store.
 pub(crate) const MAX_WRITERS: usize = 64;
 const EXT: &str = ".bmb";
-const SIDECAR_EXT: &str = ".bmi";
 
 /// One bundle as this process knows it.
 #[derive(Default)]
@@ -126,34 +125,6 @@ impl BundleStore {
 
     fn path(&self, (bx, bz): Tile) -> PathBuf {
         self.dir.join(format!("x{bx}z{bz}{EXT}"))
-    }
-
-    fn sidecar_path(&self, (bx, bz): Tile) -> PathBuf {
-        self.dir.join(format!("x{bx}z{bz}{SIDECAR_EXT}"))
-    }
-
-    /// Best effort: without a sidecar, readers scan the log.
-    fn write_sidecar(&self, bundle: Tile, ix: &Index) {
-        if let Some(bytes) = sidecar::encode(ix) {
-            let _ = fsops::write_atomic(&self.sidecar_path(bundle), &bytes);
-        }
-    }
-
-    fn close_writer(&self, bundle: Tile, b: &mut Bundle) {
-        if b.writer.take().is_some() {
-            self.write_sidecar(bundle, &b.ix);
-        }
-    }
-
-    /// Closes every held write handle, leaving each bundle with a sidecar.
-    fn close_writers(&self) {
-        let open: Vec<Tile> = lock(&self.open).drain(..).collect();
-        for bundle in open {
-            let state = lock(&self.cache).get(bundle);
-            if let Some(state) = state {
-                self.close_writer(bundle, &mut lock(&state));
-            }
-        }
     }
 
     fn bundle(&self, bundle: Tile) -> Arc<Mutex<Bundle>> {
@@ -225,15 +196,6 @@ impl BundleStore {
             self.distrust_sidecar(split(tile).0, version.0[0]);
         }
         Err(Error::CorruptBundle { path, reason: "record does not match its index entry" })
-    }
-
-    fn distrust_sidecar(&self, bundle: Tile, generation: u64) {
-        let state = self.bundle(bundle);
-        let mut b = lock(&state);
-        b.distrust = generation;
-        if b.ix.sidecar && b.ix.generation == generation {
-            b.ix = Index::default();
-        }
     }
 
     fn bundles(&self) -> Result<Vec<Tile>> {

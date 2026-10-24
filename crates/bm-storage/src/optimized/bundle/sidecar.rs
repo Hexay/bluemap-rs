@@ -3,11 +3,56 @@
 
 use std::fs;
 use std::hash::Hasher;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use bm_format::grid::Tile;
 use twox_hash::XxHash32;
 
 use super::log::{HEADER_LEN, Index, RECORD_HEAD, SHIFT};
+use super::{Bundle, BundleStore, lock};
+use crate::file::fsops;
+
+const EXT: &str = ".bmi";
+
+impl BundleStore {
+    pub(super) fn sidecar_path(&self, (bx, bz): Tile) -> PathBuf {
+        self.dir.join(format!("x{bx}z{bz}{EXT}"))
+    }
+
+    /// Best effort: without a sidecar, readers scan the log.
+    pub(super) fn write_sidecar(&self, bundle: Tile, ix: &Index) {
+        if let Some(bytes) = encode(ix) {
+            let _ = fsops::write_atomic(&self.sidecar_path(bundle), &bytes);
+        }
+    }
+
+    pub(super) fn close_writer(&self, bundle: Tile, b: &mut Bundle) {
+        if b.writer.take().is_some() {
+            self.write_sidecar(bundle, &b.ix);
+        }
+    }
+
+    /// Closes every held write handle, leaving each bundle with a sidecar.
+    pub(super) fn close_writers(&self) {
+        let open: Vec<Tile> = lock(&self.open).drain(..).collect();
+        for bundle in open {
+            let state = lock(&self.cache).get(bundle);
+            if let Some(state) = state {
+                self.close_writer(bundle, &mut lock(&state));
+            }
+        }
+    }
+
+    /// After a record disagreed with this file version's sidecar: index that version by scanning.
+    pub(super) fn distrust_sidecar(&self, bundle: Tile, generation: u64) {
+        let state = self.bundle(bundle);
+        let mut b = lock(&state);
+        b.distrust = generation;
+        if b.ix.sidecar && b.ix.generation == generation {
+            b.ix = Index::default();
+        }
+    }
+}
 
 const MAGIC: &[u8; 4] = b"BMI1";
 const SLOTS: usize = 1 << (2 * SHIFT);
