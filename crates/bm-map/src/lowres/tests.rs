@@ -158,3 +158,38 @@ fn failed_save_keeps_tile_dirty_for_retry() {
     assert_eq!(m.dirty_tiles(1).count() + m.dirty_tiles(2).count(), 0);
     assert_eq!(m.store().inner.tiles.len(), 5, "lod-1 tile, lod-2 tile and its 3 seam neighbours");
 }
+
+/// Writes in a scattered order with partial flushes in between, like an update's region completions.
+fn scattered(budget: Option<usize>) -> MemoryStore {
+    let mut m = manager(3);
+    if let Some(b) = budget {
+        m = m.with_budget(b);
+    }
+    let mut seed = 0x2545_F491_4F6C_DD1Du64;
+    for step in 0..4000 {
+        seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        let (x, z) = ((seed >> 33) as i32 % 40 - 20, (seed >> 45) as i32 % 40 - 20);
+        let (argb, height, light) = ((seed >> 7) as u32 | 0xFF00_0000, (seed >> 20) as i32 % 300, (seed >> 50) as i32 & 15);
+        m.set_argb(x, z, argb, height, light).unwrap();
+        if step % 500 == 499 {
+            let row = step / 500 - 5;
+            m.flush_lod(1, |t| t.1 == row).unwrap();
+        }
+    }
+    m.flush().unwrap();
+    assert_eq!((1..=3).map(|l| m.spilled_tiles(l).count() + m.dirty_tiles(l).count()).sum::<usize>(), 0);
+    m.into_store()
+}
+
+#[test]
+fn spilling_past_the_budget_changes_no_tile() {
+    let unbounded = scattered(None);
+    for budget in [1, 2, 7] {
+        let bounded = scattered(Some(budget));
+        assert_eq!(bounded.tiles.len(), unbounded.tiles.len(), "budget {budget}");
+        for (key, data) in &unbounded.tiles {
+            assert!(bounded.tiles.get(key) == Some(data), "budget {budget}: tile {key:?} differs");
+        }
+        assert!(bounded.saves > unbounded.saves, "budget {budget} spilled");
+    }
+}

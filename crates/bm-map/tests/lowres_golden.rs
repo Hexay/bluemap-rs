@@ -59,7 +59,7 @@ fn diff(a: &LowresTile, b: &LowresTile, size: [usize; 2], counts: &mut [u64; 7])
     }
 }
 
-fn check_fixture(fixture: &str) -> u64 {
+fn check_fixture(fixture: &str, budget: Option<usize>) -> u64 {
     let maps = bluemap_work().join(fixture).join("web/maps");
     let map = fs::read_dir(&maps).unwrap().flatten().map(|e| e.path()).find(|p| p.is_dir()).expect("a map");
     let settings: serde_json::Value = serde_json::from_slice(&fs::read(map.join("settings.json")).unwrap()).unwrap();
@@ -71,6 +71,9 @@ fn check_fixture(fixture: &str) -> u64 {
 
     let goldens: Vec<_> = (1..=lod_count).map(|lod| golden_tiles(&map.join(format!("tiles/{lod}")), size)).collect();
     let mut layer = LowresTileManager::new(MemoryStore::default(), ts, lod_count, lod_factor);
+    if let Some(b) = budget {
+        layer = layer.with_budget(b);
+    }
     let mut columns = 0u64;
     for (&(tx, tz), tile) in &goldens[0] {
         for z in 0..size[1] {
@@ -111,7 +114,9 @@ fn check_fixture(fixture: &str) -> u64 {
             detail.join(" ")
         );
     }
-    assert_eq!(store.saves, produced_tiles, "{fixture}: every tile saved exactly once");
+    if budget.is_none() {
+        assert_eq!(store.saves, produced_tiles, "{fixture}: every tile saved exactly once");
+    }
     println!("{fixture}: {columns} columns fed, {} saves", store.saves);
     total
 }
@@ -119,6 +124,13 @@ fn check_fixture(fixture: &str) -> u64 {
 #[test]
 #[ignore = "needs Java BlueMap golden webroots under work/bluemap/<fixture>/web"]
 fn lowres_layers_match_java_bluemap() {
-    let failures: u64 = FIXTURES.iter().map(|f| check_fixture(f)).sum();
+    let failures: u64 = FIXTURES.iter().map(|f| check_fixture(f, None)).sum();
+    assert_eq!(failures, 0, "lowres pixel mismatches");
+}
+
+#[test]
+#[ignore = "needs Java BlueMap golden webroots under work/bluemap/<fixture>/web"]
+fn lowres_layers_match_java_bluemap_when_spilling() {
+    let failures: u64 = FIXTURES.iter().map(|f| check_fixture(f, Some(4))).sum();
     assert_eq!(failures, 0, "lowres pixel mismatches");
 }

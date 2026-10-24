@@ -206,9 +206,11 @@ impl<S: CellIo> Done<'_, S> {
         let States { chunks, regions, .. } = &mut self.states;
         complete_region(ctx, region, &f.headers, chunks, regions, unix_now());
         let finished = self.plan.complete(region);
-        if !finished.is_empty() {
-            send_flush(self.persister, finished)?;
+        if !finished.lowres.is_empty() {
+            send_flush(self.persister, finished.lowres)?;
         }
+        self.states.tiles.release(&finished.tile_cells)?;
+        self.states.chunks.release(&finished.chunk_cells)?;
         if self.last_save.elapsed() >= SAVE_INTERVAL {
             self.states.save(self.on_event)?;
             self.last_save = Instant::now();
