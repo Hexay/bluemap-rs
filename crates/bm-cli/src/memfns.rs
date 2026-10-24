@@ -4,6 +4,7 @@
 //!
 //! The bulk loop uses volatile stores: LLVM turns a plain store loop back into a `memset` call, which here would recurse.
 
+#[cfg(target_env = "musl")]
 use std::ffi::{c_int, c_void};
 use std::ptr::{write_unaligned, write_volatile};
 

@@ -51,7 +51,7 @@ fn run(name: &str, threads: usize, work: impl Fn(&mut Rng) -> Option<(Duration, 
         for t in 0..threads {
             let (lat, found, work) = (&lat, &found, &work);
             s.spawn(move || {
-                let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (t as u64 + 1) * 0x2545_F491);
+                let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ ((t as u64 + 1) * 0x2545_F491));
                 let mut mine = Vec::new();
                 while let Some((d, hit)) = work(&mut rng) {
                     mine.push(d);
