@@ -60,6 +60,13 @@ impl MeshExt for TileModel {
     }
 
     fn transform_from(&mut self, start: usize, t: &MatrixM4f) {
+        if is_scale(t) {
+            // the zero terms only add ±0, and adding the +0 translation leaves exactly what the full product gives
+            for p in positions_from(&mut self.position, start) {
+                *p = [t.m00 * p[0] + t.m03, t.m11 * p[1] + t.m13, t.m22 * p[2] + t.m23];
+            }
+            return;
+        }
         for p in positions_from(&mut self.position, start) {
             let [x, y, z] = *p;
             *p = [
@@ -83,6 +90,12 @@ impl MeshExt for TileModel {
     }
 }
 
+/// An affine transform with zero off-diagonals and a +0.0 translation (every unrotated element's `scale(1/16)`).
+fn is_scale(t: &MatrixM4f) -> bool {
+    [t.m01, t.m02, t.m10, t.m12, t.m20, t.m21].iter().all(|&v| v == 0.0)
+        && [t.m03, t.m13, t.m23].iter().all(|v| v.to_bits() == 0)
+}
+
 /// The positions of faces `start..`; none in a counted-only model.
 fn positions_from(position: &mut [f32], start: usize) -> &mut [[f32; 3]] {
     position.get_mut(start * 9..).unwrap_or_default().as_chunks_mut::<3>().0
@@ -91,6 +104,7 @@ fn positions_from(position: &mut [f32], start: usize) -> &mut [[f32; 3]] {
 /// `ArrayTileModel.sort`: faces ordered by material, stable. `out` is overwritten.
 pub fn sort_by_material(model: &TileModel, out: &mut TileModel) {
     out.clear();
+    // faces come in material runs, which the stable sort merges cheaply (an unstable sort of packed keys costs more)
     let mut order: Vec<u32> = (0..model.faces() as u32).collect();
     order.sort_by_key(|&i| model.material[i as usize]);
     gather::<9, _>(&model.position, &order, &mut out.position);

@@ -35,6 +35,27 @@ pub struct TileBuffers {
     volume: Volume,
 }
 
+impl TileBuffers {
+    /// Empty buffers with room for `faces` faces before the mesh has to grow (and copy) its arrays.
+    pub fn with_face_capacity(faces: usize) -> Self {
+        let mut buffers = Self::default();
+        let m = &mut buffers.unsorted;
+        m.position.reserve(faces * 9);
+        m.uv.reserve(faces * 6);
+        m.ao.reserve(faces * 3);
+        m.color.reserve(faces * 3);
+        m.sunlight.reserve(faces);
+        m.blocklight.reserve(faces);
+        m.material.reserve(faces);
+        buffers
+    }
+
+    /// Faces of the last rendered tile, before the material sort.
+    pub fn faces(&self) -> usize {
+        self.unsorted.len()
+    }
+}
+
 impl HiresRenderer<'_, '_> {
     /// Renders `tile` of `grid` from `area`, which must hold the tile's chunks plus a two-block border (biome
     /// blending reaches that far; blocks outside the area read as air). `registry` is the area's block-state registry, to check the cache is current.

@@ -1,10 +1,11 @@
 //! `ResourceModelRenderer`: a block-model variant as faces, with culling, light, AO, tint and the map colour.
 
+pub(crate) mod faces;
 mod geometry;
 
 use bm_format::prbm::TileModel;
 use bm_java::trig;
-use bm_math::{Color, VectorM2f, VectorM3f};
+use bm_math::{Color, VectorM2f};
 use bm_resources::model::{BakedElement, BakedModel, Direction};
 
 use crate::context::{Block, Ctx};
@@ -62,24 +63,11 @@ impl Renderer<'_, '_, '_> {
         out: &mut TileModel,
         color: &mut Color,
     ) -> Result<(), CapacityReached> {
-        let ([fx, fy, fz], [tx, ty, tz]) = (e.from, e.to);
-        let c = [
-            [fx, fy, fz],
-            [fx, fy, tz],
-            [tx, fy, fz],
-            [tx, fy, tz],
-            [fx, ty, fz],
-            [fx, ty, tz],
-            [tx, ty, fz],
-            [tx, ty, tz],
-        ];
-        let mut face = |dir, corners: [usize; 4]| self.face(i, e, dir, corners.map(|k| c[k]), out, color);
-        face(Direction::Down, [0, 2, 3, 1])?;
-        face(Direction::Up, [5, 7, 6, 4])?;
-        face(Direction::North, [2, 0, 4, 6])?;
-        face(Direction::South, [1, 3, 7, 5])?;
-        face(Direction::West, [0, 1, 5, 4])?;
-        face(Direction::East, [3, 2, 6, 7])
+        let c = faces::corners(e);
+        for (dir, ks) in faces::FACES {
+            self.face(i, e, dir, ks.map(|k| c[k]), out, color)?;
+        }
+        Ok(())
     }
 
     /// `createElementFace`.
@@ -96,20 +84,18 @@ impl Renderer<'_, '_, '_> {
         let (ctx, block) = (self.ctx, self.block);
 
         // Java tests light and caves first; every test is side-effect free, so the cheapest goes first
-        if let Some(cull) = face.cullface
-            && ctx.states.culls(block.neighbor_id(ctx, self.v.relative.get(cull.to_vector())), block.id)
+        let info = &self.v.faces[element_index][dir.index()];
+        if let Some(cull) = info.cull
+            && ctx.states.culls(block.neighbor_id(ctx, cull), block.id)
         {
             return Ok(());
         }
-        let mut facing = VectorM3f::default();
-        facing.set_i(dir.to_vector());
-        facing.rotate_and_scale(&e.rotation);
-        self.make_relative(&mut facing);
-        if ctx.settings.render_top_only && f64::from(facing.y) < 0.01 {
+        let facing_y = info.facing_y;
+        if ctx.settings.render_top_only && f64::from(facing_y) < 0.01 {
             return Ok(());
         }
 
-        let (sky, block_light) = block.neighbor_light(ctx, self.v.relative.get(dir.to_vector()));
+        let (sky, block_light) = block.neighbor_light(ctx, info.light);
         let sun = block.sky.max(sky);
         let block_light = block.block_light.max(block_light);
         if block.culled_as_cave(ctx, sun, block_light) {
@@ -125,7 +111,7 @@ impl Renderer<'_, '_, '_> {
             [1.0; 3]
         };
         // the map colour only reads the tint just set, so it can come before the geometry
-        if f64::from(facing.y) > 0.01
+        if f64::from(facing_y) > 0.01
             && let Some(texture) = material.color
         {
             self.add_map_color(texture, sun, block_light, color);
@@ -149,7 +135,7 @@ impl Renderer<'_, '_, '_> {
         }
         let blocklight = i32::from(block_light).max(e.light_emission);
 
-        let ao = if self.model.ambient_occlusion { c.map(|corner| self.ao(corner, dir)) } else { [1.0; 4] };
+        let ao = if self.model.ambient_occlusion { info.ao.map(|p| self.ao(&p)) } else { [1.0; 4] };
         let uv = uvs.map(|v| [v.x, v.y]);
         let tri = |a: usize, b: usize, d: usize| Face {
             positions: [c[a], c[b], c[d]],

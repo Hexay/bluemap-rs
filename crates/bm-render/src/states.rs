@@ -14,6 +14,7 @@ use bm_world::{BlockState, BlockStates, StateId};
 
 use crate::flags::{Flags, Hidden};
 use crate::relative::{Offset, RelativeOffsets};
+use crate::resource::faces::{self, FaceInfo};
 
 /// Resolved `BlockProperties` (undefined reads as false).
 #[derive(Clone, Copy, Debug, Default)]
@@ -51,6 +52,8 @@ pub struct VariantInfo<'a> {
     pub model: Option<&'a BakedModel>,
     /// Per element, indexed by `Direction::index`.
     pub materials: Vec<[Material; 6]>,
+    /// Per element, indexed by `Direction::index`.
+    pub(crate) faces: Vec<[FaceInfo; 6]>,
     /// The liquid renderer's `still` and `flow` textures.
     pub still: Material,
     pub flow: Material,
@@ -206,7 +209,9 @@ impl<'a> StateCache<'a> {
                 .collect()
         });
         let named = |name: &str| self.material(model.and_then(|m| m.textures.get(name)));
+        let relative = RelativeOffsets::new(variant);
         VariantInfo {
+            faces: model.map_or_else(Vec::new, |m| faces::resolve(&m.elements, variant, &relative)),
             variant,
             // `bluemap:missing` falls back to the default renderer: core registers no fallback renderer types
             renderer: match RendererType::from_key(&variant.renderer) {
@@ -217,7 +222,7 @@ impl<'a> StateCache<'a> {
             materials,
             still: named("still"),
             flow: named("flow"),
-            relative: RelativeOffsets::new(variant),
+            relative,
         }
     }
 

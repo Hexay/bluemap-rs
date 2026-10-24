@@ -1,6 +1,8 @@
 //! `WorldRegionUpdateTask.init`: what to do with each hires tile a region owns, from its stored state, whether any
 //! chunk under it changed (region-header timestamps vs. the stored "chunk hashes") and the map bounds.
 
+use std::sync::Arc;
+
 use bm_format::grid::Tile;
 use bm_map::renderstate::{
     Action, ActionAndNextState, BoundsSituation, CellIo, MapChunkState, MapTileState, TileUpdateStrategy,
@@ -12,34 +14,72 @@ use rustc_hash::FxHashMap;
 use crate::map::MapContext;
 use crate::plan::{Plan, REGION_GRID};
 
+/// A region header's chunk timestamps as BlueMap records them (0 when not listed), `x * 32 + z`.
+type Stamps = Arc<[i32; 1024]>;
+
 /// Region headers around the region being processed; `None` where the file is missing or unreadable.
-pub(crate) struct Headers(FxHashMap<Tile, Option<Region>>);
+pub(crate) struct Headers(FxHashMap<Tile, Option<Stamps>>);
 
 impl Headers {
-    /// The planned regions in the 3×3 neighbourhood of `center`: tiles owned by it can reach into each of them.
-    pub fn load(world: &World, plan: &Plan, center: Tile) -> Self {
-        let mut map = FxHashMap::default();
-        for dx in -1..=1 {
-            for dz in -1..=1 {
-                let r = (center.0 + dx, center.1 + dz);
-                if plan.contains(r) {
-                    map.insert(r, world.region(r.0, r.1).ok());
-                }
-            }
-        }
-        Self(map)
-    }
-
     /// The chunk's current timestamp as BlueMap records it (0 when not listed), if its region is planned.
     pub fn hash(&self, cx: i32, cz: i32) -> Option<i32> {
         let region = self.0.get(&(cx >> 5, cz >> 5))?;
-        let (lx, lz) = ((cx & 31) as usize, (cz & 31) as usize);
-        Some(region.as_ref().and_then(|r| r.listed_timestamp(lx, lz)).unwrap_or(0))
+        Some(region.as_ref().map_or(0, |s| s[((cx & 31) * 32 + (cz & 31)) as usize]))
     }
 
-    pub fn region(&self, r: Tile) -> Option<&Region> {
+    /// Whether the region's file could be read.
+    pub fn has(&self, r: Tile) -> bool {
+        self.0.get(&r).is_some_and(Option::is_some)
+    }
+
+    fn stamps(&self, r: Tile) -> Option<&Stamps> {
         self.0.get(&r).and_then(Option::as_ref)
     }
+}
+
+/// Each planned region's header read once per update: every region needs its 3×3 neighbourhood's, so reading them
+/// per region opened each file 9 times. A header is dropped once the last region that needs it has loaded it.
+pub(crate) struct HeaderCache {
+    /// Regions still to [`HeaderCache::load`] whose neighbourhood holds the key.
+    pending: FxHashMap<Tile, u32>,
+    cached: FxHashMap<Tile, Option<Stamps>>,
+}
+
+impl HeaderCache {
+    pub fn new(plan: &Plan) -> Self {
+        let mut pending = FxHashMap::default();
+        for &center in &plan.regions {
+            for r in neighbourhood(plan, center) {
+                *pending.entry(r).or_default() += 1;
+            }
+        }
+        Self { pending, cached: FxHashMap::default() }
+    }
+
+    /// The planned regions in the 3×3 neighbourhood of `center`: tiles owned by it can reach into each of them.
+    pub fn load(&mut self, world: &World, plan: &Plan, center: Tile) -> Headers {
+        let mut map = FxHashMap::default();
+        for r in neighbourhood(plan, center) {
+            let stamps = self.cached.entry(r).or_insert_with(|| world.region(r.0, r.1).ok().map(|h| stamps(&h))).clone();
+            if let Some(n) = self.pending.get_mut(&r) {
+                *n -= 1;
+                if *n == 0 {
+                    self.pending.remove(&r);
+                    self.cached.remove(&r);
+                }
+            }
+            map.insert(r, stamps);
+        }
+        Headers(map)
+    }
+}
+
+fn neighbourhood(plan: &Plan, center: Tile) -> impl Iterator<Item = Tile> + '_ {
+    (-1..=1).flat_map(move |dx| (-1..=1).map(move |dz| (center.0 + dx, center.1 + dz))).filter(|&r| plan.contains(r))
+}
+
+fn stamps(region: &Region) -> Stamps {
+    Arc::new(std::array::from_fn(|i| region.listed_timestamp(i / 32, i % 32).unwrap_or(0)))
 }
 
 pub(crate) struct TileJob {
@@ -104,10 +144,10 @@ pub(crate) fn complete_region<S: CellIo>(
 ) {
     let (x0, z0) = REGION_GRID.tile_min(region);
     let (cx0, cz0) = (x0 >> 4, z0 >> 4);
-    let header = headers.region(region);
+    let header = headers.stamps(region);
     for lx in 0..32 {
         for lz in 0..32 {
-            let hash = header.and_then(|r| r.listed_timestamp(lx, lz)).unwrap_or(0);
+            let hash = header.map_or(0, |s| s[lx * 32 + lz]);
             chunks.set(cx0 + lx as i32, cz0 + lz as i32, hash);
         }
     }
