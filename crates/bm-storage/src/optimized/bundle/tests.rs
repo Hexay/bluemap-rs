@@ -141,6 +141,87 @@ fn a_full_cache_drops_least_recently_used_bundles() {
     assert!(cached.is_some_and(|b| lock(&b).ix.generation != 0), "the hot bundle survived the evictions");
 }
 
+fn sidecar_index(s: &BundleStore) -> bool {
+    let state = s.bundle((0, 0));
+    lock(&state).ix.sidecar
+}
+
+#[test]
+fn flush_leaves_a_sidecar_that_readers_start_from() {
+    let (dir, s) = store();
+    s.write((1, 2), b"one").unwrap();
+    s.write((1, 2), b"two").unwrap();
+    s.write((3, 4), b"x").unwrap();
+    assert!(!s.sidecar_path((0, 0)).exists(), "none while a writer appends");
+    s.flush();
+    assert!(s.sidecar_path((0, 0)).exists());
+    let reader = BundleStore::new(dir.path().join("hires"), true);
+    assert_eq!(reader.read((1, 2)).unwrap().unwrap(), b"two");
+    assert!(sidecar_index(&reader));
+    let mut all = reader.list().unwrap();
+    all.sort();
+    assert_eq!(all, vec![(1, 2), (3, 4)]);
+
+    s.write((5, 5), b"later").unwrap();
+    assert!(!s.sidecar_path((0, 0)).exists(), "the next append deletes it");
+    assert_eq!(reader.read((5, 5)).unwrap().unwrap(), b"later");
+}
+
+#[test]
+fn records_appended_after_a_sidecar_are_scanned() {
+    let (dir, s) = store();
+    s.write((1, 2), b"two").unwrap();
+    s.flush();
+    // an older version appends without knowing about sidecars
+    let mut tail = Vec::new();
+    log::record(&mut tail, true, (6, 6), b"old version");
+    log::record(&mut tail, false, (1, 2), b"");
+    OpenOptions::new().append(true).open(s.path((0, 0))).unwrap().write_all(&tail).unwrap();
+    let reader = BundleStore::new(dir.path().join("hires"), true);
+    assert_eq!(reader.read((6, 6)).unwrap().unwrap(), b"old version");
+    assert_eq!(reader.read((1, 2)).unwrap(), None);
+    assert!(sidecar_index(&reader));
+}
+
+#[test]
+fn a_sidecar_that_disagrees_with_the_log_is_dropped() {
+    let (dir, s) = store();
+    s.write((1, 2), b"two").unwrap();
+    s.write((3, 4), b"four").unwrap();
+    s.flush();
+    let (generation, end, mut entries) = {
+        let state = s.bundle((0, 0));
+        let b = lock(&state);
+        (b.ix.generation, b.ix.end, b.ix.entries.clone())
+    };
+    let (a, b) = (entries[&(1, 2)], entries[&(3, 4)]);
+    entries.insert((1, 2), b);
+    entries.insert((3, 4), a);
+    let wrong = Index { entries, end, ..Index::fresh(generation) };
+    fs::write(s.sidecar_path((0, 0)), sidecar::encode(&wrong).unwrap()).unwrap();
+    let reader = BundleStore::new(dir.path().join("hires"), true);
+    assert_eq!(reader.read((1, 2)).unwrap().unwrap(), b"two");
+    assert_eq!(reader.read((3, 4)).unwrap().unwrap(), b"four");
+    assert!(!sidecar_index(&reader), "rescanned");
+    assert_eq!(lock(&reader.bundle((0, 0))).distrust, generation);
+}
+
+#[test]
+fn compaction_leaves_a_sidecar_of_the_new_file() {
+    let (dir, s) = store();
+    // the third write leaves 1.2 MB dead against 0.6 MB live: compaction, and no writer open after it
+    for i in 0..3u8 {
+        s.write((2, 2), &vec![i; 600 << 10]).unwrap();
+    }
+    let generation = lock(&s.bundle((0, 0))).ix.generation;
+    let len = fs::metadata(s.path((0, 0))).unwrap().len();
+    assert!(len < 2 * (600 << 10), "compacted: {len}");
+    assert!(sidecar::load(&s.sidecar_path((0, 0)), generation, len).is_some());
+    let reader = BundleStore::new(dir.path().join("hires"), true);
+    assert_eq!(reader.read((2, 2)).unwrap().unwrap()[0], 2);
+    assert!(sidecar_index(&reader));
+}
+
 #[test]
 #[ignore = "timing probe"]
 fn probe_write_costs() {

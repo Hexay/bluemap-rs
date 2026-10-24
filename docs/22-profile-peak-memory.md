@@ -115,8 +115,7 @@ with `posix_fadvise(DONTNEED)`.
   only reading the whole log finds a tile's latest record. Tried: indexing by the 12-byte record heads alone
   (positional reads, payload checksums deferred to the record read): **22 req/s, p99 15 s**, 2× worse, because
   scattered small reads defeat readahead on an HDD. Reverted.
-  Plan for a real "index + one record" cold path: a sidecar `x…z….bmi` per bundle (generation, covered length,
-  256 × (offset, len)), written atomically when a writer closes its handle and by compaction/convert. A reader
-  trusts it only for the same generation and covered length ≤ file length, then scans only the records appended
-  after it; record checksums stay per read. Old versions ignore the file, and a compaction by anything changes the
-  generation, so it stays compatible both ways. Cost: one more file per bundle (+340 k files).
+  Done since: a sidecar index `x…z….bmi` per bundle (spec and safety rules in `optimized/bundle/mod.rs`), written
+  when a write handle closes (`MapStorage::flush` after every update pass, drop, writer eviction, compaction).
+  In-log index records were rejected: an older version's scan stops at an unknown record kind and its writer
+  would truncate everything after it. Cost: one more file per bundle (+340 k files at 300k²).

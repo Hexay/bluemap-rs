@@ -84,6 +84,11 @@ pub trait MapStorage: Send + Sync {
     /// Deletes everything of this map. `on_progress(0..=1)` returning false aborts (data stays partially deleted).
     fn delete(&self, on_progress: &mut dyn FnMut(f64) -> bool) -> Result<()>;
 
+    /// Ends a batch of writes (an update pass): closes write handles held between appends and writes what other
+    /// processes need to open the data fast (optimized file bundles: their sidecar indexes). Best effort, and
+    /// writes may follow.
+    fn flush(&self) {}
+
     fn exists(&self) -> Result<bool>;
 
     fn key_locks(&self) -> &KeyLocks;

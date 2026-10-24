@@ -26,6 +26,21 @@
 //!   only new records, so a separate webserver process sees the renderer's appends. A handle always reads one
 //!   file version, so a concurrent compaction cannot hand a reader a wrong offset.
 //!
+//! # Sidecar index
+//! `x<bx>z<bz>.bmi` (2076 B): `"BMI1"`, `u32 4`, `u64 generation`, `u64 covered` (end of the last indexed record),
+//! 256 × (`u32 offset`, `u32 len`) by `lz * 16 + lx` (offset 0 = no tile), `u32 xxh32` of all before. Without it, a
+//! reader's first touch of a bundle reads and scans the whole log (~1.9 MB at 300k²); with it, 2 KB plus the
+//! records appended after `covered` (testbox HDD, cold: 2× the reads/s, p99 2.5× lower; ~190× fewer bytes).
+//! - Written atomically when a write handle closes ([`MapStorage::flush`](crate::MapStorage::flush), drop, writer
+//!   eviction, compaction). A writer
+//!   deletes it before its first append and never trusts one (it rescans the log), so the record bytes under a
+//!   sidecar were valid when it was written and are never rewritten while it exists.
+//! - Readers use it only for the header's generation and a file at least `covered` long, and still check each
+//!   record they read; a mismatch drops it for that file version and rescans. Older versions ignore the file, and
+//!   their compactions change the generation; a record they append lands after `covered` and is scanned.
+//! - Not caught: a power loss that shortens the log below `covered`, followed by an older version regrowing it
+//!   past `covered` (a sidecar can then hide a tile). A newer writer deletes the sidecar first.
+//!
 //! # Determinism
 //! The live tiles of a bundle are a function of the input; its bytes are not. Records follow write order, and a
 //! render writes the tiles of a region from parallel workers in completion order. Where the order is ours to
@@ -38,6 +53,7 @@
 
 mod cache;
 mod log;
+mod sidecar;
 mod writer;
 
 use std::collections::VecDeque;
@@ -59,6 +75,7 @@ use crate::locks::KeyLocks;
 /// Write handles kept open by one store.
 pub(crate) const MAX_WRITERS: usize = 64;
 const EXT: &str = ".bmb";
+const SIDECAR_EXT: &str = ".bmi";
 
 /// One bundle as this process knows it.
 #[derive(Default)]
@@ -66,6 +83,8 @@ struct Bundle {
     ix: Index,
     /// Write-only handle of the current file version, held between appends.
     writer: Option<File>,
+    /// Generation whose sidecar disagreed with the log; that version is indexed by scanning.
+    distrust: u64,
 }
 
 pub(crate) struct BundleStore {
@@ -109,6 +128,34 @@ impl BundleStore {
         self.dir.join(format!("x{bx}z{bz}{EXT}"))
     }
 
+    fn sidecar_path(&self, (bx, bz): Tile) -> PathBuf {
+        self.dir.join(format!("x{bx}z{bz}{SIDECAR_EXT}"))
+    }
+
+    /// Best effort: without a sidecar, readers scan the log.
+    fn write_sidecar(&self, bundle: Tile, ix: &Index) {
+        if let Some(bytes) = sidecar::encode(ix) {
+            let _ = fsops::write_atomic(&self.sidecar_path(bundle), &bytes);
+        }
+    }
+
+    fn close_writer(&self, bundle: Tile, b: &mut Bundle) {
+        if b.writer.take().is_some() {
+            self.write_sidecar(bundle, &b.ix);
+        }
+    }
+
+    /// Closes every held write handle, leaving each bundle with a sidecar.
+    fn close_writers(&self) {
+        let open: Vec<Tile> = lock(&self.open).drain(..).collect();
+        for bundle in open {
+            let state = lock(&self.cache).get(bundle);
+            if let Some(state) = state {
+                self.close_writer(bundle, &mut lock(&state));
+            }
+        }
+    }
+
     fn bundle(&self, bundle: Tile) -> Arc<Mutex<Bundle>> {
         lock(&self.cache).get_or_insert(bundle)
     }
@@ -122,15 +169,19 @@ impl BundleStore {
 
     /// Brings `ix` up to date with the file behind `f` (another version, or records appended elsewhere). The new
     /// records are read in one sequential read: indexing by record heads alone (positional reads of 12 bytes)
-    /// defeats readahead and was 2× slower disk-cold on an HDD (docs/22).
-    fn refresh(f: &mut File, ix: &mut Index) -> io::Result<u64> {
+    /// defeats readahead and was 2× slower disk-cold on an HDD (docs/22). A stale index starts from `sidecar` when
+    /// given and it describes this file version.
+    fn refresh(f: &mut File, ix: &mut Index, sidecar: Option<(&Path, u64)>) -> io::Result<u64> {
         let len = f.metadata()?.len();
         let Some(generation) = log::read_generation(f, len)? else {
             *ix = Index::default();
             return Ok(len);
         };
         if generation != ix.generation || len < ix.end {
-            *ix = Index::fresh(generation);
+            *ix = sidecar
+                .filter(|&(_, distrust)| distrust != generation)
+                .and_then(|(path, _)| sidecar::load(path, generation, len))
+                .unwrap_or_else(|| Index::fresh(generation));
         }
         if len > ix.end {
             log::scan(&log::read_range(f, ix.end, len)?, ix);
@@ -145,24 +196,43 @@ impl BundleStore {
         let (bundle, local) = split(tile);
         let path = self.path(bundle);
         let Some(mut f) = Self::open_read(&path).ctx("read", &path)? else { return Ok(None) };
+        let side = self.sidecar_path(bundle);
         let state = self.bundle(bundle);
         let mut b = lock(&state);
-        Self::refresh(&mut f, &mut b.ix).ctx("read", &path)?;
+        let distrust = b.distrust;
+        Self::refresh(&mut f, &mut b.ix, Some((&side, distrust))).ctx("read", &path)?;
         let out = op(&b.ix, local);
         drop(b);
         Ok(Some((f, out)))
     }
 
-    /// The blob of `tile` and its version, reading the record outside the bundle's lock.
+    /// The blob of `tile` and its version, reading the record outside the bundle's lock. A record that doesn't
+    /// match an index from a sidecar drops the sidecar for that file version and reads again from a scan.
     fn read_record(&self, tile: Tile) -> Result<Option<(Vec<u8>, Version)>> {
-        let found = self.with_index(tile, |ix, local| {
-            ix.entries.get(&local).map(|&(offset, len)| (local, offset, len, record_version(ix, offset, len)))
-        })?;
-        let Some((f, Some((local, offset, len, version)))) = found else { return Ok(None) };
         let path = self.path(split(tile).0);
-        match log::read_record(&f, offset, local, len).ctx("read", &path)? {
-            Some(data) => Ok(Some((data, version))),
-            None => Err(Error::CorruptBundle { path, reason: "record does not match its index entry" }),
+        for _ in 0..2 {
+            let found = self.with_index(tile, |ix, local| {
+                let entry = ix.entries.get(&local).copied();
+                entry.map(|(offset, len)| (local, offset, len, record_version(ix, offset, len), ix.sidecar))
+            })?;
+            let Some((f, Some((local, offset, len, version, unverified)))) = found else { return Ok(None) };
+            if let Some(data) = log::read_record(&f, offset, local, len).ctx("read", &path)? {
+                return Ok(Some((data, version)));
+            }
+            if !unverified {
+                break;
+            }
+            self.distrust_sidecar(split(tile).0, version.0[0]);
+        }
+        Err(Error::CorruptBundle { path, reason: "record does not match its index entry" })
+    }
+
+    fn distrust_sidecar(&self, bundle: Tile, generation: u64) {
+        let state = self.bundle(bundle);
+        let mut b = lock(&state);
+        b.distrust = generation;
+        if b.ix.sidecar && b.ix.generation == generation {
+            b.ix = Index::default();
         }
     }
 
@@ -231,12 +301,22 @@ impl HiresStore for BundleStore {
         fsops::remove_tree(&self.dir)
     }
 
+    fn flush(&self) {
+        self.close_writers();
+    }
+
     fn release(&self) {
         let states = lock(&self.cache).drain();
         lock(&self.open).clear();
         for state in states {
             lock(&state).writer = None;
         }
+    }
+}
+
+impl Drop for BundleStore {
+    fn drop(&mut self) {
+        self.close_writers();
     }
 }
 

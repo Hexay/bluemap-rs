@@ -91,6 +91,7 @@ pub fn update_map(
     let persister = Persister::start(ctx.storage.clone(), lowres, ctx.tile_listener.clone())?;
     let result = run(ctx, resources, job, &persister, on_event);
     let persisted = persister.finish();
+    ctx.storage.flush();
     let mut stats = result?;
     stats.lowres_saves = persisted?.lowres_saves;
     Ok(stats)

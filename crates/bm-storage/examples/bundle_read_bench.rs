@@ -1,16 +1,18 @@
 //! Hires read latency of an optimized file storage as the webserver sees it (`read_hires_packed`), N threads.
 //! Usage: cargo run -p bm-storage --release --example bundle_read_bench -- <maps root> <map id> [--threads T]
-//!        [--secs S]
+//!        [--secs S] [--add-sidecars]
 //!   cold: one random tile of every bundle, each bundle's first touch (evict the page cache first for a disk-cold
 //!   run: `vmtouch -e` or posix_fadvise DONTNEED). warm: random tiles of random bundles for S seconds.
 //!   hot: random tiles of 4 bundles (one webapp view) for S seconds.
+//!   --add-sidecars: first rewrites one tile per bundle and flushes, so a storage written before sidecar indexes
+//!   has them, then exits.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
-use bm_storage::{Compression, FileStorage, Format, MapStorage, Storage, Tile};
+use bm_storage::{Compression, FileStorage, Format, GridKey, MapStorage, Storage, Tile};
 
 struct Rng(u64);
 
@@ -78,6 +80,21 @@ fn run(name: &str, threads: usize, work: impl Fn(&mut Rng) -> Option<(Duration, 
     );
 }
 
+fn add_sidecars(root: &PathBuf, id: &str) {
+    let storage = FileStorage::open(root, Compression::Gzip, Format::Optimized, false).expect("storage");
+    let map = storage.map(id).expect("map");
+    map.set_hires_grid(bm_format::grid::Grid { size: [32; 2], offset: [2; 2] });
+    let mut seen = std::collections::HashSet::new();
+    for t in map.list_grid(GridKey::Hires).expect("list") {
+        if seen.insert((t.0 >> 4, t.1 >> 4)) {
+            let prbm = map.read_grid(GridKey::Hires, t).expect("read").expect("listed").decompress().expect("prbm");
+            map.write_grid(GridKey::Hires, t, &prbm).expect("write");
+        }
+    }
+    map.flush();
+    println!("sidecars for {} bundles", seen.len());
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let opt = |flag: &str, default: usize| {
@@ -86,6 +103,10 @@ fn main() {
     let (root, id) = (PathBuf::from(&args[0]), args[1].clone());
     let (threads, secs) = (opt("--threads", 32), opt("--secs", 8));
     let all = bundles(&root.join(&id).join("hires"));
+    if args.iter().any(|a| a == "--add-sidecars") {
+        add_sidecars(&root, &id);
+        return;
+    }
     let storage = FileStorage::open(&root, Compression::Gzip, Format::Optimized, true).expect("storage");
     let map: std::sync::Arc<dyn MapStorage> = storage.map(&id).expect("map");
     println!("{} bundles, {threads} threads", all.len());

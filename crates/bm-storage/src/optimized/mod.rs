@@ -39,6 +39,8 @@ pub(crate) trait HiresStore: Send + Sync {
     fn clear(&self) -> Result<()>;
     /// Closes held file handles (before something else deletes the files).
     fn release(&self) {}
+    /// See [`MapStorage::flush`].
+    fn flush(&self) {}
 }
 
 thread_local! {
@@ -159,6 +161,11 @@ impl MapStorage for OptimizedMapStorage {
 
     fn exists(&self) -> Result<bool> {
         self.inner.exists()
+    }
+
+    fn flush(&self) {
+        self.hires.flush();
+        self.inner.flush();
     }
 
     fn key_locks(&self) -> &KeyLocks {

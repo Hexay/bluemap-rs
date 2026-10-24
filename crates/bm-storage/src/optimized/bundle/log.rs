@@ -13,7 +13,7 @@ const MAGIC: &[u8; 4] = b"BMB1";
 pub(super) const HEADER_LEN: u64 = 16;
 /// Tiles per bundle side: `1 << SHIFT`.
 pub(super) const SHIFT: u32 = 4;
-const RECORD_HEAD: usize = 12;
+pub(super) const RECORD_HEAD: usize = 12;
 const PUT: u8 = 1;
 const DELETE: u8 = 2;
 
@@ -31,6 +31,8 @@ pub(super) struct Index {
     pub entries: HashMap<Local, (u64, u32)>,
     /// Bytes of the live records (headers included).
     pub live: u64,
+    /// Loaded from a sidecar up to `end`, records unverified: readers check each record they read, writers rescan.
+    pub sidecar: bool,
 }
 
 impl Index {

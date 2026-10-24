@@ -38,7 +38,7 @@ impl BundleStore {
         if opened && data.is_none() && !path.exists() {
             return Ok(());
         }
-        let after = Self::append_locked(&path, &mut b, local, data).ctx("write", &path);
+        let after = Self::append_locked(&path, &self.sidecar_path(bundle), &mut b, local, data).ctx("write", &path);
         let after = match after {
             Ok(after) => after,
             Err(e) => {
@@ -58,6 +58,7 @@ impl BundleStore {
                 b.ix = Index::default();
                 fsops::write_atomic(&path, &image)?;
                 b.ix = next;
+                self.write_sidecar(bundle, &b.ix);
             }
         }
         let holds = b.writer.is_some();
@@ -68,9 +69,9 @@ impl BundleStore {
         Ok(())
     }
 
-    fn append_locked(path: &Path, b: &mut Bundle, local: Local, data: Option<&[u8]>) -> io::Result<After> {
+    fn append_locked(path: &Path, side: &Path, b: &mut Bundle, local: Local, data: Option<&[u8]>) -> io::Result<After> {
         if b.writer.is_none() {
-            b.writer = Some(Self::open_writer(path, &mut b.ix)?);
+            b.writer = Some(Self::open_writer(path, side, &mut b.ix)?);
         }
         if data.is_none() && !b.ix.entries.contains_key(&local) {
             return Ok(After::Keep);
@@ -102,16 +103,24 @@ impl BundleStore {
         Ok(After::Keep)
     }
 
-    /// Loads the index through a read handle (never read through the write handle: see the module docs), then
-    /// opens the write handle and cuts a torn tail or header.
-    fn open_writer(path: &Path, ix: &mut Index) -> io::Result<File> {
+    /// Loads the index through a read handle (never read through the write handle: see the module docs) by
+    /// scanning, deletes the sidecar (see the module docs), then opens the write handle and cuts a torn tail or
+    /// header.
+    fn open_writer(path: &Path, side: &Path, ix: &mut Index) -> io::Result<File> {
+        if ix.sidecar {
+            *ix = Index::default();
+        }
         let len = match Self::open_read(path)? {
-            Some(mut f) => Self::refresh(&mut f, ix)?,
+            Some(mut f) => Self::refresh(&mut f, ix, None)?,
             None => {
                 *ix = Index::default();
                 0
             }
         };
+        match fsops::retry(side, || fs::remove_file(side)) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
         let open = || fsops::retry(path, || OpenOptions::new().write(true).create(true).truncate(false).open(path));
         let w = match open() {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -135,10 +144,10 @@ impl BundleStore {
             if open.len() > MAX_WRITERS { open.pop_front() } else { None }
         };
         // the state mutex alone guards the handle; taking the writer key lock here could deadlock
-        if let Some(old) = evict.filter(|&old| old != bundle)
-            && let Some(state) = lock(&self.cache).get(old)
-        {
-            lock(&state).writer = None;
+        let Some(old) = evict.filter(|&old| old != bundle) else { return };
+        let state = lock(&self.cache).get(old);
+        if let Some(state) = state {
+            self.close_writer(old, &mut lock(&state));
         }
     }
 }
