@@ -3,6 +3,12 @@
     py -3 tools/testbox.py sync <name> [--tree DIR]
     py -3 tools/testbox.py run  <name> [--sync] [--lock] [--job J] [--tail N] [--grep RE] [--detach] -- <command…>
     py -3 tools/testbox.py wait <name> [--job J] [--tail N] [--grep RE]
+    py -3 tools/testbox.py stage <name>
+
+`stage` mirrors the canonical fixtures (~/bmrs-529/work: worlds, goldens, jars) into tmpfs and links each entry into
+the checkout's work/, keeping entries the checkout has as real directories (its own accept/ output): the testbox disks are shared HDDs, and tests reading fixtures from them spent ~85% of their wall
+time in disk waits. tmpfs is a cache: it is gone after a reboot (stage again), and what a job writes there is not
+kept, so render new goldens into the canonical tree.
 
 <name> is the remote checkout ~/bmrs-<name>. `sync` pushes the working tree as it is on disk (HEAD + uncommitted +
 untracked, minus .gitignore) and hard-resets the remote checkout to it; ignored remote files (target/, work/) survive,
@@ -14,6 +20,7 @@ Jobs outlive the 2-minute foreground limit: call `run`/`wait` with run_in_backgr
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -68,12 +75,30 @@ def sync(name: str, tree: Path) -> None:
     print(f"synced {tree} -> {HOST}:~/bmrs-{name} (on {head.strip()}) in {time.monotonic() - started:.0f}s")
 
 
+CANONICAL_WORK = "~/bmrs-529/work"
+TMPFS_WORK = "/dev/shm/bmrs-work"
+
+
+def stage(name: str) -> None:
+    started = time.monotonic()
+    remote_checked(f"""mkdir -p {TMPFS_WORK}
+rsync -a --delete {CANONICAL_WORK}/ {TMPFS_WORK}/
+w=~/bmrs-{name}/work; [ -L $w ] && rm $w; mkdir -p $w
+for e in {TMPFS_WORK}/*; do
+  t=$w/$(basename $e)
+  if [ -e $t ] && [ ! -L $t ]; then echo "kept own $t"; else ln -sfn $e $t; fi
+done""")
+    print(f"staged {CANONICAL_WORK} -> {TMPFS_WORK}, linked into ~/bmrs-{name}/work in {time.monotonic() - started:.0f}s")
+
+
 def start(name: str, job: str, command: str, lock: bool) -> None:
     runner = f"flock ~/bench.lock bash $d/{job}.sh" if lock else f"bash $d/{job}.sh"
     remote_checked(f"""d=~/.testbox/{name}; mkdir -p $d
 test -d ~/bmrs-{name}
 cat > $d/{job}.sh <<'TESTBOX_EOF'
 [ -f ~/.cargo/env ] && . ~/.cargo/env
+# shared across checkouts: a fresh checkout's cold release build 234 s -> 81 s
+command -v sccache >/dev/null && export RUSTC_WRAPPER=sccache SCCACHE_DIR=~/.cache/sccache-bmrs SCCACHE_CACHE_SIZE=40G
 cd ~/bmrs-{name}
 {command}
 TESTBOX_EOF
@@ -135,6 +160,7 @@ def main() -> None:
 
     tree_default = Path(__file__).resolve().parent.parent
     add("sync").add_argument("--tree", type=Path, default=tree_default)
+    add("stage")
     run = add("run")
     run.add_argument("--tree", type=Path, default=tree_default)
     run.add_argument("--sync", action="store_true", help="sync the tree first")
@@ -150,10 +176,17 @@ def main() -> None:
     if args.action == "sync":
         sync(args.name, args.tree)
         return
+    if args.action == "stage":
+        stage(args.name)
+        return
     if args.action == "run":
         command = " ".join(argv[cut + 1:])
         if not command:
             parser.error("run needs -- <command>")
+        # Git Bash rewrites unquoted ~/x and /home/x into Windows paths; fail now, not after waiting for the lock
+        local = re.search(r"(?<![\w.])(/[a-z]/Users/|[A-Za-z]:[/\\])\S*", command)
+        if local:
+            parser.error(f"command holds a local path {local.group(0)!r}: quote it ('~/x') or set MSYS_NO_PATHCONV=1")
         if args.sync:
             sync(args.name, args.tree)
         start(args.name, args.job, command, args.lock)

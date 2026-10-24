@@ -58,7 +58,11 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   `--release` test use `--profile fast` instead (release without LTO, `target/fast`); benches and acceptance stay on
   `--release`
 - Testbox (sync the tree as on disk to `~/bmrs-<name>`, run there, block until exit, print the log tail; run it in
-  the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`
+  the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`;
+  `stage <name>` once per checkout (and after a reboot) puts fixtures on tmpfs: from the shared HDD, fixture-reading
+  tests are disk-bound (oracle_optimized 565 s → 12 s); jobs use a shared sccache
+- Merge gates (clippy, tests in `fast`, oracles, acceptance on release; ~6 min): `py -3 tools/testbox.py run <name>
+  --sync -- python3 tools/gates.py [gate …]`
 - Golden renders (Java BlueMap 5.29, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
 - Bench: `py -3 tools/bench.py <label> -n 3 [--cwd DIR] -- <command…>`; Java vs ours: `py -3 tools/bench_render.py`
