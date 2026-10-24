@@ -37,16 +37,18 @@ impl BlockState {
     }
 }
 
+/// `Arc` keys so the copy a change makes while a snapshot is alive (about once per region) is a few allocations.
 #[derive(Clone, Default)]
 struct StatesInner {
-    by_key: FxHashMap<Box<str>, StateId>,
+    by_key: FxHashMap<Arc<str>, StateId>,
     states: Vec<Arc<BlockState>>,
     /// Block name → its default state, for palettes that name a block without properties (26.3+).
-    defaults: FxHashMap<Box<str>, StateId>,
+    defaults: FxHashMap<Arc<str>, StateId>,
 }
 
+/// Shared with [`BlockStates::snapshot`]s until the next change copies it.
 pub struct BlockStates {
-    inner: RwLock<StatesInner>,
+    inner: RwLock<Arc<StatesInner>>,
 }
 
 impl Default for BlockStates {
@@ -71,10 +73,11 @@ impl BlockStates {
         if let Some(&id) = self.inner.read().unwrap().by_key.get(key.as_str()) {
             return id;
         }
-        let mut inner = self.inner.write().unwrap();
-        if let Some(&id) = inner.by_key.get(key.as_str()) {
+        let mut guard = self.inner.write().unwrap();
+        if let Some(&id) = guard.by_key.get(key.as_str()) {
             return id;
         }
+        let inner = Arc::make_mut(&mut guard);
         let id = StateId(inner.states.len() as u32);
         let name = namespaced(name);
         inner.states.push(Arc::new(BlockState {
@@ -115,7 +118,7 @@ impl BlockStates {
     /// Registers `state` as its block's default unless one is already set: higher-priority packs load first.
     pub fn add_default(&self, state: StateId) {
         let name = self.get(state).name.clone();
-        self.inner.write().unwrap().defaults.entry(name).or_insert(state);
+        Arc::make_mut(&mut self.inner.write().unwrap()).defaults.entry(name.into()).or_insert(state);
     }
 
     /// Loads a `defaultBlockstates.json` (`{"minecraft:oak_door": "minecraft:oak_door[facing=north,…]", …}`).
