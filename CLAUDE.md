@@ -43,7 +43,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   watcher (`task`, `queue`, `runner`, `watch/`)
 - `bm-cli` — `bluemap` binary, BlueMapCLI flags/exit codes/log format; `-u`, `--markers`, `--convert-storage`;
   hidden `--plugin-ipc` = server-plugin core (`src/plugin/`, command spec `src/plugin/commands.json`); musl builds
-  use tuned mimalloc (`src/alloc.rs`)
+  use tuned mimalloc (`src/alloc.rs`) and their own `memset` (`src/memfns.rs`: zig's is a byte loop, docs/23)
 - `bm-ipc` — shim↔core wire protocol (stdin/stdout frames, JSON headers); crate docs are the canonical spec
 - Beyond parity (pause reasons, `memory-limit`, MSPT pausing, low-priority render threads): `docs/15`,
   `crates/bm-cli/src/throttle/`
