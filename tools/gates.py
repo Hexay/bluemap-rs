@@ -2,7 +2,7 @@
 
     py -3 tools/testbox.py run <name> --sync -- python3 tools/gates.py [gate …]
 
-Gates: clippy unit mapo oracle accept accopt (default: all). Tests build in profile `fast` (cold 68 s vs 234 s for
+Gates: fmt clippy unit mapo oracle accept accopt (default: all). Tests build in profile `fast` (cold 68 s vs 234 s for
 release, 11 s vs 57 s after a bm-render edit); acceptance runs the release binary, as shipped. Stage the fixtures
 first (`testbox.py stage <name>`): from the testbox HDD the oracle alone takes ~10 min.
 """
@@ -13,6 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GATES = {
+    "fmt": ["cargo", "fmt", "--all", "--", "--check"],
     "clippy": ["cargo", "+stable", "clippy", "-q", "--workspace", "--all-targets", "--", "-D", "warnings"],
     "unit": ["cargo", "test", "-q", "--profile", "fast", "--workspace"],
     "mapo": ["cargo", "test", "-q", "--profile", "fast", "-p", "bm-map", "--", "--ignored"],

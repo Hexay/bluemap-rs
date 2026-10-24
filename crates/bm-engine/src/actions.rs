@@ -60,7 +60,8 @@ impl HeaderCache {
     pub fn load(&mut self, world: &World, plan: &Plan, center: Tile) -> Headers {
         let mut map = FxHashMap::default();
         for r in neighbourhood(plan, center) {
-            let stamps = self.cached.entry(r).or_insert_with(|| world.region(r.0, r.1).ok().map(|h| stamps(&h))).clone();
+            let stamps =
+                self.cached.entry(r).or_insert_with(|| world.region(r.0, r.1).ok().map(|h| stamps(&h))).clone();
             if let Some(n) = self.pending.get_mut(&r) {
                 *n -= 1;
                 if *n == 0 {
