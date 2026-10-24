@@ -85,7 +85,7 @@ Extrapolated peak at 300k² (k=73), new: 1006 MB (k=4 plateau) + open rstate cel
 | plan: region order + index, pending counts (lowres, tile/chunk cells) | `bm-engine/src/plan.rs` | ~20 MB | fine; a region bitmap would halve it |
 | region-state cells | `MapRegionState` | 1.4 MB | fine |
 | world region list (transient at plan time) | `World::regions` | ~3 MB | fine |
-| watch fingerprints | `bm-engine/src/watch/files.rs` | ~20 MB, and a `stat` of 341 k files per check interval | avg-memory/watch owner: rescan by directory mtime first |
+| watch fingerprints | `bm-engine/src/watch/files.rs` | ~20 MB, and a `stat` of 341 k files per check interval | fine: measured 0.9 s warm, 2.2 s cache-dropped per rescan (testbox HDD, 341 k files), every 5 min by default |
 | bundle index cache | `bm-storage` bundle cache | ≤ 4096 × ~10 KB = 40 MB, bounded | done (LRU, below) |
 | lowres spills | persistence thread | CPU, not memory | Hilbert-like region order would cut spills to ~0, but changes Java's spiral progress |
 
