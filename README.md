@@ -44,7 +44,7 @@ Same world and machine; the better value in each row is bold:
 | Size on disk | 1,576 MiB in 16,865 files | **130 MiB in 387 files** |
 | Serve a hires tile (server CPU) | 0.03 ms | **0.02 ms** ¹ |
 | Bytes sent per hires tile | 96 KB | **7 KB** ¹ |
-| Hires tiles served per second | 140,000 | **178,000** ¹ |
+| Hires tiles served per second | 150,000 | **328,000** ¹ |
 | Can be served by | **bluemap-rs, Java BlueMap, nginx, `sql.php`** | bluemap-rs only |
 
 ¹ With bluemap-rs's webserver, which has the browser unpack optimized tiles itself
@@ -55,13 +55,13 @@ Serving a hires tile nobody requested recently, by who asks for it:
 
 | Storage, client | Server CPU per tile | Tiles per second | Sent per tile |
 |---|---:|---:|---:|
-| `compat` | 0.03 ms | 140,260 | 96 KB |
-| `optimized`, browser unpacks, zstd | **0.02 ms** | **178,064** | **7 KB** |
-| `optimized`, browser unpacks, gzip | 0.25 ms | 9,712 | 8 KB |
-| `optimized`, client without the script, zstd | 1.64 ms | 3,217 | 96 KB |
-| `optimized`, client without the script, gzip | 3.49 ms | 1,873 | 96 KB |
+| `compat` | 0.03 ms | 150,515 | 96 KB |
+| `optimized`, browser unpacks, zstd | **0.02 ms** | **328,215** | **7 KB** |
+| `optimized`, browser unpacks, gzip | 0.24 ms | 32,076 | 8 KB |
+| `optimized`, client without the script, zstd | 1.51 ms | 4,218 | 96 KB |
+| `optimized`, client without the script, gzip | 3.24 ms | 2,322 | 96 KB |
 
-CPU per tile is at 1 connection, tiles per second at 32 (one run, 2026-10-28, harness in
+CPU per tile is at 1 connection, tiles per second at 32 (medians of 3 runs, 2026-10-28, harness in
 [docs/18](docs/18-client-unpack.md)). A tile served again from the server's cache costs the same as `compat` on every
 row. The first request to a part of the map nobody has viewed since startup reads one 2 KB index per storage bundle:
 10,000–66,000 such reads per second at 32 connections, p99 under 9 ms.
