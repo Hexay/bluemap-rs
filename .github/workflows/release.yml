@@ -164,7 +164,8 @@ jobs:
       - id: tags
         run: |
           tags="$IMAGE:${GITHUB_REF_NAME#v}"
-          if [ "$PRERELEASE" != true ]; then tags="$tags,$IMAGE:latest"; fi
+          # every 0.x release is a pre-release but the newest one is still what `:latest` users want; only -rc tags skip it
+          case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags,$IMAGE:latest" ;; esac
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - if: startsWith(github.ref, 'refs/tags/v')

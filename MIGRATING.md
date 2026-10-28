@@ -28,10 +28,10 @@ Docker: change only the image. Mounts (`/app/config`, `/app/world`, `/app/data`,
 
 ```diff
 -    image: ghcr.io/bluemap-minecraft/bluemap:v5.29
-+    image: ghcr.io/hexay/bluemap-rs:0.2.0
++    image: ghcr.io/hexay/bluemap-rs:latest
 ```
 
-Tags are bluemap-rs versions (`0.2.0`) and `latest` for stable releases. The image has no Java: an `entrypoint`
+Tags are bluemap-rs versions (`0.3.0`) and `latest`, the newest release (release candidates are left out). The image has no Java: an `entrypoint`
 override that ran `java -jar cli.jar` with JVM flags becomes `bluemap` (cap memory with `memory-limit` in
 `core.conf` instead of `-Xmx`).
 
