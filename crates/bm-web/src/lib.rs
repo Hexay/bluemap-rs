@@ -16,6 +16,7 @@
 
 mod access_log;
 mod app;
+mod client_key;
 mod client_unpack;
 mod content_type;
 mod encoding;
@@ -30,6 +31,7 @@ mod paths;
 mod registry;
 mod response;
 mod server;
+mod slots;
 mod static_cache;
 mod static_files;
 mod transcode;
@@ -37,8 +39,8 @@ mod validators;
 mod webapp;
 
 pub use access_log::{AccessLog, FileSink, Level, LogSink, RequestInfo, StdoutSink, java_host_address};
-pub use app::{SERVER_UNPACK_WAIT, WebApp, WebOptions};
-pub use bm_config::ServerUnpack;
+pub use app::{SERVER_UNPACK_SHARE, SERVER_UNPACK_WAIT, WebApp, WebOptions};
+pub use bm_config::{IpCidr, ServerUnpack};
 pub use error::WebError;
 pub use javafmt::{Arg, FormatError, JavaFormat};
 pub use live::LiveMap;

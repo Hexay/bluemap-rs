@@ -10,6 +10,10 @@ BlueMap version they replace.
   decodes it in WASM (zstd's C decoder, +39 KB to the module, +20 KB to the script on the wire). Server CPU per
   hires tile for them falls from 0.24–0.39 ms to 0.02–0.03 ms; tiles/s at 32 connections from 32k to 299k
   (docs/18). Pages still running the 0.3.0 script keep the gzip path.
+- `server-unpack: limited` shares its queue fairly per client address (round-robin slots, at least 64 places for a
+  client when another floods), and new `webserver.conf` setting `trusted-proxies` takes the client from
+  `X-Forwarded-For`/`X-Real-IP` behind a reverse proxy. A viewer without the script loading a view next to a
+  600-connection flood went from 16 of 65 tiles to 65 of 65 (docs/18, docs/reverse-proxy.md).
 
 ## 0.3.0 — 2026-10-28
 

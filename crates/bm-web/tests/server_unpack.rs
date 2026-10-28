@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use bm_storage::{Compression, FileStorage, Format, GridKey, MapStorage, Storage};
 use bm_web::{MapRoute, ServerUnpack, WebApp, WebOptions};
-use common::{PRBM_TYPE, RAW_TILE, Reply, Served, TILE, UNPACKS, get, prbm_of};
+use common::{Conn, PRBM_TYPE, RAW_TILE, Reply, Served, TILE, UNPACKS, get, prbm_of};
 
 const ZSTD: (&str, &str) = ("Accept-Encoding", "gzip, deflate, br, zstd");
 const GZIP: (&str, &str) = ("Accept-Encoding", "gzip");
@@ -37,8 +37,20 @@ fn serve_queued(
     queue: usize,
     threads: usize,
 ) -> Served {
+    serve_trusting(storage, mode, slots, queue, threads, &[])
+}
+
+fn serve_trusting(
+    storage: Arc<dyn MapStorage>,
+    mode: ServerUnpack,
+    slots: usize,
+    queue: usize,
+    threads: usize,
+    trusted_proxies: &[&str],
+) -> Served {
     let mut options = WebOptions::new(std::env::temp_dir().join("bm-web-no-webroot"));
     (options.server_unpack, options.server_unpack_slots, options.server_unpack_queue) = (mode, slots, queue);
+    options.trusted_proxies = trusted_proxies.iter().map(|p| p.parse().unwrap()).collect();
     let mut app = WebApp::new(options).unwrap();
     app.add_map("world", MapRoute { storage, live: None }).unwrap();
     Served::start_with_blocking_threads(app, threads)
@@ -57,7 +69,8 @@ fn limited_is_the_default_and_unpacks_while_a_slot_is_free() {
     assert_eq!(options.server_unpack, ServerUnpack::Limited);
     let cores = std::thread::available_parallelism().map_or(4, usize::from);
     assert_eq!(options.server_unpack_slots, (cores / 4).max(1));
-    assert_eq!(options.server_unpack_queue, (64 * options.server_unpack_slots).min(256));
+    assert_eq!(options.server_unpack_queue, (64 * options.server_unpack_slots).clamp(128, 256));
+    assert!(options.trusted_proxies.is_empty());
 
     let dir = tempfile::tempdir().unwrap();
     let s = serve(map(dir.path(), Format::Optimized, 41), ServerUnpack::Limited, 1);
@@ -157,6 +170,64 @@ fn one_viewers_burst_queues_instead_of_failing() {
     for (i, r) in replies.iter().enumerate() {
         assert!((r.status, r.decoded()) == (200, prbm_of(100 + i as u32)), "tile {i}: {}", r.status);
     }
+}
+
+/// One client floods the single slot (closed loop, identity bodies, which are never cached) and keeps the queue
+/// full; a viewer at another address then loads 50 tiles at once. Both come through a proxy on 127.0.0.1: trusted,
+/// the viewer gets its fair share and all 50 tiles; untrusted, both are one client and the viewer is crowded out.
+#[test]
+fn a_flooding_client_leaves_room_for_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let map = FileStorage::open(dir.path().join("maps"), Compression::Gzip, Format::Optimized, false)
+        .unwrap()
+        .map("world")
+        .unwrap();
+    map.write_grid(GridKey::Hires, (0, 0), &prbm_of(500)).unwrap();
+    let view: Vec<i32> = (0..50).collect();
+    for &x in &view {
+        map.write_grid(GridKey::Hires, (x, 100), &prbm_of(300 + x as u32)).unwrap();
+    }
+    let flood_ip = ("X-Forwarded-For", "203.0.113.1");
+    let viewer_ip = ("X-Forwarded-For", "203.0.113.2");
+    let identity = ("Accept-Encoding", "identity");
+    let load_view = |trusted: &[&str]| -> Vec<u16> {
+        let s = serve_trusting(map.clone(), ServerUnpack::Limited, 1, 128, 512, trusted);
+        let (stop, refused) = (AtomicBool::new(false), AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..200 {
+                scope.spawn(|| {
+                    let mut conn = Conn::open(s.addr);
+                    while !stop.load(Relaxed) {
+                        if conn.get(TILE, &[identity, flood_ip]).status == 503 {
+                            refused.fetch_add(1, Relaxed);
+                        }
+                    }
+                });
+            }
+            let t = Instant::now();
+            while refused.load(Relaxed) == 0 {
+                assert!(t.elapsed() < Duration::from_secs(20), "the flood never filled the queue");
+                std::thread::yield_now();
+            }
+            let reqs: Vec<_> = view
+                .iter()
+                .map(|&x| {
+                    scope.spawn(move || {
+                        let r = get(s.addr, &format!("/maps/world/tiles/0/x{x}/z100.prbm"), &[identity, viewer_ip]);
+                        assert!(r.status != 200 || r.decoded() == prbm_of(300 + x as u32), "tile {x}");
+                        r.status
+                    })
+                })
+                .collect();
+            let statuses = reqs.into_iter().map(|r| r.join().unwrap()).collect();
+            stop.store(true, Relaxed);
+            statuses
+        })
+    };
+    let fair = load_view(&["127.0.0.1"]);
+    assert_eq!(fair, vec![200; 50], "trusted proxy: the viewer has its own share");
+    let shared = load_view(&[]);
+    assert!(shared.contains(&503), "untrusted proxy: one client, crowded out ({shared:?})");
 }
 
 /// A queued request gives up at the deadline; with the queue full, the next is refused at once.

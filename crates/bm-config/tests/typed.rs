@@ -193,6 +193,21 @@ fn server_unpack_key() {
 }
 
 #[test]
+fn trusted_proxies_key() {
+    let web = |src: &str| from_value::<WebserverConfig>(&parse(src)).map(|c| c.trusted_proxies);
+    assert_eq!(web(""), Ok(vec![]), "Java's webserver.conf has no such key");
+    let generated = bm_config::generate::webserver_conf(".".as_ref(), "data".as_ref(), ".".as_ref());
+    assert_eq!(web(&generated), Ok(vec![]));
+    let proxies = web(r#"trusted-proxies: ["127.0.0.1", "10.0.0.0/8", "fd00::/8"]"#).unwrap();
+    let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+    assert_eq!(proxies.len(), 3);
+    assert!(proxies[0].contains(ip("127.0.0.1")) && proxies[1].contains(ip("10.9.8.7")));
+    assert!(proxies[2].contains(ip("fd12::1")) && !proxies[2].contains(ip("fe80::1")));
+    let err = web(r#"trusted-proxies: ["10.0.0.0/40"]"#).unwrap_err();
+    assert!(err.key().starts_with("trusted-proxies") && err.to_string().contains("10.0.0.0/40"), "{err}");
+}
+
+#[test]
 fn map_errors_name_the_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("world.conf");

@@ -109,8 +109,9 @@ revalidates, and any script hash is answered with the current script).
 decides what a request without the opt-in (or a `.gz` URL) gets for a packed hires tile:
 
 - `limited`: unpacked by the server, at most max(1, cores / 4) at once (`WebOptions::server_unpack_slots`). A
-  request without a free slot waits for one, up to 500 ms (`SERVER_UNPACK_WAIT`), in a queue of min(64 × slots,
-  256) (`server_unpack_queue`); past the deadline or with the queue full: `503`, `Retry-After: 1`, `no-store`.
+  request without a free slot waits for one, up to 500 ms (`SERVER_UNPACK_WAIT`), in a queue of 64 × slots
+  clamped to 128–256 (`server_unpack_queue`) shared fairly by client (below); past the deadline or with no room
+  for it in the queue: `503`, `Retry-After: 1`, `no-store`.
 - `never`: `406` with a one-line `text/plain` body. Tiles stored raw are still served, under the `limited` slots.
 - `always`: every request unpacked, bounded only by the transcode memory gate (cores at once, waiting).
 
@@ -140,6 +141,50 @@ devbox below, `limited`, `docs/perf-exp/testbox_viewer.sh` (2026-10-28, load 1�
 
 The 1-slot burst used ~10% of the deadline; a host with 3–5× slower cores still fits.
 
+### Fair share by client
+
+One client flooding without the script used to fill the whole queue, and every other viewer without the script got
+`503`s at once. The queue is now shared by client (`crates/bm-web/src/slots.rs`):
+
+- A client is its peer address, an IPv6 one per /64 (one host owns a whole /64). From a peer in `webserver.conf`
+  `trusted-proxies` (IPs or CIDR blocks; absent = none, so upstream configs load unchanged) it is the right-most
+  `X-Forwarded-For` entry that isn't a trusted proxy, or `X-Real-IP` without one; the headers are ignored from
+  anyone else (`client_key.rs`). Behind an untrusted proxy all clients are one, which is how it was before.
+- A client alone may fill the whole queue, so a lone viewer or a whole school behind one NAT address loses
+  nothing. With the queue full, a request from a client holding less than its fair share, queue / clients
+  waiting but at least 64 (`SERVER_UNPACK_SHARE`, one view load of ~50 hires tiles with headroom), gets in by
+  refusing the newest waiter of the client furthest over its share; past its share a client gets `503` at once.
+  The 128 floor keeps room for two view loads even on a 1-slot host.
+- A freed slot goes straight to the oldest waiter of the next client in turn: round-robin across clients, FIFO
+  within one. A flood gets one slot in n however many requests it queues, so a viewer's 50 tiles take ~2 × 50
+  unpacks on the slots with one flood beside it, not the whole flood's backlog, and arrivals can't barge past
+  waiters. One mutex; the uncontended path is a counter, a request that has to wait touches a hash map and parks
+  its blocking thread.
+
+A fixed per-client cap would be simpler but takes from lone clients and NAT'd households to protect them from
+nobody; a dynamic share without the eviction would come too late, since the flood holds the full queue when the
+viewer's burst arrives.
+
+Devbox (16 threads, 4 slots, queue 256), the 4096² world, 2026-10-28, locked, load 7 rising to 32 during the run
+(the flood itself and other users): a closed-loop flood without the script on the hires tiles outside the view from
+X-Forwarded-For 203.0.113.1, and a viewer without the script loading the view (49 hires + 16 lowres, cold cache)
+from 203.0.113.2, both through a trusted 127.0.0.1 (`docs/perf-exp/devbox_fair_share.sh`; "before" is `9ae9e79`,
+which sees one client). 3 runs per row, each the same within a few ms:
+
+| flood conns | viewer conns | before: viewer 200 / 503 | load wall | after: viewer 200 / 503 | load wall | flood req/s, % 503 before / after |
+|---:|---:|---:|---:|---:|---:|---:|
+| 64 | 6 | 65 / 0 | 285–334 ms | 65 / 0 | 36–55 ms | 2.2k, 0 / 2.1k, 0 |
+| 64 | 65 | 65 / 0 | 43–47 ms | 65 / 0 | 34–42 ms | 2.2k, 0 / 2.1k, 0 |
+| 600 | 6 | **16 / 49** | 14–21 ms | **65 / 0** | 60–72 ms | 206–226k, 97 / 240k, 98 |
+| 600 | 65 | **16 / 49** | 6–8 ms | **65 / 0** | 58–70 ms | 153–216k, 97 / 213–225k, 97 |
+
+Before, 600 flood connections kept the queue full and the viewer got only its 16 lowres tiles; now it gets every
+tile in ~65 ms. With 64 the queue never filled, but round-robin still took the 6-connection load from ~300 ms
+(each tile behind the flood's backlog) to ~45 ms. Script clients (32 conns, frames, the same build serving) are
+unchanged: 272–312k req/s before, 301–329k after over 6 runs each (load 18–24 from other users), 21k / 25k under
+the 600-connection flood. The flood's own rate is unchanged: a refusal costs the same, and no limit inside the
+process stops it (docs/reverse-proxy.md).
+
 A flood: devbox (Ryzen 9700X, 16 threads, 4 slots, queue 256), the 4096² world, 2026-10-28, locked runs: 32
 opt-in connections on one half of the tiles, alone and with a closed-loop flood of the other half without the
 opt-in from the same machine (`docs/perf-exp/testbox_flood.sh`), 10 s per row:
@@ -157,7 +202,9 @@ blocking pool (opt-in p50 ≤ 1.4 ms with 600 waiting floods); it starves the CP
 queue, 64 flood connections all wait their turn on 4 slots: the flood gets 1.5k tiles/s, opt-in throughput stays
 at 77 % of an idle server. At 600 the queue is full, refusals come back at once and the flood becomes ~150k cheap
 requests per second from 600 client threads on the same box, which costs what any cheap flood does (`never` fares
-no better): past that point it is a request rate, for a rate limit in front of the server, not this setting.
+no better): past that point it is a request rate, for a rate limit in front of the server, not this setting
+(nginx and Caddy snippets: docs/reverse-proxy.md). These rows predate the fair share; one client flooded, so they
+still hold.
 
 ## Measured
 

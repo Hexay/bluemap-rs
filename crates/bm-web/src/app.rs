@@ -16,16 +16,16 @@ use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 
-use bm_config::ServerUnpack;
+use bm_config::{IpCidr, ServerUnpack};
 
 use crate::WebError;
 use crate::access_log::{AccessLog, FileSink, LogSink, RequestInfo, StdoutSink};
-use crate::gate::Gate;
 use crate::map_data::ServerUnpackPolicy;
 use crate::map_handler::{self, MapRoute, Serving};
 use crate::paths::{decode_path, java_query_string};
 use crate::registry::MapRegistry;
 use crate::response::{ExtraHeaders, finish, status_message};
+use crate::slots::Slots;
 use crate::static_files::StaticFiles;
 use crate::transcode;
 use crate::webapp::WEBAPP_VERSION;
@@ -55,19 +55,26 @@ pub struct WebOptions {
     pub server_unpack: ServerUnpack,
     /// How many of those unpacks may run at once under [`ServerUnpack::Limited`].
     pub server_unpack_slots: usize,
-    /// How many more may wait for a slot, each up to [`SERVER_UNPACK_WAIT`], before the rest get `503`.
+    /// How many more may wait for a slot, each up to [`SERVER_UNPACK_WAIT`], before the rest get `503`; shared
+    /// fairly by client ([`SERVER_UNPACK_SHARE`]).
     pub server_unpack_queue: usize,
+    /// `webserver.conf` `trusted-proxies`: whose `X-Forwarded-For`/`X-Real-IP` names the client for that share.
+    pub trusted_proxies: Vec<IpCidr>,
 }
 
 /// Longest a server-side unpack waits for a slot (docs/18).
 pub const SERVER_UNPACK_WAIT: Duration = Duration::from_millis(500);
+/// Room a client always gets in a full queue when others fill it: one view load (~50 hires tiles) (docs/18).
+pub const SERVER_UNPACK_SHARE: usize = 64;
+/// Room for two clients' view loads, so one can't crowd out another even on a single slot (docs/18).
+const MIN_SERVER_UNPACK_QUEUE: usize = 2 * SERVER_UNPACK_SHARE;
 /// Waiters hold a blocking-pool thread each: at most half of tokio's default 512 (docs/18).
 const MAX_SERVER_UNPACK_QUEUE: usize = 256;
 
 impl WebOptions {
     /// `slots` server-unpack slots and the queue that goes with them.
     pub fn with_server_unpack_slots(self, slots: usize) -> Self {
-        let queue = (64 * slots).min(MAX_SERVER_UNPACK_QUEUE);
+        let queue = (64 * slots).clamp(MIN_SERVER_UNPACK_QUEUE, MAX_SERVER_UNPACK_QUEUE);
         Self { server_unpack_slots: slots, server_unpack_queue: queue, ..self }
     }
 
@@ -83,6 +90,7 @@ impl WebOptions {
             server_unpack: ServerUnpack::default(),
             server_unpack_slots: 0,
             server_unpack_queue: 0,
+            trusted_proxies: Vec::new(),
         }
         .with_server_unpack_slots((transcode::cores() / 4).max(1))
     }
@@ -102,6 +110,7 @@ impl WebOptions {
             map_etags: config.map_etags,
             client_unpack: config.client_unpack,
             server_unpack: config.server_unpack,
+            trusted_proxies: config.trusted_proxies.clone(),
             ..Self::new(&config.webroot)
         })
     }
@@ -143,12 +152,14 @@ impl WebApp {
                 client_unpack: options.client_unpack,
                 server_unpack: Arc::new(ServerUnpackPolicy {
                     mode: options.server_unpack,
-                    slots: Gate::with_queue(
+                    slots: Slots::new(
                         options.server_unpack_slots,
                         options.server_unpack_queue,
+                        SERVER_UNPACK_SHARE,
                         SERVER_UNPACK_WAIT,
                     ),
                 }),
+                trusted_proxies: options.trusted_proxies,
             },
             shutdown: CancellationToken::new(),
         })
@@ -169,9 +180,9 @@ impl WebApp {
         self.shutdown.clone()
     }
 
-    /// Whether requests need a [`PeerAddr`] (only the access log reads it).
+    /// Whether requests need a [`PeerAddr`]: for the access log and the `server-unpack` slots' client key.
     pub(crate) fn wants_peer_addr(&self) -> bool {
-        self.log.is_enabled()
+        self.log.is_enabled() || self.serving.server_unpack.mode != ServerUnpack::Always
     }
 
     pub fn into_router(self) -> Router {
@@ -194,7 +205,9 @@ impl WebApp {
             if let Some(rest) = rest.filter(|r| !r.contains(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])) {
                 let rest = rest.strip_prefix('/').unwrap_or(rest);
                 let rest = if rest.is_empty() { "/" } else { rest };
-                return map_handler::handle(map, rest, &req.method, &req.headers, &self.serving, &self.shutdown).await;
+                let peer = req.extensions.get::<PeerAddr>().map(|p| p.0.ip());
+                return map_handler::handle(map, rest, &req.method, &req.headers, peer, &self.serving, &self.shutdown)
+                    .await;
             }
         }
         // the webapp only gets the client script while a map has something for it to unpack
