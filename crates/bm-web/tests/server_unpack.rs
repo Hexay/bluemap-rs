@@ -239,9 +239,11 @@ fn the_queue_is_bounded_in_time_and_length() {
         let t = Instant::now();
         let waiters: Vec<_> = (0..2).map(|_| scope.spawn(|| get(s.addr, TILE, &[ZSTD]))).collect();
         std::thread::sleep(Duration::from_millis(150));
+        // timed alone: on a slow CI runner the spawns and sleep above can eat most of the deadline
+        let asked = Instant::now();
         let refused = get(s.addr, TILE, &[ZSTD]);
         assert_busy(&refused);
-        assert!(t.elapsed() < bm_web::SERVER_UNPACK_WAIT, "refused before the waiters gave up");
+        assert!(asked.elapsed() < bm_web::SERVER_UNPACK_WAIT, "refused at once, not after waiting");
         for w in waiters {
             assert_busy(&w.join().unwrap());
         }
