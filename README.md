@@ -91,6 +91,8 @@ Downloads are on the [Releases](https://github.com/Hexay/bluemap-rs/releases) pa
 
 - **CLI**: unpack `bluemap-rs-<version>-<platform>` and run `bluemap` where you ran `java -jar bluemap-cli.jar`, from
   the same working directory. Builds for Linux (x64, arm64, armv7; static), Windows x64 and macOS (x64, arm64).
+- **Docker**: replace `ghcr.io/bluemap-minecraft/bluemap:<version>` with `ghcr.io/hexay/bluemap-rs:<version>`
+  (amd64, arm64). Same mounts, arguments and port.
 - **Paper**: replace the BlueMap jar in `plugins/` with `bluemap-rs-paper-…-<platform>.jar` (or the `universal` jar).
   It keeps using `plugins/BlueMap/`. Java 21+.
 - **Fabric**: replace the BlueMap jar in `mods/` with `bluemap-rs-fabric-…jar`. Needs Fabric API. Java 25.

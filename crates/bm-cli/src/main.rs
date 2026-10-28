@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result, bail};
-use args::{Args, HELP};
+use args::Args;
 use bm_config::{BlueMapConfig, ConfigOptions};
 use bm_engine::{ResourceOptions, Service, TileUpdateStrategy};
 use clap::Parser;
@@ -39,7 +39,7 @@ fn main() -> ExitCode {
         Ok(args) => args,
         Err(e) => {
             log::error(&format!("Failed to parse provided arguments! {}", e.to_string().trim()));
-            print!("{HELP}");
+            print!("{}", args::help());
             return ExitCode::from(1);
         }
     };
@@ -80,7 +80,7 @@ fn run(args: &Args) -> Result<ExitCode> {
         log::add_file(&file, args.append).with_context(|| format!("log file {file}"))?;
     }
     if args.help {
-        print!("{HELP}");
+        print!("{}", args::help());
         return Ok(ExitCode::SUCCESS);
     }
     if args.version {
@@ -153,7 +153,7 @@ fn run(args: &Args) -> Result<ExitCode> {
         return Ok(if ok { ExitCode::SUCCESS } else { ExitCode::from(1) });
     }
     log::info(&format!("Generated default config files for you, here: {}\n", absolute(&config_folder).display()));
-    print!("{HELP}");
+    print!("{}", args::help());
     Ok(ExitCode::from(1))
 }
 
