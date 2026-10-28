@@ -62,6 +62,10 @@ Testbox (6-core Xeon E-2136), the 4096² world of docs/14 (16,641 hires tiles, 1
 
 A tile served again from the transcode cache costs what compat does (0.09 against 0.08 ms) on any path.
 
+Rerun at `957d8ad` (2026-10-28, one locked run at load 9–16, the docs/14 renders of that day), same order of rows:
+CPU 0.09 / 3.04 / 7.04 / **0.06** / 0.45 ms, req/s 50,588 / 1,750 / 1,019 / **102,843** / 14,372, KB 96 / 92 / 100 /
+**7** / 7: unchanged within noise (the sidecar index and decoder inlining since touch cold reads and the browser).
+
 ```
 py -3 tools/testbox.py run <name> --sync --lock -- bash docs/perf-exp/testbox_web.sh ~/bmrs-<name> \
     <compat webroot> <optimized webroot of the same map>

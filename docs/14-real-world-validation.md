@@ -11,8 +11,9 @@ Scripts: `tools/real_world.py`, `tools/accept_versions.py` (usage in their heade
   (one core of an unrelated job, at times a `rustc`) still ran alongside. CPU seconds are the robust figure and wall
   times are indicative.
 - Java: Temurin 25.0.4.1, BlueMap CLI 5.28, default JVM flags (max heap = ¼ of RAM ≈ 8 GiB).
-  Ours: release build of `master` @ `8be0570` (glibc, `cargo build --release`) and the static musl build from
-  `tools/build_core.py linux-x64` (cargo-zigbuild).
+  Ours: release build of `master` (glibc, `cargo build --release`) and the static musl build (cargo-zigbuild, as
+  `tools/build_core.py linux-x64`): first `8be0570` (2026-10-08, with the Java runs), re-measured at `957d8ad`
+  (2026-10-28; Java not re-run, same world, config and machine).
 - Both sides use one config folder created by Java (`render_serve.configure`), with `render-thread-count: 12`, the
   default map settings and file storage (gzip). Each run starts from an empty storage (`-r -f`).
 
@@ -59,30 +60,35 @@ busy JVM. Ours keeps a single writer per lowres tile (`LowresStore`), so it cann
 
 **Benchmarks** (forced render `-r -f` from an empty storage, 12 render threads, the same config):
 
-| side | runs | wall s (median, range) | CPU s (median, range) | peak RSS MB (median) | output |
-|------|-----:|-----------------------:|----------------------:|---------------------:|--------|
-| Java 5.28 | 3 | 1413 (1316–1458) | 9843 (8307–9851) | 2139 | 1,544.9 MiB, 16,865 files (compat) |
-| ours, glibc | 3 | 77.0 (67.8–85.5) | 471.6 (455.4–474.9) | 764 | 1,576.0 MiB, 16,865 files (compat) |
-| ours, static musl | 1 | 65.9 | 598.9 | 611 | 1,576.0 MiB (compat) |
-| ours, glibc, `format: optimized` | 1 | 49.2 | 498.3 | 802 | 309.6 MiB, 306 files |
-| ours, optimized → compat conversion | 1 | 27.4 | 261.2 | 514 | 1,576.0 MiB |
+| side | commit, date | runs | wall s (median, range) | CPU s (median, range) | peak RSS MB (median) | output |
+|------|--------------|-----:|-----------------------:|----------------------:|---------------------:|--------|
+| Java 5.28 | 2026-10-08 | 3 | 1413 (1316–1458) | 9843 (8307–9851) | 2139 | 1,544.9 MiB, 16,865 files (compat) |
+| ours, glibc | `957d8ad`, 10-28 | 3 | 57.9 (49.4–90.6) | 320.0 (267.1–325.6) | 878 | 1,576.0 MiB, 16,865 files (compat) |
+| ours, static musl (shipped) | `957d8ad`, 10-28 | 3 | 63.5 (55.8–82.9) | 360.9 (335.4–411.5) | 709 | 1,576.0 MiB (compat) |
+| ours, glibc, `format: optimized` | `957d8ad`, 10-28 | 3 | 25.1 (24.9–59.3) | 262.8 (248.3–264.5) | 904 | 129.9 MiB, 387 files |
+| ours, optimized → compat conversion | `957d8ad`, 10-28 | 1 | 32.6 | 228.9 | 413 | 1,576.0 MiB |
+| ours, glibc | `8be0570`, 10-08 | 3 | 77.0 (67.8–85.5) | 471.6 (455.4–474.9) | 764 | 1,576.0 MiB (compat) |
+| ours, static musl | `8be0570`, 10-08 | 1 | 65.9 | 598.9 | 611 | 1,576.0 MiB (compat) |
+| ours, glibc, optimized (BMQ2) | `8be0570`, 10-08 | 1 | 49.2 | 498.3 | 802 | 309.6 MiB, 306 files |
 
-Raw lines: `docs/results/bench.jsonl`, labels `real-*`. Java ran 08:41 UTC (run 1) and 09:53–10:38 (runs 2–3).
+Raw lines: `docs/results/bench.jsonl`, labels `real-*` (10-28: `real-r1028*`; their `commit` field is the testbox
+sync commit of `957d8ad`'s tree). Java ran 08:41 UTC (run 1) and 09:53–10:38 (runs 2–3). The 10-28 runs were
+interleaved (compat, optimized, musl per round, one lock) at box load 3–16 from other users; compat wall is the
+noisiest figure because it writes 1.6 GB in 16,865 files to the HDDs.
 
-- Ours renders the same output with 20.9× less CPU and 18.4× less wall time, at 36% of Java's peak RSS (medians).
-  Java's CPU is real work, not a lock convoy: it averaged 7.0 of 12 threads busy, at times 10.75 (`top`). The convoy
-  docs/10 measured on the 22-thread PC did not show up here.
-- The musl build is one run only. It used 27% more CPU than glibc for the same output; the allocator is the likely
-  cause (docs/13 has the allocator benchmark). Its wall time sits inside glibc's run-to-run spread.
-- **Optimized storage**: 309.6 MiB in 306 files, against 1,576 MiB in 16,865 files for compat: 5.1× smaller, 55× fewer
-  files. The lowres PNGs are the same in both formats, so the hires-only ratio is higher. Rendering straight to
-  optimized took 49 s wall. Converting it back to compat (`--convert-storage file --to compat`) took 27 s, and the
-  result compares exactly like the direct compat render.
-- **Optimized storage since BMQ3** (docs/17, run 2026-10-09, labels `real-rs-bmq3*`): **133.4 MiB** in 306 files,
-  11.8× smaller than compat; the hires bundles went from 299 to 122 MB on disk. Converted back to compat it is the
-  same 1,576.0 MiB in 16,865 files and compares to Java like the direct compat render: hires and rstate identical,
-  the one known lowres difference. That run shared the box with a saturated disk (125 s wall, 282 s CPU, 873 MB),
-  so its timings are not comparable with the table; the table's optimized rows are the BMQ2 run.
+- Ours renders the same output with 31× less CPU and 24× less wall time, at 41% of Java's peak RSS (compat, glibc,
+  medians; optimized: 37× less CPU, 56× less wall). Java's CPU is real work, not a lock convoy: it averaged 7.0 of
+  12 threads busy, at times 10.75 (`top`). The convoy docs/10 measured on the 22-thread PC did not show up here.
+- 10-08 → 10-28: CPU −32% compat and −47% optimized (render rounds docs/12, docs/20, docs/21; chunk load docs/21,
+  docs/23; BMQ3 encoding docs/17). Peak RSS rose 764 → 878 MB (per-split mesh buffers sized like the last tile,
+  docs/20; docs/22 measured 858 MB here and breaks the peak down), below the ~1.1 GB docs/22 extrapolates to 300k².
+- The shipped musl core (tuned mimalloc, own `memset`: docs/23) uses 13% more CPU than glibc and 19% less peak RSS.
+- **Optimized storage**: 129.9 MiB in 387 files (81 bundles, their 81 sidecar indexes, lowres, rstate), against
+  1,576 MiB in 16,865 files for compat: 12.1× smaller. BMQ3 (docs/17, 10-09: 133.4 MiB) replaced BMQ2 (309.6 MiB);
+  finest-first shapes took 3% more off hires (docs/19). The lowres PNGs are the same in both formats, so the
+  hires-only ratio is higher. The render now costs less CPU than compat's: BMQ3 + zstd is cheaper than gzipping
+  PRBM. Converting it back to compat (`--convert-storage file --to compat`) gives the same 1,576.0 MiB in 16,865 files,
+  which compares to Java exactly like the direct compat render.
 - Compat output: Java 1,544.9 MiB, ours 1,576.0 MiB, the same 16,865 files. Hires bytes match after decompression,
   but the gzip streams themselves differ.
 
@@ -90,10 +96,14 @@ Raw lines: `docs/results/bench.jsonl`, labels `real-*`. Java ran 08:41 UTC (run 
 glass roof at y 140, a 16×16×71 air shaft, a hollow gold-block tower and a torch. It saves, and 320 chunks in 6 region
 files get new timestamps. Each side then runs `-r` (not forced) over its own full render, pointed at the edited world:
 
-| | wall s | CPU s | peak RSS MB |
-|-|-------:|------:|------------:|
-| Java 5.28 `-r` | 20.5 | 155.1 | 712 |
-| ours `-r` | 5.0 | 5.6 | 543 |
+| | runs | wall s | CPU s | peak RSS MB |
+|-|-----:|-------:|------:|------------:|
+| Java 5.28 `-r` (10-08) | 1 | 20.5 | 155.1 | 712 |
+| ours `-r`, compat (`957d8ad`, 10-28, median, range) | 3 | 3.6 (2.4–20.5) | 6.1 (5.7–6.2) | 467 |
+| ours `-r`, optimized (`957d8ad`, 10-28) | 3 | 6.1 (2.5–6.4) | 6.0 (5.9–6.0) | 485 |
+| ours `-r`, compat (`8be0570`, 10-08) | 1 | 5.0 | 5.6 | 543 |
+
+The 20.5 s outlier is the first run, behind the writeback of the 1.6 GB copy its reset makes.
 
 Both times include the fixed startup cost: resource loading, plus JVM warm-up for Java. Both outputs are identical
 apart from the hole carried over from the full render, so the edited tiles match exactly.
