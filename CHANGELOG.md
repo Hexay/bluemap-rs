@@ -3,13 +3,31 @@
 Versions follow `<crate version>`; the plugin and mod jars report `<BlueMap version>+rs.<crate version>`, the
 BlueMap version they replace.
 
-## Unreleased
+## 0.3.0 — 2026-10-28
 
 - Drop-in target is now BlueMap 5.29: its webapp, `core.conf` template (`region-file-check-interval`) and
   BlueMapAPI 2.8.2; jars report `5.29+rs.<crate version>`. Hires and lowres output is unchanged (5.29 renders
   the same tiles as 5.28).
 - Webserver: error responses carry 5.29's `<code> - <message>` body; `Accept-Encoding` honours `*` and treats an
   unparsable `q` as 0, like 5.29.
+- `optimized` storage, serving: hires tiles go out packed and the browser unpacks them (a WASM script added to
+  `index.html`, negotiated by `Accept`; docs/18), so the server spends 0.02 ms of CPU per tile instead of rebuilding
+  PRBM. Clients without the script still get PRBM; new `webserver.conf` setting `server-unpack`
+  (`limited` default, `never`, `always`) bounds that work, so they can't use all the cores. `index.html` now
+  revalidates, so it always loads the current script.
+- `optimized` storage: a sidecar index per bundle, so a reader's first touch reads 2 KB instead of scanning the
+  bundle; finest-first shape discovery makes hires data 3% smaller (format unchanged).
+- Memory stays flat as the map grows: lowres tiles spill to storage past a 128 MB budget and render-state cells
+  leave memory once no remaining region needs them (docs/22).
+- Faster renders and updates: chunk parsing, palette reads, region headers read once per update, zlib through
+  libdeflate, encoder and mesher hot paths (docs/20, 21, 23).
+- Plugins: under a container memory limit (Pterodactyl and other panels) the core's `memory-limit` is set from the
+  limit left after the JVM heap, and the decision is logged; a `memory-limit` in `core.conf` still wins.
+- Docker image `ghcr.io/hexay/bluemap-rs` for amd64 and arm64, a drop-in for `ghcr.io/bluemap-minecraft/bluemap`:
+  same mounts, arguments and port. `--help` honours `BLUEMAP_COMMAND` like upstream.
+- musl cores use their own `memset` (zig's is a byte loop); glibc builds return freed memory when the render queue
+  runs dry.
+- Fixes: ARM and macOS builds (lanes.rs re-export, memfns transmute); dependency updates for RustSec advisories.
 
 ## 0.2.0 — 2026-10-09
 
