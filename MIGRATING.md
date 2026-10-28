@@ -70,13 +70,20 @@ Rendering pauses on server lag as on Paper (`render-pause-mspt` / `render-resume
 ## Memory and thread limits (Pterodactyl, Pelican and other panels)
 
 The core runs outside the Java heap, so the container's memory limit now covers **the JVM plus the core**. The
-stock Paper egg starts Java with `-XX:MaxRAMPercentage=95.0`, which leaves the core almost nothing; the host may
-then kill the whole server. Lower the percentage so the core keeps some headroom. How much it needs grows with
-render threads and map size.
+plugin handles this by itself: at startup it reads the container's limit, subtracts the JVM's max heap and an
+estimate of its non-heap memory, and gives the rest to the core as its memory limit. The core then starts fewer
+render threads to fit and pauses rendering while it is above the limit (the map keeps being served). The log
+says what it decided:
 
-To cap the core itself, add `memory-limit: "1G"` (any size like `512M`, `2GiB`) to `core.conf`. The core then
-starts fewer render threads to fit, and pauses rendering while it is above the limit (the map keeps being served).
-See docs/15-beyond-parity.md.
+```
+Container memory limit 4096 MiB, JVM max heap 3072 MiB (+ ~563 MiB non-heap): memory-limit for the core is 461 MiB (...)
+```
+
+The stock Paper egg starts Java with `-XX:MaxRAMPercentage=95.0`, which leaves the core nothing. The core still
+starts, renders with one thread, and logs a WARNING with the `MaxRAMPercentage` (or container limit) that fixes it.
+
+To set the limit yourself, add `memory-limit: "1G"` (any size like `512M`, `2GiB`) to `core.conf`; it always wins.
+`auto-memory-limit: false` in `plugin.conf` turns the automatic limit off. See docs/15-beyond-parity.md.
 
 Panels also cap the number of threads per container (default 512 on Pterodactyl), and the JVM and the core share
 that cap. If you hit the cap, lower `render-thread-count` in `core.conf`.

@@ -16,6 +16,7 @@ use bm_engine::{
 use bm_ipc::{CoreWorld, WorldInfo};
 use bm_web::LiveMap;
 
+use super::memory_budget::apply_container_budget;
 use super::state::{self, PluginState};
 use super::{Hello, blockstates};
 use crate::eta::ProgressTracker;
@@ -83,12 +84,15 @@ impl Session {
         let packs = hello.config_folder.join("packs");
         let _ = std::fs::create_dir_all(&packs);
         bm_engine::find_java_addons(&packs).iter().for_each(|a| log::warn(&a.warning()));
-        let config = BlueMapConfig::load(&config_options(hello, worlds))
+        let mut config = BlueMapConfig::load(&config_options(hello, worlds))
             .map_err(|e| not_ready("config-error", format!("{e}")))?;
         if let Some(file) = &config.core.log.file
             && let Err(e) = log::add_formatted_file(file, config.core.log.append)
         {
             log::warn(&format!("Failed to open log file {file}: {e}"));
+        }
+        if let Some((level, line)) = apply_container_budget(&mut config.core, &config.plugin, hello.memory_budget) {
+            log::log(level, &line);
         }
         let (plugin_state, warning) = state::load(&config.core.data);
         if let Some(w) = warning {

@@ -35,6 +35,7 @@ fn hello(cwd: &Path) -> ShimMsg {
         metrics: None,
         folia: false,
         max_memory_mib: Some(1024),
+        memory_budget: None,
         worlds: vec![],
     }
 }
@@ -145,6 +146,25 @@ fn server_load_pauses_and_resumes() {
             break;
         }
     }
+    assert!(child.wait().unwrap().success());
+}
+
+#[test]
+fn container_budget_becomes_the_memory_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut child, mut stdin, mut stdout) = spawn(dir.path());
+    let mut msg = hello(dir.path());
+    if let ShimMsg::Hello { memory_budget, .. } = &mut msg {
+        *memory_budget =
+            Some(bm_ipc::MemoryBudget { container_mib: 4096, heap_mib: 3072, overhead_mib: 563, budget_mib: 461 });
+    }
+    send(&mut stdin, &msg);
+    let (level, line) = log_containing(&mut stdout, "Container memory limit");
+    assert_eq!(level, bm_ipc::LogLevel::Info);
+    assert!(line.contains("memory-limit for the core is 461 MiB"), "{line}");
+
+    send(&mut stdin, &ShimMsg::Shutdown);
+    while !matches!(next(&mut stdout), CoreMsg::Bye) {}
     assert!(child.wait().unwrap().success());
 }
 

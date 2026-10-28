@@ -6,6 +6,7 @@ mod blockstates;
 mod commands;
 mod core;
 mod live;
+mod memory_budget;
 mod ops;
 mod outbox;
 mod rpc;
@@ -37,6 +38,7 @@ pub struct Hello {
     pub config_folder: PathBuf,
     pub mods_folder: Option<PathBuf>,
     pub max_memory_mib: Option<u64>,
+    pub memory_budget: Option<bm_ipc::MemoryBudget>,
     /// `defaultBlockstates` dump (JSON object), possibly empty.
     pub blockstates: Vec<u8>,
 }
@@ -146,7 +148,15 @@ fn handshake(rx: &Receiver<Event>, out: &Outbox) -> Option<(Hello, Vec<bm_ipc::W
     let Ok(Event::Frame(frame)) = rx.recv() else { return None };
     let hello = frame.parse::<ShimMsg>();
     let Ok(ShimMsg::Hello {
-        protocol, platform, mc_version, config_folder, mods_folder, max_memory_mib, worlds, ..
+        protocol,
+        platform,
+        mc_version,
+        config_folder,
+        mods_folder,
+        max_memory_mib,
+        memory_budget,
+        worlds,
+        ..
     }) = hello
     else {
         eprintln!("bluemap: expected Hello, got {}", frame.kind());
@@ -168,6 +178,7 @@ fn handshake(rx: &Receiver<Event>, out: &Outbox) -> Option<(Hello, Vec<bm_ipc::W
         config_folder: PathBuf::from(config_folder),
         mods_folder: mods_folder.map(PathBuf::from),
         max_memory_mib,
+        memory_budget,
         blockstates: frame.body,
     };
     Some((hello, worlds))
