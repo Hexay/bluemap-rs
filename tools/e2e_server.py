@@ -148,7 +148,7 @@ def prepare(folder: Path, plugins: list[Path], fresh: bool, world_from: Path | N
 class Server:
     """A server jar on its console (stdin/stdout); every line is echoed to `log`."""
 
-    def __init__(self, folder: Path, jar: Path, heap: str = "2G"):
+    def __init__(self, folder: Path, jar: Path, jvm: tuple[str, ...] = ("-Xmx2G",)):
         self.folder = folder
         self.history: list[str] = []
         self.cursor = 0  # wait_for scans from here; send() moves it to the end
@@ -157,7 +157,7 @@ class Server:
         self.log = open(folder / "e2e-console.log", "a", encoding="utf-8")
         self.started = time.monotonic()
         self.proc = subprocess.Popen(
-            [str(JAVA), f"-Xmx{heap}", "-jar", str(jar), "--nogui"],
+            [str(JAVA), *jvm, "-jar", str(jar), "--nogui"],
             cwd=folder, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1)
         threading.Thread(target=self._pump, daemon=True).start()
@@ -238,8 +238,8 @@ class Server:
 class Paper(Server):
     """Paper or Folia (`kind`) for Minecraft `mc`, one of SERVERS."""
 
-    def __init__(self, folder: Path, heap: str = "2G", kind: str = "paper", mc: str = MC):
-        super().__init__(folder, fetch(f"{kind}-{mc}"), heap)
+    def __init__(self, folder: Path, kind: str = "paper", mc: str = MC, jvm: tuple[str, ...] = ("-Xmx2G",)):
+        super().__init__(folder, fetch(f"{kind}-{mc}"), jvm)
 
 
 def get(path: str, timeout: float = 10) -> tuple[int, bytes]:

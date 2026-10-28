@@ -104,6 +104,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   `config/` (fixtures: `work/bluemap/<fx>`).
 - BlueMap renders unlit chunks dark/skips them: worlds written without light need `render_serve.py --relight`.
 - Cross-builds: zig 0.16's clang rejects libdeflate's AVX-512 kernel without `-mevex512` (set per triple in
-  `tools/build_core.py`); a bare `cargo zigbuild` for x86_64 fails without it.
+  `tools/build_core.py`); a bare `cargo zigbuild` for x86_64 fails without it. zig 0.17 rejects the flag: use CI's pin
+  (`ziglang==0.16.0`; testbox: `~/.local/zigenv-016/bin` first on PATH, not `~/.local/zigenv`).
 - `diff-render` compares every face by default. Pass `--inset 16` only when the two renders read different worlds
   (sky light leaks 15 blocks sideways where one world ends).
