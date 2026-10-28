@@ -45,7 +45,13 @@ impl Pack {
     /// An in-memory zip, e.g. a jar nested in another pack.
     pub fn zip(bytes: Arc<[u8]>, origin: Arc<str>) -> Result<Self> {
         let archive = ZipArchive::new(Cursor::new(bytes)).map_err(|e| Error::Pack(format!("{origin}: {e}")))?;
-        let files = archive.file_names().filter(|n| !n.ends_with('/')).map(|n| n.replace('\\', "/")).collect();
+        // an undecodable name can't be looked up by path anyway, so it only drops that entry
+        let files = archive
+            .file_names()
+            .filter_map(|n| n.ok())
+            .filter(|n| !n.ends_with('/'))
+            .map(|n| n.replace('\\', "/"))
+            .collect();
         Ok(Self { source: Source::Zip(Arc::new(ZipSource { archive, files })), prefix: String::new(), origin })
     }
 
