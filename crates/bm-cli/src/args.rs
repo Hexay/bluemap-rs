@@ -67,9 +67,9 @@ impl Args {
 /// [`HELP`] with `bluemap` replaced by `BLUEMAP_COMMAND` when set, as upstream's `getCliCommand` (the Docker image sets it).
 pub fn help() -> String {
     match std::env::var("BLUEMAP_COMMAND") {
-        Ok(cmd) if !cmd.is_empty() => HELP
-            .replacen("usage: bluemap ", &format!("usage: {cmd} "), 1)
-            .replace("\nbluemap ", &format!("\n{cmd} ")),
+        Ok(cmd) if !cmd.is_empty() => {
+            HELP.replacen("usage: bluemap ", &format!("usage: {cmd} "), 1).replace("\nbluemap ", &format!("\n{cmd} "))
+        }
         _ => HELP.to_owned(),
     }
 }
