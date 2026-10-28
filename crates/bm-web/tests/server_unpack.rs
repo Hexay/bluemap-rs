@@ -16,6 +16,12 @@ const ZSTD: (&str, &str) = ("Accept-Encoding", "gzip, deflate, br, zstd");
 const GZIP: (&str, &str) = ("Accept-Encoding", "gzip");
 const LOWRES: &str = "/maps/world/tiles/1/x0/z0.png";
 
+/// Held by the timing tests and the flood: on a small CI runner the flood's 200 connections starve the others.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// [`common::packing_map`] with a tile model of its own, plus a lowres tile.
 fn map(root: &Path, format: Format, quads: u32) -> Arc<dyn MapStorage> {
     let map = FileStorage::open(root.join("maps"), Compression::Gzip, format, false).unwrap().map("world").unwrap();
@@ -150,6 +156,7 @@ fn always_ignores_the_slots() {
 /// waits its turn, none is refused.
 #[test]
 fn one_viewers_burst_queues_instead_of_failing() {
+    let _serial = serial();
     let dir = tempfile::tempdir().unwrap();
     let map = FileStorage::open(dir.path().join("maps"), Compression::Gzip, Format::Optimized, false)
         .unwrap()
@@ -177,6 +184,7 @@ fn one_viewers_burst_queues_instead_of_failing() {
 /// the viewer gets its fair share and all 50 tiles; untrusted, both are one client and the viewer is crowded out.
 #[test]
 fn a_flooding_client_leaves_room_for_another() {
+    let _serial = serial();
     let dir = tempfile::tempdir().unwrap();
     let map = FileStorage::open(dir.path().join("maps"), Compression::Gzip, Format::Optimized, false)
         .unwrap()
@@ -233,6 +241,7 @@ fn a_flooding_client_leaves_room_for_another() {
 /// A queued request gives up at the deadline; with the queue full, the next is refused at once.
 #[test]
 fn the_queue_is_bounded_in_time_and_length() {
+    let _serial = serial();
     let dir = tempfile::tempdir().unwrap();
     let s = serve_queued(map(dir.path(), Format::Optimized, 47), ServerUnpack::Limited, 0, 2, 16);
     std::thread::scope(|scope| {
@@ -255,6 +264,7 @@ fn the_queue_is_bounded_in_time_and_length() {
 /// blocking pool, a flood of refused requests leaves opt-in requests prompt.
 #[test]
 fn refusals_hold_no_blocking_thread() {
+    let _serial = serial();
     let dir = tempfile::tempdir().unwrap();
     let s = serve(map(dir.path(), Format::Optimized, 46), ServerUnpack::Limited, 0);
     let (stop, refused, other) =
