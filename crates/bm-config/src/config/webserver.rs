@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::cidr::IpCidr;
 use crate::de::fields;
 
 /// `webserver.conf` (`WebserverConfig.java`); serializes with Java's field names.
@@ -25,6 +26,9 @@ pub struct WebserverConfig {
     /// bluemap-rs key: packed hires tiles for clients that don't unpack them.
     #[serde(deserialize_with = "server_unpack")]
     pub server_unpack: ServerUnpack,
+    /// bluemap-rs key: peers whose `X-Forwarded-For`/`X-Real-IP` names the client for the `server-unpack` fair
+    /// share (docs/18). Empty: the peer is the client.
+    pub trusted_proxies: Vec<IpCidr>,
 }
 
 /// `server-unpack`: what a client that doesn't unpack gets for a packed hires tile (docs/18).
@@ -73,6 +77,7 @@ impl Default for WebserverConfig {
             map_etags: true,
             client_unpack: true,
             server_unpack: ServerUnpack::default(),
+            trusted_proxies: Vec::new(),
         }
     }
 }

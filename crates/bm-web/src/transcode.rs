@@ -10,7 +10,9 @@ use bm_compress::zstd_bulk;
 use bm_storage::{Compression, MAX_DECODED, Stored, with_unpacked_hires};
 use bytes::Bytes;
 
+use crate::client_key::ClientKey;
 use crate::gate::{Gate, Permit};
+use crate::slots::{SlotPermit, Slots};
 
 /// Room for a few hundred packed hires tiles (~6 KB in, ~70 KB out each) within [`MAX_BYTES`].
 const MAX_ENTRIES: usize = 1024;
@@ -70,16 +72,16 @@ pub(crate) fn decode(stored: &Stored) -> Result<Bytes, bm_compress::Error> {
 }
 
 /// A packed hires tile (`MapStorage::read_hires_packed`) as PRBM in `coding`. Cached by the blob, so a hit skips
-/// unpacking too; identity bodies are too large to be worth keeping. With `slots` the work runs under one of them
-/// instead of the memory gate (they bound it tighter), and a miss that gets none in time is `None`.
+/// unpacking too; identity bodies are too large to be worth keeping. With `slots` the work runs under one of them,
+/// taken for that client, instead of the memory gate (they bound it tighter); a miss that gets none is `None`.
 pub(crate) fn packed(
     blob: &[u8],
     coding: Compression,
-    slots: Option<&Gate>,
+    slots: Option<(&Slots, ClientKey)>,
 ) -> Result<Option<Bytes>, bm_storage::Error> {
     let admit = || match slots {
-        Some(slots) => slots.acquire_bounded(),
-        None => Some(GATE.acquire()),
+        Some((slots, client)) => slots.acquire(client).map(Admitted::Slot),
+        None => Some(Admitted::Gate(GATE.acquire())),
     };
     match coding {
         Compression::None => {
@@ -114,11 +116,18 @@ fn cached<E>(op: Op, input: &[u8], work: impl FnOnce() -> Result<Vec<u8>, E>) ->
     Ok(admitted(op, input, || Some(GATE.acquire()), work)?.expect("the gate admits everyone eventually"))
 }
 
+/// What `work` runs under; held only for its drop.
+#[allow(dead_code)]
+enum Admitted<'g> {
+    Gate(Permit<'g>),
+    Slot(SlotPermit<'g>),
+}
+
 /// [`cached`], with `work` run only once `admit` hands out a permit; `None` when it doesn't.
-fn admitted<'g, E>(
+fn admitted<P, E>(
     op: Op,
     input: &[u8],
-    admit: impl FnOnce() -> Option<Permit<'g>>,
+    admit: impl FnOnce() -> Option<P>,
     work: impl FnOnce() -> Result<Vec<u8>, E>,
 ) -> Result<Option<Bytes>, E> {
     let fingerprint = fingerprint(input);

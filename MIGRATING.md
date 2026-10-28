@@ -110,6 +110,9 @@ format: optimized
   bluemap-rs too) or `server-unpack: always`. To turn the script off for everyone set `client-unpack: false`; a
   single viewer can run `localStorage.setItem("bluemap-rs-client-unpack", "off")` in the browser console
   ([docs/18](docs/18-client-unpack.md)).
+- The queue is shared fairly per client address. Behind a reverse proxy, list it in `webserver.conf`
+  `trusted-proxies` (e.g. `["127.0.0.1"]`) so clients are told apart by `X-Forwarded-For`; unset, all of them
+  count as one client, as before. Rate limits for floods belong in the proxy ([docs/reverse-proxy.md](docs/reverse-proxy.md)).
 - A storage records its own format, and a config that disagrees with it is refused rather than guessed.
   Converting is a separate step. Stop BlueMap first, then:
 

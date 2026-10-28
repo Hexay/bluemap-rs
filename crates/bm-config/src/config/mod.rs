@@ -1,5 +1,6 @@
 //! Typed config files with BlueMap's keys (kebab-case), Java field defaults and hidden keys.
 
+mod cidr;
 mod core;
 mod map;
 mod mask;
@@ -8,6 +9,7 @@ mod storage;
 mod webapp;
 mod webserver;
 
+pub use cidr::{IpCidr, IpCidrError};
 pub use core::{CoreConfig, LogConfig};
 pub(crate) use map::LEGACY_MESSAGE;
 pub use map::MapConfig;

@@ -1,13 +1,16 @@
 //! `maps/<id>/…`: `MapRequestHandler` (live routes) in front of `MapStorageRequestHandler` (tiles and items).
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::body::Body;
+use bm_config::IpCidr;
 use bm_storage::{GridKey, ItemKey, MapStorage};
 use http::header::{CONTENT_ENCODING, CONTENT_TYPE, ETAG, RETRY_AFTER, VARY};
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::sync::CancellationToken;
 
+use crate::client_key::ClientKey;
 use crate::encoding::Accepted;
 use crate::live::LiveMap;
 use crate::map_data::{self, Reply, ServerUnpackPolicy, Target};
@@ -27,6 +30,7 @@ pub(crate) struct Serving {
     pub etags: bool,
     pub client_unpack: bool,
     pub server_unpack: Arc<ServerUnpackPolicy>,
+    pub trusted_proxies: Vec<IpCidr>,
 }
 
 const NO_STORE: [&str; 4] = ["Cache-Control", "Cloudflare-CDN-Cache-Control", "CDN-Cache-Control", "Surrogate-Control"];
@@ -38,6 +42,7 @@ pub(crate) async fn handle(
     path: &str,
     method: &Method,
     headers: &HeaderMap,
+    peer: Option<IpAddr>,
     serving: &Serving,
     shutdown: &CancellationToken,
 ) -> Response<Body> {
@@ -49,7 +54,7 @@ pub(crate) async fn handle(
             _ => {}
         }
     }
-    storage(route, path, method, headers, serving).await
+    storage(route, path, method, headers, peer, serving).await
 }
 
 fn live_json(body: Option<bytes::Bytes>) -> Response<Body> {
@@ -88,6 +93,7 @@ async fn storage(
     path: &str,
     method: &Method,
     headers: &HeaderMap,
+    peer: Option<IpAddr>,
     serving: &Serving,
 ) -> Response<Body> {
     let path = path.strip_prefix('/').unwrap_or(path);
@@ -119,6 +125,7 @@ async fn storage(
         etags: serving.etags,
         unpacks: serving.client_unpack.then(|| client_unpack::requested(headers)),
         server_unpack: serving.server_unpack.clone(),
+        client: ClientKey::of(peer, headers, &serving.trusted_proxies),
     };
     let storage = route.storage.clone();
     match tokio::task::spawn_blocking(move || map_data::serve(storage.as_ref(), req)).await {

@@ -7,10 +7,11 @@ use bm_config::ServerUnpack;
 use bm_storage::{Compression, GridKey, ItemKey, MapStorage, Tile, Version};
 use http::HeaderValue;
 
+use crate::client_key::ClientKey;
 use crate::client_unpack::{Asked, Form};
 use crate::content_type::OCTET_STREAM;
 use crate::encoding::{Accepted, Encoded, body_coding, encode, packed_coding};
-use crate::gate::Gate;
+use crate::slots::Slots;
 use crate::transcode;
 use crate::validators::{IfNoneMatch, etag};
 
@@ -31,12 +32,14 @@ pub(crate) struct Request {
     /// asked for.
     pub unpacks: Option<Asked>,
     pub server_unpack: Arc<ServerUnpackPolicy>,
+    /// Whose share of the `server-unpack` slots this request takes.
+    pub client: ClientKey,
 }
 
 /// `server-unpack` and, for the modes that use them, its slots.
 pub(crate) struct ServerUnpackPolicy {
     pub mode: ServerUnpack,
-    pub slots: Gate,
+    pub slots: Slots,
 }
 
 pub(crate) enum Reply {
@@ -117,7 +120,7 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
             _ if unpacks => None,
             ServerUnpack::Never if model => return Ok(Reply::NotAcceptable),
             ServerUnpack::Always => None,
-            ServerUnpack::Limited | ServerUnpack::Never => Some(&req.server_unpack.slots),
+            ServerUnpack::Limited | ServerUnpack::Never => Some((&req.server_unpack.slots, req.client)),
         };
         let Some(body) = transcode::packed(&blob, coding, slots)? else { return Ok(Reply::Busy) };
         let encoded = Encoded { body, content_encoding };

@@ -41,16 +41,44 @@ pub fn get(addr: SocketAddr, target: &str, headers: &[(&str, &str)]) -> Reply {
 }
 
 pub fn request(addr: SocketAddr, method: &str, target: &str, headers: &[(&str, &str)]) -> Reply {
-    let mut s = TcpStream::connect(addr).expect("connect");
+    let mut s = connect(addr);
+    send(&mut s, addr, method, target, &[&[("Connection", "close")], headers].concat());
+    let raw = read_response(&mut s, method == "HEAD");
+    parse(&raw, method == "HEAD")
+}
+
+/// A keep-alive connection, one `GET` at a time (a flood without a TCP handshake per request).
+pub struct Conn(TcpStream, SocketAddr);
+
+impl Conn {
+    pub fn open(addr: SocketAddr) -> Self {
+        Self(connect(addr), addr)
+    }
+
+    /// Reconnects first if the server closed the connection.
+    pub fn get(&mut self, target: &str, headers: &[(&str, &str)]) -> Reply {
+        send(&mut self.0, self.1, "GET", target, headers);
+        let reply = parse(&read_response(&mut self.0, false), false);
+        if reply.header("connection").is_some_and(|v| v.eq_ignore_ascii_case("close")) || reply.status == 0 {
+            self.0 = connect(self.1);
+        }
+        reply
+    }
+}
+
+fn connect(addr: SocketAddr) -> TcpStream {
+    let s = TcpStream::connect(addr).expect("connect");
     s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-    let mut req = format!("{method} {target} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n");
+    s
+}
+
+fn send(s: &mut TcpStream, addr: SocketAddr, method: &str, target: &str, headers: &[(&str, &str)]) {
+    let mut req = format!("{method} {target} HTTP/1.1\r\nHost: {addr}\r\n");
     for (k, v) in headers {
         req.push_str(&format!("{k}: {v}\r\n"));
     }
     req.push_str("\r\n");
     s.write_all(req.as_bytes()).unwrap();
-    let raw = read_response(&mut s, method == "HEAD");
-    parse(&raw, method == "HEAD")
 }
 
 /// Reads one response by its framing: Java ignores `Connection: close`, so EOF never comes.
