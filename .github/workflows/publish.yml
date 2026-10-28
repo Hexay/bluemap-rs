@@ -1,0 +1,57 @@
+name: Publish
+
+# Uploads a published GitHub release's universal jars to Modrinth (Paper + Fabric) and Hangar (Paper) via
+# tools/publish.py; setup and secrets: docs/release-publishing.md. Versions already there are skipped, so re-runs are safe.
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to (re-)publish, e.g. v0.3.0
+        type: string
+        required: true
+
+concurrency:
+  group: publish-${{ inputs.tag || github.event.release.tag_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # CHANGELOG.md and the script come from this checkout, not the tag: older tags predate tools/publish.py
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Hangar links the release's asset, which 404s while the release is a draft; drafts are also unreviewed
+      - id: release
+        run: |
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft -q .isDraft | grep -qx false; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "::error::no published release $TAG"
+            exit 1
+          else
+            echo "::notice::$TAG is not a published release (still a draft?); publish it to trigger this workflow"
+          fi
+      - if: steps.release.outputs.published
+        run: gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'bluemap-rs-*-universal.jar' -D jars
+      - if: steps.release.outputs.published
+        run: python tools/publish.py --tag "$TAG" --jars jars
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+          MODRINTH_PROJECT_ID: ${{ vars.MODRINTH_PROJECT_ID }}
+          HANGAR_TOKEN: ${{ secrets.HANGAR_TOKEN }}
+          HANGAR_PROJECT: ${{ vars.HANGAR_PROJECT }}

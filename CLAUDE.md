@@ -81,6 +81,8 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   a Fabric addon): `py -3 tools/e2e_fabric.py` (same flags)
 - Third-party notices for releases (cargo-about + `licenses/BUNDLED.txt`; update that file when the webapp, shaded
   jars or bundled C libraries change): `py -3 tools/notices.py`
+- Modrinth/Hangar publishing (`publish.yml` on release publish; setup: `docs/release-publishing.md`):
+  `py -3 tools/publish.py --tag <tag> --jars <dir> --dry-run`
 - Plugin cores per target (musl via cargo-zigbuild + `pip install ziglang cargo-zigbuild`) + jars, same as CI:
   `py -3 tools/build_core.py [windows-x64 linux-x64 linux-arm64 linux-armv7 …] [--jars]`
 
