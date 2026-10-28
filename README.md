@@ -7,7 +7,7 @@ A Rust reimplementation of [BlueMap](https://github.com/BlueMap-Minecraft/BlueMa
 built as a **drop-in replacement for BlueMap 5.29**. Keep your configs, rendered maps, web setup, commands and marker
 plugins; get the same map for a fraction of the CPU and memory.
 
-> **Status: beta.** Builds are pre-releases. Not affiliated with the BlueMap project.
+> **Status: beta.** Not affiliated with the BlueMap project.
 
 ## Why
 
@@ -21,8 +21,8 @@ On a 4096×4096-block world (100 region files), a full render from scratch, same
 
 - **23× faster, 27× less CPU, 30% of the memory** (medians of 3 runs). Re-rendering after edits to 6 region files:
   0.97 s and 3.4 CPU-seconds, against Java's 4.3 s and 45 CPU-seconds.
-- **Cheaper to serve.** On the same compat map, the webserver uses 5–33× less CPU per tile than Java's and a third
-  of its memory. A page reload revalidates instead of downloading the view again: 13 KB against 5.8 MB
+- **Cheaper to serve.** For a hires tile nobody requested recently, the webserver uses 5–20× less CPU than Java's on
+  the same compat map, 13–32× less with `optimized` storage, and under half its memory. A page reload revalidates instead of downloading the view again: 13 KB against 5.8 MB
   ([docs/results](docs/results/devbox-web-java-vs-rs-2026-10-28.md)).
 - **The same map.** Hires tiles are byte-identical to Java's after decompression; render state and JSON are identical.
   The one lowres difference on that world is a hole in Java's output that bluemap-rs doesn't have
@@ -46,8 +46,8 @@ Same world and machine; the better value in each row is bold:
 | Render, CPU time | 2.7 min | **2.3 min** |
 | Size on disk | 1,576 MiB in 16,865 files | **130 MiB in 387 files** |
 | Serve a hires tile (server CPU) | 0.03 ms | **0.02 ms** ¹ |
-| Bytes sent per hires tile | 96 KB | **7 KB** ¹ |
-| Hires tiles served per second | 150,000 | **328,000** ¹ |
+| Bytes sent per hires tile | 94 KB | **7 KB** ¹ |
+| Hires tiles served per second | 153,000 | **381,000** ¹ |
 | Can be served by | **bluemap-rs, Java BlueMap, nginx, `sql.php`** | bluemap-rs only |
 
 ¹ With bluemap-rs's webserver, which has the browser unpack optimized tiles itself
