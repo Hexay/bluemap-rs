@@ -3,7 +3,7 @@
 Versions follow `<crate version>`; the plugin and mod jars report `<BlueMap version>+rs.<crate version>`, the
 BlueMap version they replace.
 
-## Unreleased
+## 0.3.1 — 2026-10-28
 
 - `optimized` storage, serving: browsers without zstd as a content coding (Safari before 26.3, Safari 26 on macOS
   before Tahoe, clients behind proxies that strip it) now get the stored zstd frame too, and the client script
@@ -14,6 +14,9 @@ BlueMap version they replace.
   client when another floods), and new `webserver.conf` setting `trusted-proxies` takes the client from
   `X-Forwarded-For`/`X-Real-IP` behind a reverse proxy. A viewer without the script loading a view next to a
   600-connection flood went from 16 of 65 tiles to 65 of 65 (docs/18, docs/reverse-proxy.md).
+- Releases: tags without a `-rc` style suffix are full releases (shown as the repo's Latest); the Docker image is
+  smoke-tested on amd64 and arm64 after each release; Modrinth/Hangar publishing on release
+  (`docs/release-publishing.md`).
 
 ## 0.3.0 — 2026-10-28
 
