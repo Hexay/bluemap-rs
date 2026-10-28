@@ -60,7 +60,7 @@ class Release:
 
 
 def channel(tag: str) -> str:
-    """release.yml's PRERELEASE split in two: `-suffix` tags are alpha, other 0.x tags beta."""
+    """`-suffix` tags (release.yml's PRERELEASE) are alpha; other 0.x tags beta, as mod sites label pre-1.0 versions."""
     if "-" in tag:
         return "alpha"
     return "beta" if tag.startswith("v0.") else "release"

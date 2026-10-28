@@ -137,3 +137,86 @@ MSYS_NO_PATHCONV=1 BM_TESTBOX=devbox py -3 tools/testbox.py run devbench --lock 
 - The scripts must be in the remote checkout: sync it, or copy them there.
 - Raw rows go to `~/jvr-web/rows.jsonl`. This run's are kept as `~/jvr-web/rows-final.jsonl` on the devbox. About
   15 min.
+
+## Distinct hires tiles: compat and optimized, warm and cold page cache
+
+Same box, client and per-row method as above (restart, 3 s warmup at 32 conns, 3 s idle, measure; 3 runs
+interleaved, order flipped per run), `docs/perf-exp/devbox_web_distinct.sh`, bluemap-rs `637daab` (0.3.0), Java 5.28.
+
+- **Webroots:** Java and ours compat both serve `work/real/j12` (the same files). Ours optimized serves `work/real/d12-opt`
+  (the same map rendered by us with `format: optimized`: 387 files, 130 MiB). Header `Accept-Encoding: gzip, deflate,
+  br, zstd` everywhere. The unpacking client adds `Accept: application/vnd.bluemap.bmq3, */*`, as `unpack.js` does.
+  "No script" means optimized storage with no opt-in (`server-unpack` default `limited`, 4 slots).
+- **Tiles:** the shuffled 16,641 are split into 1,000 for the warmup and 15,641 measured, so no measured tile was
+  requested before in that server's life.
+- **Warm:** webroot read into page cache before measuring, then closed loop for 5 s. Compat and opt-in zstd have no
+  per-tile cache in either server, so wrapping the list only re-reads page cache. The no-script rows take each tile
+  once (`load_bench --once`), because repeats would hit the transcode cache.
+- **Cold:** after the warmup, every file under the server's `web/maps` dropped with `posix_fadvise(DONTNEED)`
+  (`fincore` afterwards: 0.0 MiB resident in every run), then each of the 15,641 tiles once (`--once`; Java at 1 conn: the
+  first 1,500). Bundle indexes ours loaded during the warmup stay in process memory.
+- **Load:** other users kept 1.34 / 1.45 / 1.34 CPUs busy before the runs, 1.55 after. The 1-minute load average,
+  ours included, was 5.5–11.4. ~18 min.
+
+| cache | conns | server | tiles/s | p50 | p99 | CPU ms/tile | KB/tile | peak RSS MB |
+|---|---:|---|---:|---:|---:|---:|---:|---:|
+| warm | 1 | Java compat | 37 | 40.6 ms | 42.0 ms | 0.65 (0.59–0.71) | (sample) | 178 |
+| | | ours compat | 29,520 | 28 µs | 102 µs | 0.033 | 94.1 | 89 |
+| | | ours optimized, unpacks | 52,240 | 18 µs | 29 µs | **0.020** | **7.2** | 26 |
+| | | ours optimized, no script | 558 | 1.2 ms | 8.9 ms | 1.79 | 96.5 | 552 |
+| warm | 32 | Java compat | 1,016 | 41.0 ms | 42.0 ms | 0.32 | 92.2 | 333 |
+| | | ours compat | 152,678 (141–162k) | 173 µs | 680 µs | 0.067 | 94.3 | 95 |
+| | | ours optimized, unpacks | **380,754** (363–407k) | 67 µs | 264 µs | **0.025** | **7.3** | 28 |
+| | | ours optimized, no script | 2,103 | 14.7 ms | 27.5 ms | 1.97 | 96.5 | 573 |
+| warm | 512 | Java compat | 54,060 (17–66k) | 476 µs | 42.9 ms | 0.132 | 96.0 | 699 |
+| | | ours compat | 80,210 (77–87k) | 5.5 ms | 19.0 ms | 0.113 | 94.2 | 162 |
+| | | ours optimized, unpacks | **300,614** (260–309k) | 1.4 ms | 5.6 ms | **0.030** | **7.2** | 55 |
+| cold | 1 | Java compat | 35 | 41.0 ms | 42.3 ms | 0.58 | 88.6 | 228 |
+| | | ours compat | 5,211 | 181 µs | 392 µs | 0.059 | 94.3 | 86 |
+| | | ours optimized, unpacks | 12,637 | 32 µs | 203 µs | **0.027** | **7.3** | 25 |
+| | | ours optimized, no script | 538 | 1.3 ms | 9.0 ms | 1.80 | 96.5 | 558 |
+| cold | 32 | Java compat | 969 | 41.0 ms | 42.1 ms | 0.19 | 94.3 | 529 |
+| | | ours compat | 72,714 (70–79k) | 366 µs | 1.0 ms | 0.079 | 94.3 | 91 |
+| | | ours optimized, unpacks | **187,268** (56–205k) | 128 µs | 1.4 ms | **0.029** | **7.3** | 27 |
+| | | ours optimized, no script | 2,099 | 14.6 ms | 27.4 ms | 1.98 | 96.5 | 572 |
+| cold | 512 | Java compat | 4,910 ¹ | 41.0 ms | 52.7 ms | 0.19 | 94.3 | 559 |
+| | | ours compat | 52,289 | 6.4 ms | 28.9 ms | 0.172 | 94.3 | 125 |
+| | | ours optimized, unpacks | **194,470** | 1.4 ms | 8.8 ms | **0.035** | **7.3** | 45 |
+
+¹ Not a disk effect: with `--once` each of the 512 connections makes ~30 requests, and Java's p50 stays at the
+41 ms stall. Java only drops the stall under sustained load (warm 512 closed loop: p50 476 µs). Cold Java at 512 has
+no like-for-like number.
+
+KB/tile is body bytes. The cold rows cover the same 15,641 tiles for every server, so both compat servers send the
+same 94.3 KB. Java's warm KB is a sample of whatever tiles it reached. 2 failed connects per 512-conn run on all three
+servers, none elsewhere.
+
+Findings:
+
+1. **Optimized with the unpacking client is the cheapest path in every row:**
+   - 0.020–0.035 ms CPU and 7.3 KB per tile, warm or cold.
+   - Against ours compat: 2.5× the throughput at 32 conns warm, 3.7× at 512 warm, 2.6× at 32 cold.
+   - Against Java compat at 512 warm, the only Java row not bound by the stall: 5.6× the throughput at 4.4× less CPU
+     per tile.
+2. **Cold costs ours compat the most.** At 32 conns it drops from 153k to 73k tiles/s, and CPU rises 0.067 → 0.079 ms.
+   Every tile is a 94 KB file read from NVMe. Optimized reads ~7 KB from a bundle: 381k → 187k (one run 56k, cause not
+   traced), CPU 0.025 → 0.029. Java's 1–32 conn rows don't move, because they are bound by
+   the stall.
+3. **CPU per tile, Java ÷ ours:**
+   - compat: 20× at 1 conn, 4.8× at 32, 1.2× at 512 (warm). Cold: 10× at 1 and 2.4× at 32.
+   - optimized with the unpacking client: 32×, 13× and 4.4×.
+4. **Without the script, optimized costs 1.8–2.0 ms per tile and ~570 MB RSS** (rebuilt PRBM in flight plus the
+   transcode cache). Throughput is capped by the 4 unpack slots: 2.1k tiles/s at 32 conns, the same warm and cold.
+   That is still 2× Java's stall-bound 32-conn rate, but this is the path to avoid.
+5. **Memory:** Java 178–333 MB at 1–32 conns warm (529 cold, 699 at 512). Ours compat 86–162 MB, optimized with
+   unpacking 25–55 MB.
+
+Reproduce (needs `target/release/bluemap` and `target/profiling/examples/load_bench`; raw rows in
+`~/jvr-distinct/rows.jsonl`, kept on the devbox):
+
+```
+MSYS_NO_PATHCONV=1 BM_TESTBOX=devbox py -3 tools/testbox.py run devbench --lock --detach --job distinct -- \
+  bash docs/perf-exp/devbox_web_distinct.sh '~/bmrs-devbench' '~/bmrs-devbench/work/real/j12' \
+  '~/bmrs-devbench/work/real/d12-opt' '~/bmrs-devbench/work/downloads/jdk25/bin/java' \
+  '~/bmrs-devbench/work/downloads/bluemap-5.28-cli.jar' 3 5
+```

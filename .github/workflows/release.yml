@@ -12,7 +12,8 @@ env:
   CARGO_TERM_COLOR: always
   ZIGLANG: ziglang==0.16.0
   CARGO_ZIGBUILD: cargo-zigbuild==0.23.4
-  PRERELEASE: ${{ startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-') }}
+  # only -rc style tags: a pre-release never shows as the repo's "Latest" release
+  PRERELEASE: ${{ contains(github.ref_name, '-') }}
   IMAGE: ghcr.io/hexay/bluemap-rs
 
 jobs:
@@ -166,8 +167,7 @@ jobs:
       - id: tags
         run: |
           tags="$IMAGE:${GITHUB_REF_NAME#v}"
-          # every 0.x release is a pre-release but the newest one is still what `:latest` users want; only -rc tags skip it
-          case "$GITHUB_REF_NAME" in *-*) ;; *) tags="$tags,$IMAGE:latest" ;; esac
+          if [ "$PRERELEASE" != true ]; then tags="$tags,$IMAGE:latest"; fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
