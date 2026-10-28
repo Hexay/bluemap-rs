@@ -23,6 +23,18 @@ Replace `java -jar bluemap-cli.jar …` with `bluemap …`. Run it from the same
 config paths are relative to the working directory. `bluemap --version` prints the BlueMap version it is a drop-in
 for, then its own version.
 
+Docker: change only the image. Mounts (`/app/config`, `/app/world`, `/app/data`, `/app/web`), arguments (`-r -u
+-w`), port 8100 and `--user` stay as they are.
+
+```diff
+-    image: ghcr.io/bluemap-minecraft/bluemap:v5.29
++    image: ghcr.io/hexay/bluemap-rs:0.2.0
+```
+
+Tags are bluemap-rs versions (`0.2.0`) and `latest` for stable releases. The image has no Java: an `entrypoint`
+override that ran `java -jar cli.jar` with JVM flags becomes `bluemap` (cap memory with `memory-limit` in
+`core.conf` instead of `-Xmx`).
+
 New: a forced render (`-f`) stopped with Ctrl+C resumes where it left off the next time you run `-f`. Add
 `--restart` to start over.
 
