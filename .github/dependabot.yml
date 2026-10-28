@@ -23,3 +23,6 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    # v6's caching is proprietary; Gradle caching comes from setup-java's `cache: gradle`
+    ignore:
+      - dependency-name: "gradle/actions"
