@@ -10,7 +10,8 @@ use http::HeaderValue;
 use crate::client_unpack;
 use crate::content_type::OCTET_STREAM;
 use crate::encoding::{Accepted, Encoded, body_coding, encode, packed_coding};
-use crate::transcode::{self, Gate};
+use crate::gate::Gate;
+use crate::transcode;
 use crate::validators::{IfNoneMatch, etag};
 
 pub(crate) enum Target {

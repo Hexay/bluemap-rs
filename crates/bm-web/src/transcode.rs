@@ -4,11 +4,13 @@
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use bm_compress::zstd_bulk;
 use bm_storage::{Compression, MAX_DECODED, Stored, with_unpacked_hires};
 use bytes::Bytes;
+
+use crate::gate::{Gate, Permit};
 
 /// Room for a few hundred packed hires tiles (~6 KB in, ~70 KB out each) within [`MAX_BYTES`].
 const MAX_ENTRIES: usize = 1024;
@@ -69,14 +71,14 @@ pub(crate) fn decode(stored: &Stored) -> Result<Bytes, bm_compress::Error> {
 
 /// A packed hires tile (`MapStorage::read_hires_packed`) as PRBM in `coding`. Cached by the blob, so a hit skips
 /// unpacking too; identity bodies are too large to be worth keeping. With `slots` the work runs under one of them
-/// instead of the memory gate (they bound it tighter), and a miss with none free is `None`.
+/// instead of the memory gate (they bound it tighter), and a miss that gets none in time is `None`.
 pub(crate) fn packed(
     blob: &[u8],
     coding: Compression,
     slots: Option<&Gate>,
 ) -> Result<Option<Bytes>, bm_storage::Error> {
     let admit = || match slots {
-        Some(slots) => slots.try_acquire(),
+        Some(slots) => slots.acquire_bounded(),
         None => Some(GATE.acquire()),
     };
     match coding {
@@ -176,45 +178,5 @@ fn insert(key: (Op, u64), mut entry: Entry) {
     while cache.entries.len() > MAX_ENTRIES || (cache.bytes > MAX_BYTES && cache.entries.len() > 1) {
         let oldest = *cache.entries.iter().min_by_key(|(_, e)| e.used).expect("non-empty").0;
         cache.bytes -= cache.entries.remove(&oldest).map_or(0, |e| size(&e));
-    }
-}
-
-/// A counting semaphore for blocking-pool threads.
-pub(crate) struct Gate {
-    busy: Mutex<usize>,
-    freed: Condvar,
-    limit: usize,
-}
-
-pub(crate) struct Permit<'a>(&'a Gate);
-
-impl Gate {
-    pub(crate) fn new(limit: usize) -> Self {
-        Self { busy: Mutex::new(0), freed: Condvar::new(), limit }
-    }
-
-    /// Never waits: `None` when all permits are out.
-    pub(crate) fn try_acquire(&self) -> Option<Permit<'_>> {
-        let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
-        (*busy < self.limit).then(|| {
-            *busy += 1;
-            Permit(self)
-        })
-    }
-
-    fn acquire(&self) -> Permit<'_> {
-        let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
-        while *busy >= self.limit {
-            busy = self.freed.wait(busy).unwrap_or_else(|e| e.into_inner());
-        }
-        *busy += 1;
-        Permit(self)
-    }
-}
-
-impl Drop for Permit<'_> {
-    fn drop(&mut self) {
-        *self.0.busy.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
-        self.0.freed.notify_one();
     }
 }

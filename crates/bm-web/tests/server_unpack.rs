@@ -25,12 +25,23 @@ fn map(root: &Path, format: Format, quads: u32) -> Arc<dyn MapStorage> {
     map
 }
 
+/// `slots` with no queue (a refusal is immediate), on a 4-thread blocking pool.
 fn serve(storage: Arc<dyn MapStorage>, mode: ServerUnpack, slots: usize) -> Served {
+    serve_queued(storage, mode, slots, 0, 4)
+}
+
+fn serve_queued(
+    storage: Arc<dyn MapStorage>,
+    mode: ServerUnpack,
+    slots: usize,
+    queue: usize,
+    threads: usize,
+) -> Served {
     let mut options = WebOptions::new(std::env::temp_dir().join("bm-web-no-webroot"));
-    (options.server_unpack, options.server_unpack_slots) = (mode, slots);
+    (options.server_unpack, options.server_unpack_slots, options.server_unpack_queue) = (mode, slots, queue);
     let mut app = WebApp::new(options).unwrap();
     app.add_map("world", MapRoute { storage, live: None }).unwrap();
-    Served::start_with_blocking_threads(app, 4)
+    Served::start_with_blocking_threads(app, threads)
 }
 
 fn assert_busy(r: &Reply) {
@@ -46,6 +57,7 @@ fn limited_is_the_default_and_unpacks_while_a_slot_is_free() {
     assert_eq!(options.server_unpack, ServerUnpack::Limited);
     let cores = std::thread::available_parallelism().map_or(4, usize::from);
     assert_eq!(options.server_unpack_slots, (cores / 4).max(1));
+    assert_eq!(options.server_unpack_queue, (64 * options.server_unpack_slots).min(256));
 
     let dir = tempfile::tempdir().unwrap();
     let s = serve(map(dir.path(), Format::Optimized, 41), ServerUnpack::Limited, 1);
@@ -121,8 +133,53 @@ fn always_ignores_the_slots() {
     }
 }
 
-/// A refused request must not wait for a slot on a blocking thread: with every slot taken and a 4-thread blocking
-/// pool, a flood of refused requests leaves opt-in requests prompt.
+/// A view load from one viewer without the script (49 distinct hires tiles at once) on a single slot: every tile
+/// waits its turn, none is refused.
+#[test]
+fn one_viewers_burst_queues_instead_of_failing() {
+    let dir = tempfile::tempdir().unwrap();
+    let map = FileStorage::open(dir.path().join("maps"), Compression::Gzip, Format::Optimized, false)
+        .unwrap()
+        .map("world")
+        .unwrap();
+    let tiles: Vec<(i32, i32)> = (-3..4).flat_map(|x| (-3..4).map(move |z| (x, z))).collect();
+    for (i, &tile) in tiles.iter().enumerate() {
+        map.write_grid(GridKey::Hires, tile, &prbm_of(100 + i as u32)).unwrap();
+    }
+    let s = serve_queued(map, ServerUnpack::Limited, 1, 64, 512);
+    let replies: Vec<Reply> = std::thread::scope(|scope| {
+        let reqs: Vec<_> = tiles
+            .iter()
+            .map(|&(x, z)| scope.spawn(move || get(s.addr, &format!("/maps/world/tiles/0/x{x}/z{z}.prbm"), &[GZIP])))
+            .collect();
+        reqs.into_iter().map(|r| r.join().unwrap()).collect()
+    });
+    for (i, r) in replies.iter().enumerate() {
+        assert!((r.status, r.decoded()) == (200, prbm_of(100 + i as u32)), "tile {i}: {}", r.status);
+    }
+}
+
+/// A queued request gives up at the deadline; with the queue full, the next is refused at once.
+#[test]
+fn the_queue_is_bounded_in_time_and_length() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = serve_queued(map(dir.path(), Format::Optimized, 47), ServerUnpack::Limited, 0, 2, 16);
+    std::thread::scope(|scope| {
+        let t = Instant::now();
+        let waiters: Vec<_> = (0..2).map(|_| scope.spawn(|| get(s.addr, TILE, &[ZSTD]))).collect();
+        std::thread::sleep(Duration::from_millis(150));
+        let refused = get(s.addr, TILE, &[ZSTD]);
+        assert_busy(&refused);
+        assert!(t.elapsed() < bm_web::SERVER_UNPACK_WAIT, "refused before the waiters gave up");
+        for w in waiters {
+            assert_busy(&w.join().unwrap());
+        }
+        assert!(t.elapsed() >= bm_web::SERVER_UNPACK_WAIT);
+    });
+}
+
+/// A refused request must not wait for a slot on a blocking thread: with every slot taken, no queue and a 4-thread
+/// blocking pool, a flood of refused requests leaves opt-in requests prompt.
 #[test]
 fn refusals_hold_no_blocking_thread() {
     let dir = tempfile::tempdir().unwrap();

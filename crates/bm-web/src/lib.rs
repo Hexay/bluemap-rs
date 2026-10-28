@@ -20,6 +20,7 @@ mod client_unpack;
 mod content_type;
 mod encoding;
 mod error;
+mod gate;
 mod http_date;
 mod javafmt;
 mod live;
@@ -36,7 +37,7 @@ mod validators;
 mod webapp;
 
 pub use access_log::{AccessLog, FileSink, Level, LogSink, RequestInfo, StdoutSink, java_host_address};
-pub use app::{WebApp, WebOptions};
+pub use app::{SERVER_UNPACK_WAIT, WebApp, WebOptions};
 pub use bm_config::ServerUnpack;
 pub use error::WebError;
 pub use javafmt::{Arg, FormatError, JavaFormat};

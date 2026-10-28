@@ -1,7 +1,7 @@
 //! Serves an existing BlueMap webroot (every `maps/<id>` as gzip file storage) for load tests and profiling.
 //!
 //! `cargo run -p bm-web --profile profiling --example serve_bench -- <webroot> [--port 8100] [--live] [--log <file>]
-//! [--exit-after <secs>] [--etags] [--optimized] [--server-unpack limited|never|always]`
+//! [--exit-after <secs>] [--etags] [--optimized] [--server-unpack limited|never|always] [--slots N]`
 //!
 //! `--etags` sends map-data ETags; `--optimized` opens the maps as an optimized storage (convert a copy first);
 //! `--server-unpack` defaults to `always`, so the serve benchmarks measure the transcode itself.
@@ -98,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webroot = PathBuf::from(args.next().ok_or("usage: serve_bench <webroot> …")?);
     let (mut port, mut live, mut log, mut exit_after) = (8100, false, None::<String>, None::<u64>);
     let (mut etags, mut format, mut server_unpack) = (false, Format::Compat, ServerUnpack::Always);
+    let mut slots = None::<usize>;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--port" => port = args.next().unwrap_or_default().parse()?,
@@ -105,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--live" => live = true,
             "--etags" => etags = true,
             "--optimized" => format = Format::Optimized,
+            "--slots" => slots = Some(args.next().unwrap_or_default().parse()?),
             "--server-unpack" => {
                 server_unpack = match args.next().unwrap_or_default().as_str() {
                     "limited" => ServerUnpack::Limited,
@@ -120,6 +122,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut options = WebOptions::new(&webroot);
     options.map_etags = etags;
     options.server_unpack = server_unpack;
+    if let Some(n) = slots {
+        options = options.with_server_unpack_slots(n);
+    }
     if let Some(file) = log {
         let sinks: Vec<Box<dyn LogSink>> = vec![Box::new(FileSink::open(&file, false)?)];
         options.access_log = AccessLog::new("%1$s \"%3$s %4$s %5$s\" %6$s %7$s", sinks)?;

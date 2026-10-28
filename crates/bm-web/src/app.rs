@@ -20,13 +20,14 @@ use bm_config::ServerUnpack;
 
 use crate::WebError;
 use crate::access_log::{AccessLog, FileSink, LogSink, RequestInfo, StdoutSink};
+use crate::gate::Gate;
 use crate::map_data::ServerUnpackPolicy;
 use crate::map_handler::{self, MapRoute, Serving};
 use crate::paths::{decode_path, java_query_string};
 use crate::registry::MapRegistry;
 use crate::response::{ExtraHeaders, finish, status_message};
 use crate::static_files::StaticFiles;
-use crate::transcode::{self, Gate};
+use crate::transcode;
 use crate::webapp::WEBAPP_VERSION;
 
 /// Requests never need a body; anything bigger is refused before it is read (#828).
@@ -54,9 +55,22 @@ pub struct WebOptions {
     pub server_unpack: ServerUnpack,
     /// How many of those unpacks may run at once under [`ServerUnpack::Limited`].
     pub server_unpack_slots: usize,
+    /// How many more may wait for a slot, each up to [`SERVER_UNPACK_WAIT`], before the rest get `503`.
+    pub server_unpack_queue: usize,
 }
 
+/// Longest a server-side unpack waits for a slot (docs/18).
+pub const SERVER_UNPACK_WAIT: Duration = Duration::from_millis(500);
+/// Waiters hold a blocking-pool thread each: at most half of tokio's default 512 (docs/18).
+const MAX_SERVER_UNPACK_QUEUE: usize = 256;
+
 impl WebOptions {
+    /// `slots` server-unpack slots and the queue that goes with them.
+    pub fn with_server_unpack_slots(self, slots: usize) -> Self {
+        let queue = (64 * slots).min(MAX_SERVER_UNPACK_QUEUE);
+        Self { server_unpack_slots: slots, server_unpack_queue: queue, ..self }
+    }
+
     pub fn new(webroot: impl Into<PathBuf>) -> Self {
         Self {
             webroot: webroot.into(),
@@ -67,8 +81,10 @@ impl WebOptions {
             map_etags: true,
             client_unpack: true,
             server_unpack: ServerUnpack::default(),
-            server_unpack_slots: (transcode::cores() / 4).max(1),
+            server_unpack_slots: 0,
+            server_unpack_queue: 0,
         }
+        .with_server_unpack_slots((transcode::cores() / 4).max(1))
     }
 
     /// From `webserver.conf`; `verbose` adds the console log like BlueMap CLI's `-b`.
@@ -127,7 +143,11 @@ impl WebApp {
                 client_unpack: options.client_unpack,
                 server_unpack: Arc::new(ServerUnpackPolicy {
                     mode: options.server_unpack,
-                    slots: Gate::new(options.server_unpack_slots),
+                    slots: Gate::with_queue(
+                        options.server_unpack_slots,
+                        options.server_unpack_queue,
+                        SERVER_UNPACK_WAIT,
+                    ),
                 }),
             },
             shutdown: CancellationToken::new(),

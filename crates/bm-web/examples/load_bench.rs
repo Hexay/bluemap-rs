@@ -1,8 +1,10 @@
 //! Closed-loop HTTP/1.1 keep-alive load generator for `serve_bench`; prints one JSON summary line.
 //!
-//! `load_bench <addr> <urls-file> [--conns 32] [--secs 10] [--header "Name: value"]… [--sse N] [--revalidate]`
+//! `load_bench <addr> <urls-file> [--conns 32] [--secs 10] [--header "Name: value"]… [--sse N] [--revalidate]
+//! [--once]`
 //!
-//! Each connection walks the URL list from its own offset. `--revalidate` sends each URL's `ETag` (learned in one
+//! Each connection walks the URL list from its own offset; `--once` instead requests each URL once, spread over
+//! the connections (a page load), and ends. `--revalidate` sends each URL's `ETag` (learned in one
 //! untimed pass) as `If-None-Match`, like a browser reload. `--sse N` instead holds N `live/sse` streams open (the
 //! first URL) for `--secs` and counts received bytes.
 
@@ -78,12 +80,14 @@ fn connect(addr: &str) -> std::io::Result<(TcpStream, BufReader<TcpStream>)> {
 }
 
 /// `etags`: per URL the last `ETag` seen, sent back as `If-None-Match` (a browser reload); filled before timing.
+/// `once`: request `urls[offset]`, then every `once`-th after it, and stop.
 fn worker(
     addr: &str,
     urls: &[String],
     offset: usize,
     headers: &str,
     etags: Option<&[Option<String>]>,
+    once: Option<usize>,
     stop: &AtomicBool,
 ) -> ConnStats {
     let mut st = ConnStats::default();
@@ -94,9 +98,12 @@ fn worker(
     let mut line = String::new();
     let mut i = offset;
     while !stop.load(Relaxed) {
+        if once.is_some() && i >= urls.len() {
+            break;
+        }
         let k = i % urls.len();
         let url = &urls[k];
-        i += 1;
+        i += once.unwrap_or(1);
         let inm = match etags.and_then(|e| e[k].as_deref()) {
             Some(tag) => format!("If-None-Match: {tag}\r\n"),
             None => String::new(),
@@ -173,6 +180,7 @@ fn main() {
         .map(|l| l.trim_start_matches('/').to_owned())
         .collect();
     let (mut conns, mut secs, mut headers, mut sse_n, mut revalidate) = (32usize, 10u64, String::new(), 0usize, false);
+    let mut once = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--conns" => conns = args.next().unwrap().parse().unwrap(),
@@ -180,6 +188,7 @@ fn main() {
             "--header" => headers.push_str(&format!("{}\r\n", args.next().unwrap())),
             "--sse" => sse_n = args.next().unwrap().parse().unwrap(),
             "--revalidate" => revalidate = true,
+            "--once" => once = true,
             other => panic!("unknown arg {other}"),
         }
     }
@@ -194,12 +203,16 @@ fn main() {
         .map(|c| {
             let (addr, urls, headers, stop) = (addr.clone(), urls.clone(), headers.clone(), stop.clone());
             let etags = etags.clone();
-            let offset = c * urls.len() / conns.max(1);
-            std::thread::spawn(move || worker(&addr, &urls, offset, &headers, etags.as_deref().map(|e| &e[..]), &stop))
+            let (offset, once) = if once { (c, Some(conns)) } else { (c * urls.len() / conns.max(1), None) };
+            std::thread::spawn(move || {
+                worker(&addr, &urls, offset, &headers, etags.as_deref().map(|e| &e[..]), once, &stop)
+            })
         })
         .collect();
-    std::thread::sleep(Duration::from_secs(secs));
-    stop.store(true, Relaxed);
+    if !once {
+        std::thread::sleep(Duration::from_secs(secs));
+        stop.store(true, Relaxed);
+    }
     let mut all = ConnStats::default();
     for h in handles {
         let s = h.join().unwrap();

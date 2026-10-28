@@ -46,48 +46,66 @@ unavailable, corrupt body) falls back to an ordinary request.
   Any `assets/bluemap-rs-unpack-<8 hex>.js` is answered with the current script, for pages cached before (Java's
   template headers let browsers keep `index.html` a day).
 
+The unpacker is `bm_format::compact::BodyUnpacker`, the same code the server runs, built without the `codec`
+feature (no zstd: the browser has already undone the content coding). WebAssembly float arithmetic is IEEE 754, so
+positions and normals come out bit-identical. After changing the decoder or `bm-wasm`, rebuild the checked-in
+module: `py -3 tools/build_wasm.py`.
+
 ## Clients that don't unpack
 
 `webserver.conf` `server-unpack` (generated with a comment; absent = `limited`, so Java configs load unchanged)
 decides what a request without the opt-in (or a `.gz` URL) gets for a packed hires tile:
 
-- `limited`: unpacked by the server, at most max(1, cores / 4) at once (`WebOptions::server_unpack_slots`). With
-  none free: `503`, `Retry-After: 1`, `no-store`, at once.
+- `limited`: unpacked by the server, at most max(1, cores / 4) at once (`WebOptions::server_unpack_slots`). A
+  request without a free slot waits for one, up to 500 ms (`SERVER_UNPACK_WAIT`), in a queue of min(64 × slots,
+  256) (`server_unpack_queue`); past the deadline or with the queue full: `503`, `Retry-After: 1`, `no-store`.
 - `never`: `406` with a one-line `text/plain` body. Tiles stored raw are still served, under the `limited` slots.
 - `always`: every request unpacked, bounded only by the transcode memory gate (cores at once, waiting).
 
+The queue exists for one viewer without the script: a view load asks for ~50 hires tiles at once (all of them
+over HTTP/2) and the webapp does not retry a failed tile until it leaves the view distance. 64 per slot holds a
+whole view load per slot with room to spare, and drains in ~100–200 ms per slot at 1.5–3 ms a tile, well inside
+the deadline. Each waiter holds a blocking-pool thread, so the queue is capped at 256, half of tokio's default 512:
+the opt-in requests and storage reads keep the other half (the before-run below: 600 waiting flood requests left
+opt-in p50 at ~1 ms). The deadline bounds what an overloaded server promises: a tile not started within 500 ms is
+refused rather than queued behind a flood.
+
 A transcode-cache hit and an `If-None-Match` 304 cost no slot; opt-in requests, raw tiles for them, compat
-storages and everything but hires tiles never touch the setting. The slot is taken without waiting
-(`Gate::try_acquire`) inside the blocking task, after the tile is read: that read is what an opt-in request costs
-anyway, and deciding there lets cache hits, 304s and `never`'s raw tiles through exactly. Slot holders skip the
-memory gate (the slots bound them tighter); all other transcodes (items, gzip model bodies) keep it.
+storages and everything but hires tiles never touch the setting. The slot is taken inside the blocking task, after
+the tile is read (`gate::Gate::acquire_bounded`): that read is what an opt-in request costs anyway, and deciding there lets
+cache hits, 304s and `never`'s raw tiles through exactly. Slot holders skip the memory gate (the slots bound them
+tighter); all other transcodes (items, gzip model bodies) keep it.
 
-The webapp does not retry a failed tile until it leaves the view distance, so a refused viewer without the script
-sees a hole: serve `index.html` from bluemap-rs (or proxy it) and keep `client-unpack` on, else use `always`.
+One viewer without the script loading a view (the 49 hires tiles around the center + 16 lowres, cold cache) on the
+devbox below, `limited`, `docs/perf-exp/testbox_viewer.sh` (2026-10-28, load 1–9):
 
-Devbox (Ryzen 9700X, 16 threads), the 4096² world, 2026-10-28, one locked run at load 7–13 from other users:
-32 opt-in connections on one half of the tiles, alone and with a closed-loop flood of the other half without the
+| slots | connections | 200 | 503 | load wall | slowest request |
+|---|---:|---:|---:|---:|---:|
+| 4 (default) | 6 (HTTP/1.1 browser) | 65 | 0 | 15 ms | 3 ms |
+| 4 (default) | 65 (one burst, as HTTP/2) | 65 | 0 | 16 ms | 14 ms |
+| 1 (a 4-core host) | 6 | 65 | 0 | 50 ms | 8 ms |
+| 1 | 65 | 65 | 0 | 48 ms | 46 ms |
+
+The 1-slot burst used ~10% of the deadline; a host with 3–5× slower cores still fits.
+
+A flood: devbox (Ryzen 9700X, 16 threads, 4 slots, queue 256), the 4096² world, 2026-10-28, locked runs: 32
+opt-in connections on one half of the tiles, alone and with a closed-loop flood of the other half without the
 opt-in from the same machine (`docs/perf-exp/testbox_flood.sh`), 10 s per row:
 
 | `server-unpack`, flood conns | opt-in req/s | opt-in p99 | flood req/s | flood refused |
 |---|---:|---:|---:|---:|
-| before this setting, none | 334,217 | 306 µs | | |
-| before this setting, 64 | 36,204 | 6.0 ms | 3,752 | 0 % |
-| before this setting, 600 | 25,012 | 6.1 ms | 3,697 | 0 % |
-| `always`, 64 / 600 | 18,953 / 15,586 | 11.0 / 10.0 ms | 2,806 / 2,876 | 0 % |
-| `limited`, none / 64 / 600 | 288,412 / 73,492 / 10,771 | 0.4 / 1.6 / 10.3 ms | — / 149,891 / 171,249 | 96 % |
+| before this setting, none / 64 / 600 | 334,217 / 36,204 / 25,012 | 0.3 / 6.0 / 6.1 ms | — / 3,752 / 3,697 | 0 % |
+| `always`, none / 64 / 600 | 306,896 / 28,633 / 25,067 | 0.3 / 7.3 / 6.0 ms | — / 3,730 / 3,896 | 0 % |
+| `limited`, none / 64 / 600 | 307,399 / **236,300** / 19,014 | 0.3 / 0.8 / 7.4 ms | — / 1,529 / 146,805 | 0 / 96 % |
+| `limited` without the queue (503 at once), 64 / 600 | 73,492 / 10,771 | 1.6 / 10.3 ms | 149,891 / 171,249 | 96 % |
 | `never`, 64 / 600 | 105,186 / 19,185 | 0.7 / 5.4 ms | 230,883 / 308,022 | 100 % (406) |
 
-The flood does not starve the blocking pool (opt-in p50 stayed ≤ 1.4 ms with 600 waiting floods); it starves the
-CPU, every core transcoding. `limited` takes that away at 64 connections (4× the opt-in throughput of `always`).
-At 600 the refusals come back so fast that the flood becomes ~170k cheap requests per second from 600 client
-threads on the same box, which costs as much as any cheap flood (`never` fares little better): past that point it
-is a request rate, for a rate limit in front of the server, not something this setting can bound.
-
-The unpacker is `bm_format::compact::BodyUnpacker`, the same code the server runs, built without the `codec`
-feature (no zstd: the browser has already undone the content coding). WebAssembly float arithmetic is IEEE 754, so
-positions and normals come out bit-identical. After changing the decoder or `bm-wasm`, rebuild the checked-in
-module: `py -3 tools/build_wasm.py`.
+(Load 1–9 from other users for the first three rows, 7–13 for the last two.) The flood does not starve the
+blocking pool (opt-in p50 ≤ 1.4 ms with 600 waiting floods); it starves the CPU, every core transcoding. With the
+queue, 64 flood connections all wait their turn on 4 slots: the flood gets 1.5k tiles/s, opt-in throughput stays
+at 77 % of an idle server. At 600 the queue is full, refusals come back at once and the flood becomes ~150k cheap
+requests per second from 600 client threads on the same box, which costs what any cheap flood does (`never` fares
+no better): past that point it is a request rate, for a rate limit in front of the server, not this setting.
 
 ## Measured
 
