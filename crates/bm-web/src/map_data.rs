@@ -1,12 +1,16 @@
 //! One stored tile or item for `map_handler`: an `If-None-Match` is answered from metadata alone; full replies
 //! read the bytes with their version (`MapStorage::read_grid_versioned`). Blocking.
 
+use std::sync::Arc;
+
+use bm_config::ServerUnpack;
 use bm_storage::{Compression, GridKey, ItemKey, MapStorage, Tile, Version};
 use http::HeaderValue;
 
 use crate::client_unpack;
 use crate::content_type::OCTET_STREAM;
 use crate::encoding::{Accepted, Encoded, body_coding, encode, packed_coding};
+use crate::gate::Gate;
 use crate::transcode;
 use crate::validators::{IfNoneMatch, etag};
 
@@ -26,6 +30,13 @@ pub(crate) struct Request {
     /// Client-side unpacking ([`client_unpack`]): `None` when the server does not offer it, else whether this
     /// request asked for it.
     pub unpacks: Option<bool>,
+    pub server_unpack: Arc<ServerUnpackPolicy>,
+}
+
+/// `server-unpack` and, for the modes that use them, its slots.
+pub(crate) struct ServerUnpackPolicy {
+    pub mode: ServerUnpack,
+    pub slots: Gate,
 }
 
 pub(crate) enum Reply {
@@ -37,6 +48,10 @@ pub(crate) enum Reply {
         negotiated: Option<&'static str>,
     },
     Missing,
+    /// A packed tile for a client without the opt-in, and no server-unpack slot free.
+    Busy,
+    /// A packed tile for a client without the opt-in, with `server-unpack: never`.
+    NotAcceptable,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -82,14 +97,23 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
         let version = version.filter(|_| req.etags);
         let content_encoding = coding_id(coding).filter(|_| !req.gz_url);
         let negotiated = |media_type| req.unpacks.map(|_| media_type);
-        if unpacks && bm_storage::packed_model_frame(&blob).is_some() {
+        let model = bm_storage::packed_model_frame(&blob).is_some();
+        if unpacks && model {
             return Ok(Reply::Found {
                 encoded: Encoded { body: transcode::packed_body(blob, coding)?, content_encoding },
                 etag: version.map(|v| etag(v, Some(client_unpack::etag_coding(coding)))),
                 negotiated: negotiated(client_unpack::MEDIA_TYPE),
             });
         }
-        let encoded = Encoded { body: transcode::packed(&blob, coding)?, content_encoding };
+        // a tile stored raw is PRBM for an unpacking client too, so only clients without the opt-in are limited
+        let slots = match req.server_unpack.mode {
+            _ if unpacks => None,
+            ServerUnpack::Never if model => return Ok(Reply::NotAcceptable),
+            ServerUnpack::Always => None,
+            ServerUnpack::Limited | ServerUnpack::Never => Some(&req.server_unpack.slots),
+        };
+        let Some(body) = transcode::packed(&blob, coding, slots)? else { return Ok(Reply::Busy) };
+        let encoded = Encoded { body, content_encoding };
         return Ok(Reply::Found {
             encoded,
             etag: version.map(|v| tag(v, coding)),

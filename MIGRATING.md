@@ -84,9 +84,12 @@ format: optimized
 - While it serves an optimized storage, the webserver adds one script to the `index.html` it sends (the files in
   your webroot are not changed). With it, browsers download the packed tiles and unpack them themselves, which
   takes the work off the server and sends about a twelfth of the bytes. Without it (another webapp, or
-  `index.html` served by nginx) tiles arrive as plain PRBM, at a higher server cost per tile. To turn it off for
-  everyone set `client-unpack: false` in `webserver.conf`; a single viewer can run
-  `localStorage.setItem("bluemap-rs-client-unpack", "off")` in the browser console
+  `index.html` served by nginx) the server unpacks each tile at ~50× the cost, so by default only a quarter of the
+  cores do that at once; other requests queue for up to half a second and get `503` beyond that
+  (`webserver.conf` `server-unpack: limited`; `never` refuses them, `always` serves them all). A viewer's own
+  page load fits the queue; many such viewers at once are better served with the script (proxy `index.html` to
+  bluemap-rs too) or `server-unpack: always`. To turn the script off for everyone set `client-unpack: false`; a
+  single viewer can run `localStorage.setItem("bluemap-rs-client-unpack", "off")` in the browser console
   ([docs/18](docs/18-client-unpack.md)).
 - A storage records its own format, and a config that disagrees with it is refused rather than guessed.
   Converting is a separate step. Stop BlueMap first, then:

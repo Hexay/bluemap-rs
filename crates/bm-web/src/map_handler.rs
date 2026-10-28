@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use bm_storage::{GridKey, ItemKey, MapStorage};
-use http::header::{CONTENT_ENCODING, CONTENT_TYPE, ETAG, VARY};
+use http::header::{CONTENT_ENCODING, CONTENT_TYPE, ETAG, RETRY_AFTER, VARY};
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::sync::CancellationToken;
 
 use crate::encoding::Accepted;
 use crate::live::LiveMap;
-use crate::map_data::{self, Reply, Target};
+use crate::map_data::{self, Reply, ServerUnpackPolicy, Target};
 use crate::response::{empty, header_static};
 use crate::validators::IfNoneMatch;
 use crate::{client_unpack, content_type};
@@ -22,15 +22,23 @@ pub struct MapRoute {
     pub live: Option<Arc<LiveMap>>,
 }
 
+/// How map data is served, from [`crate::WebOptions`].
+pub(crate) struct Serving {
+    pub etags: bool,
+    pub client_unpack: bool,
+    pub server_unpack: Arc<ServerUnpackPolicy>,
+}
+
 const NO_STORE: [&str; 4] = ["Cache-Control", "Cloudflare-CDN-Cache-Control", "CDN-Cache-Control", "Surrogate-Control"];
+const NOT_ACCEPTABLE: &str = "406 Not Acceptable: this map's tiles are only sent to the bluemap-rs webapp (its \
+                              index.html loads the script that unpacks them), see server-unpack in webserver.conf\n";
 
 pub(crate) async fn handle(
     route: &MapRoute,
     path: &str,
     method: &Method,
     headers: &HeaderMap,
-    etags: bool,
-    client_unpack: bool,
+    serving: &Serving,
     shutdown: &CancellationToken,
 ) -> Response<Body> {
     if let Some(live) = &route.live {
@@ -41,7 +49,7 @@ pub(crate) async fn handle(
             _ => {}
         }
     }
-    storage(route, path, method, headers, etags, client_unpack).await
+    storage(route, path, method, headers, serving).await
 }
 
 fn live_json(body: Option<bytes::Bytes>) -> Response<Body> {
@@ -66,13 +74,21 @@ fn no_store(res: &mut Response<Body>) {
     }
 }
 
+/// A refusal that depends on `Accept` and must not be cached as the tile.
+fn refused(status: StatusCode, body: &'static str) -> Response<Body> {
+    let mut res = Response::new(Body::from(body));
+    *res.status_mut() = status;
+    no_store(&mut res);
+    header_static(&mut res, VARY, "Accept, Accept-Encoding");
+    res
+}
+
 async fn storage(
     route: &MapRoute,
     path: &str,
     method: &Method,
     headers: &HeaderMap,
-    etags: bool,
-    client_unpack: bool,
+    serving: &Serving,
 ) -> Response<Body> {
     let path = path.strip_prefix('/').unwrap_or(path);
     let path = path.strip_suffix('/').unwrap_or(path);
@@ -100,8 +116,9 @@ async fn storage(
         gz_url,
         accepted: Accepted::from_headers(headers),
         if_none_match: IfNoneMatch::from_request(method, headers),
-        etags,
-        unpacks: client_unpack.then(|| client_unpack::requested(headers)),
+        etags: serving.etags,
+        unpacks: serving.client_unpack.then(|| client_unpack::requested(headers)),
+        server_unpack: serving.server_unpack.clone(),
     };
     let storage = route.storage.clone();
     match tokio::task::spawn_blocking(move || map_data::serve(storage.as_ref(), req)).await {
@@ -126,6 +143,17 @@ async fn storage(
             } else if has_etag && !gz_url {
                 header_static(&mut res, VARY, "Accept-Encoding");
             }
+            res
+        }
+        Ok(Ok(Reply::Busy)) => {
+            // empty: `finish` writes the usual error body
+            let mut res = refused(StatusCode::SERVICE_UNAVAILABLE, "");
+            header_static(&mut res, RETRY_AFTER, "1");
+            res
+        }
+        Ok(Ok(Reply::NotAcceptable)) => {
+            let mut res = refused(StatusCode::NOT_ACCEPTABLE, NOT_ACCEPTABLE);
+            header_static(&mut res, CONTENT_TYPE, "text/plain; charset=utf-8");
             res
         }
         Ok(Ok(Reply::Missing)) if is_tile => empty(StatusCode::NO_CONTENT),

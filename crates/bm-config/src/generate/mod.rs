@@ -1,5 +1,6 @@
 //! First-start config files, rendered from BlueMap's own templates exactly like `BlueMapConfigManager` does.
-//! Our only change: generated storage configs get `format: optimized` (`templates/storage-format.conf`).
+//! Our only changes: generated storage configs get `format: optimized` (`templates/storage-format.conf`),
+//! `webserver.conf` gets `server-unpack` (`templates/webserver-unpack.conf`).
 
 mod maps;
 mod path;
@@ -23,6 +24,7 @@ const PLUGIN: &str = include_str!("../../templates/bluemap/plugin.conf");
 const FILE_STORAGE: &str = include_str!("../../templates/bluemap/storages/file.conf");
 const SQL_STORAGE: &str = include_str!("../../templates/bluemap/storages/sql.conf");
 const STORAGE_FORMAT: &str = include_str!("../../templates/storage-format.conf");
+const WEBSERVER_UNPACK: &str = include_str!("../../templates/webserver-unpack.conf");
 
 /// `getSeparator()` is "/" on every real filesystem (Windows accepts it too).
 fn join_formatted(dir: &Path, cwd: &Path, file: &str) -> String {
@@ -63,6 +65,7 @@ pub fn webserver_conf(webroot: &Path, data_root: &Path, cwd: &Path) -> String {
         .var("logfile", &format_path(&logs.join("webserver.log"), cwd))
         .var("logfile-with-time", &join_formatted(&logs, cwd, "webserver_%1$tF_%<tH-%<tM-%<tS.log"))
         .build()
+        + WEBSERVER_UNPACK
 }
 
 pub fn webapp_conf(webroot: &Path, cwd: &Path) -> String {

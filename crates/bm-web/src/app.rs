@@ -16,13 +16,18 @@ use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 
+use bm_config::ServerUnpack;
+
 use crate::WebError;
 use crate::access_log::{AccessLog, FileSink, LogSink, RequestInfo, StdoutSink};
-use crate::map_handler::{self, MapRoute};
+use crate::gate::Gate;
+use crate::map_data::ServerUnpackPolicy;
+use crate::map_handler::{self, MapRoute, Serving};
 use crate::paths::{decode_path, java_query_string};
 use crate::registry::MapRegistry;
 use crate::response::{ExtraHeaders, finish, status_message};
 use crate::static_files::StaticFiles;
+use crate::transcode;
 use crate::webapp::WEBAPP_VERSION;
 
 /// Requests never need a body; anything bigger is refused before it is read (#828).
@@ -46,9 +51,26 @@ pub struct WebOptions {
     /// Let clients unpack the hires tiles of storages that pack them (docs/18): `index.html` loads a script that
     /// asks for tiles as stored. Clients without the script are served as before.
     pub client_unpack: bool,
+    /// `webserver.conf` `server-unpack`: packed hires tiles for clients that don't unpack them (docs/18).
+    pub server_unpack: ServerUnpack,
+    /// How many of those unpacks may run at once under [`ServerUnpack::Limited`].
+    pub server_unpack_slots: usize,
+    /// How many more may wait for a slot, each up to [`SERVER_UNPACK_WAIT`], before the rest get `503`.
+    pub server_unpack_queue: usize,
 }
 
+/// Longest a server-side unpack waits for a slot (docs/18).
+pub const SERVER_UNPACK_WAIT: Duration = Duration::from_millis(500);
+/// Waiters hold a blocking-pool thread each: at most half of tokio's default 512 (docs/18).
+const MAX_SERVER_UNPACK_QUEUE: usize = 256;
+
 impl WebOptions {
+    /// `slots` server-unpack slots and the queue that goes with them.
+    pub fn with_server_unpack_slots(self, slots: usize) -> Self {
+        let queue = (64 * slots).min(MAX_SERVER_UNPACK_QUEUE);
+        Self { server_unpack_slots: slots, server_unpack_queue: queue, ..self }
+    }
+
     pub fn new(webroot: impl Into<PathBuf>) -> Self {
         Self {
             webroot: webroot.into(),
@@ -58,7 +80,11 @@ impl WebOptions {
             access_log: AccessLog::disabled(),
             map_etags: true,
             client_unpack: true,
+            server_unpack: ServerUnpack::default(),
+            server_unpack_slots: 0,
+            server_unpack_queue: 0,
         }
+        .with_server_unpack_slots((transcode::cores() / 4).max(1))
     }
 
     /// From `webserver.conf`; `verbose` adds the console log like BlueMap CLI's `-b`.
@@ -75,6 +101,7 @@ impl WebOptions {
             access_log: AccessLog::new(&config.log.format, sinks)?,
             map_etags: config.map_etags,
             client_unpack: config.client_unpack,
+            server_unpack: config.server_unpack,
             ..Self::new(&config.webroot)
         })
     }
@@ -90,8 +117,7 @@ pub struct WebApp {
     server: HeaderValue,
     extra: ExtraHeaders,
     log: AccessLog,
-    map_etags: bool,
-    client_unpack: bool,
+    serving: Serving,
     shutdown: CancellationToken,
 }
 
@@ -101,14 +127,29 @@ impl WebApp {
             name: "Server".into(),
             reason: "value contains characters HTTP can't carry",
         })?;
+        if options.server_unpack == ServerUnpack::Never && !options.client_unpack {
+            tracing::warn!(
+                "server-unpack: never with client-unpack: false refuses the hires tiles of optimized maps to everyone"
+            );
+        }
         Ok(Self {
             statics: StaticFiles::new(&options.webroot, options.serve_embedded_webapp),
             maps: MapRegistry::default(),
             server,
             extra: ExtraHeaders::new(&options.additional_headers)?,
             log: options.access_log,
-            map_etags: options.map_etags,
-            client_unpack: options.client_unpack,
+            serving: Serving {
+                etags: options.map_etags,
+                client_unpack: options.client_unpack,
+                server_unpack: Arc::new(ServerUnpackPolicy {
+                    mode: options.server_unpack,
+                    slots: Gate::with_queue(
+                        options.server_unpack_slots,
+                        options.server_unpack_queue,
+                        SERVER_UNPACK_WAIT,
+                    ),
+                }),
+            },
             shutdown: CancellationToken::new(),
         })
     }
@@ -153,12 +194,11 @@ impl WebApp {
             if let Some(rest) = rest.filter(|r| !r.contains(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])) {
                 let rest = rest.strip_prefix('/').unwrap_or(rest);
                 let rest = if rest.is_empty() { "/" } else { rest };
-                let (etags, unpack) = (self.map_etags, self.client_unpack);
-                return map_handler::handle(map, rest, &req.method, &req.headers, etags, unpack, &self.shutdown).await;
+                return map_handler::handle(map, rest, &req.method, &req.headers, &self.serving, &self.shutdown).await;
             }
         }
         // the webapp only gets the client script while a map has something for it to unpack
-        let client_unpack = self.client_unpack && maps.iter().any(|(_, map)| map.storage.packs_hires());
+        let client_unpack = self.serving.client_unpack && maps.iter().any(|(_, map)| map.storage.packs_hires());
         self.statics.handle(&req.method, route_path, query, &req.headers, client_unpack).await
     }
 }

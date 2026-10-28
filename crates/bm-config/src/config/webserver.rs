@@ -22,6 +22,33 @@ pub struct WebserverConfig {
     pub map_etags: bool,
     /// Hidden bluemap-rs key: clients may unpack the hires tiles of an `optimized` storage themselves (docs/18).
     pub client_unpack: bool,
+    /// bluemap-rs key: packed hires tiles for clients that don't unpack them.
+    #[serde(deserialize_with = "server_unpack")]
+    pub server_unpack: ServerUnpack,
+}
+
+/// `server-unpack`: what a client that doesn't unpack gets for a packed hires tile (docs/18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServerUnpack {
+    /// Unpacked on the server, a bounded number at once; `503` beyond that.
+    #[default]
+    Limited,
+    /// `406`.
+    Never,
+    /// Unpacked on the server, bounded only by the transcode memory gate.
+    Always,
+}
+
+fn server_unpack<'de, D: serde::Deserializer<'de>>(d: D) -> Result<ServerUnpack, D::Error> {
+    match String::deserialize(d)?.to_ascii_lowercase().as_str() {
+        "limited" => Ok(ServerUnpack::Limited),
+        "never" => Ok(ServerUnpack::Never),
+        "always" => Ok(ServerUnpack::Always),
+        other => Err(serde::de::Error::custom(format!(
+            "unknown server-unpack '{other}' (expected limited, never or always)"
+        ))),
+    }
 }
 
 /// `log { file, append, format }`; `file` and `format` are Java `String.format` patterns, passed through verbatim.
@@ -45,6 +72,7 @@ impl Default for WebserverConfig {
             additional_headers: Vec::new(),
             map_etags: true,
             client_unpack: true,
+            server_unpack: ServerUnpack::default(),
         }
     }
 }
