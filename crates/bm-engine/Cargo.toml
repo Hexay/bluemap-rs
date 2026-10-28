@@ -30,4 +30,4 @@ zip.workspace = true
 
 [build-dependencies]
 # entries are stored uncompressed, so the build script needs no deflate backend
-zip = { version = "8.6", default-features = false }
+zip = { version = "9.1", default-features = false }
