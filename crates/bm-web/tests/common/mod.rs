@@ -150,10 +150,16 @@ pub struct Served {
 
 impl Served {
     pub fn start(app: WebApp) -> Self {
+        Self::start_with_blocking_threads(app, 512)
+    }
+
+    /// With a blocking pool of `threads` (tokio's default is 512).
+    pub fn start_with_blocking_threads(app: WebApp, threads: usize) -> Self {
         let (addr_tx, addr_rx) = std::sync::mpsc::channel();
         let (stop, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let thread = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+            let rt =
+                tokio::runtime::Builder::new_multi_thread().max_blocking_threads(threads).enable_all().build().unwrap();
             rt.block_on(async move {
                 let server = WebServer::bind("127.0.0.1", 0).await.unwrap();
                 addr_tx.send(server.local_addr()).unwrap();
@@ -178,6 +184,47 @@ impl Drop for Served {
             let _ = t.join();
         }
     }
+}
+
+pub const UNPACKS: (&str, &str) = ("Accept", "application/vnd.bluemap.bmq3, */*");
+pub const PRBM_TYPE: Option<&str> = Some("application/octet-stream");
+pub const TILE: &str = "/maps/world/tiles/0/x0/z0.prbm";
+pub const RAW_TILE: &str = "/maps/world/tiles/0/x1/z0.prbm";
+
+/// A tile model with `quads` distinct quads, as PRBM.
+pub fn prbm_of(quads: u32) -> Vec<u8> {
+    let mut m = bm_format::prbm::TileModel::default();
+    for q in 0..quads {
+        let (x, z) = ((q % 8) as f32, (q / 8) as f32);
+        for tri in [
+            [[x, 64., z], [x, 64., z + 1.], [x + 1., 64., z + 1.]],
+            [[x, 64., z], [x + 1., 64., z + 1.], [x + 1., 64., z]],
+        ] {
+            tri.iter().for_each(|p| m.position.extend(p));
+            m.color.extend([0.5, 0.5, 1.]);
+            m.sunlight.push(15);
+            m.blocklight.push(2);
+            m.material.push(q / 10);
+        }
+        m.uv.extend([0., 0., 0., 1., 1., 1., 0., 0., 1., 1., 1., 0.]);
+        m.ao.extend([1., 1., 0.5, 1., 0.5, 0.75]);
+    }
+    let mut out = Vec::new();
+    m.write_prbm(&mut out).unwrap();
+    out
+}
+
+pub fn prbm() -> Vec<u8> {
+    prbm_of(40)
+}
+
+/// Map `world` with [`TILE`], which the model holds, and [`RAW_TILE`], which it stores raw.
+pub fn packing_map(root: &std::path::Path, format: bm_storage::Format) -> Arc<dyn bm_storage::MapStorage> {
+    use bm_storage::{Compression, FileStorage, GridKey, Storage};
+    let map = FileStorage::open(root.join("maps"), Compression::Gzip, format, false).unwrap().map("world").unwrap();
+    map.write_grid(GridKey::Hires, (0, 0), &prbm()).unwrap();
+    map.write_grid(GridKey::Hires, (1, 0), b"not a PRBM").unwrap();
+    map
 }
 
 /// Collects access-log lines.

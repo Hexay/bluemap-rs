@@ -46,11 +46,11 @@ struct Cache {
 const SEEN: usize = 64;
 static CACHE: LazyLock<Mutex<Cache>> =
     LazyLock::new(|| Mutex::new(Cache { entries: HashMap::new(), bytes: 0, tick: 0, seen: [0; SEEN] }));
-static GATE: LazyLock<Gate> = LazyLock::new(|| Gate {
-    busy: Mutex::new(0),
-    freed: Condvar::new(),
-    limit: std::thread::available_parallelism().map_or(4, usize::from),
-});
+static GATE: LazyLock<Gate> = LazyLock::new(|| Gate::new(cores()));
+
+pub(crate) fn cores() -> usize {
+    std::thread::available_parallelism().map_or(4, usize::from)
+}
 
 /// `stored` as gzip bytes.
 pub(crate) fn to_gzip(stored: &Stored) -> Result<Bytes, bm_compress::Error> {
@@ -68,12 +68,24 @@ pub(crate) fn decode(stored: &Stored) -> Result<Bytes, bm_compress::Error> {
 }
 
 /// A packed hires tile (`MapStorage::read_hires_packed`) as PRBM in `coding`. Cached by the blob, so a hit skips
-/// unpacking too; identity bodies are too large to be worth keeping.
-pub(crate) fn packed(blob: &[u8], coding: Compression) -> Result<Bytes, bm_storage::Error> {
+/// unpacking too; identity bodies are too large to be worth keeping. With `slots` the work runs under one of them
+/// instead of the memory gate (they bound it tighter), and a miss with none free is `None`.
+pub(crate) fn packed(
+    blob: &[u8],
+    coding: Compression,
+    slots: Option<&Gate>,
+) -> Result<Option<Bytes>, bm_storage::Error> {
+    let admit = || match slots {
+        Some(slots) => slots.try_acquire(),
+        None => Some(GATE.acquire()),
+    };
     match coding {
-        Compression::None => Ok(bm_storage::unpack_hires(blob)?.into()),
-        Compression::Zstd => cached(Op::Packed(coding), blob, || Ok(with_unpacked_hires(blob, zstd_bulk)??)),
-        c => cached(Op::Packed(c), blob, || Ok(with_unpacked_hires(blob, |prbm| c.compress(prbm))??)),
+        Compression::None => {
+            let Some(_permit) = admit() else { return Ok(None) };
+            Ok(Some(bm_storage::unpack_hires(blob)?.into()))
+        }
+        Compression::Zstd => admitted(Op::Packed(coding), blob, admit, || Ok(with_unpacked_hires(blob, zstd_bulk)??)),
+        c => admitted(Op::Packed(c), blob, admit, || Ok(with_unpacked_hires(blob, |prbm| c.compress(prbm))??)),
     }
 }
 
@@ -91,20 +103,29 @@ pub(crate) fn packed_body(blob: Vec<u8>, coding: Compression) -> Result<Bytes, b
 }
 
 fn cached<E>(op: Op, input: &[u8], work: impl FnOnce() -> Result<Vec<u8>, E>) -> Result<Bytes, E> {
+    Ok(admitted(op, input, || Some(GATE.acquire()), work)?.expect("the gate admits everyone eventually"))
+}
+
+/// [`cached`], with `work` run only once `admit` hands out a permit; `None` when it doesn't.
+fn admitted<'g, E>(
+    op: Op,
+    input: &[u8],
+    admit: impl FnOnce() -> Option<Permit<'g>>,
+    work: impl FnOnce() -> Result<Vec<u8>, E>,
+) -> Result<Option<Bytes>, E> {
     let fingerprint = fingerprint(input);
     if let Some(hit) = lookup(op, fingerprint, input) {
-        return Ok(hit);
+        return Ok(Some(hit));
     }
-    let output = Bytes::from({
-        let _permit = GATE.acquire();
-        work()?
-    });
+    let Some(permit) = admit() else { return Ok(None) };
+    let output = Bytes::from(work()?);
+    drop(permit);
     // a packed tile costs milliseconds to redo and little to keep, so it is admitted on first sight
     let first_sight = matches!(op, Op::Packed(_) | Op::PackedBody(_));
     if output.len() <= MAX_CACHED_OUTPUT && (first_sight || seen_before(fingerprint)) {
         insert((op, fingerprint), Entry { input: Bytes::copy_from_slice(input), output: output.clone(), used: 0 });
     }
-    Ok(output)
+    Ok(Some(output))
 }
 
 /// Length plus both ends: a gzip trailer is CRC32 + size, so this separates real items; hits are verified in full.
@@ -159,15 +180,28 @@ fn insert(key: (Op, u64), mut entry: Entry) {
 }
 
 /// A counting semaphore for blocking-pool threads.
-struct Gate {
+pub(crate) struct Gate {
     busy: Mutex<usize>,
     freed: Condvar,
     limit: usize,
 }
 
-struct Permit<'a>(&'a Gate);
+pub(crate) struct Permit<'a>(&'a Gate);
 
 impl Gate {
+    pub(crate) fn new(limit: usize) -> Self {
+        Self { busy: Mutex::new(0), freed: Condvar::new(), limit }
+    }
+
+    /// Never waits: `None` when all permits are out.
+    pub(crate) fn try_acquire(&self) -> Option<Permit<'_>> {
+        let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        (*busy < self.limit).then(|| {
+            *busy += 1;
+            Permit(self)
+        })
+    }
+
     fn acquire(&self) -> Permit<'_> {
         let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         while *busy >= self.limit {

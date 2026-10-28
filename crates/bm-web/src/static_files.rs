@@ -12,7 +12,7 @@ use http::header::{
 use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
 use tokio_util::io::ReaderStream;
 
-use crate::client_unpack::{SCRIPT, with_script};
+use crate::client_unpack::{SCRIPT, is_script_path, with_script};
 use crate::content_type;
 use crate::encoding::Accepted;
 use crate::http_date::parse_http_date;
@@ -73,7 +73,7 @@ impl StaticFiles {
             Resolved::Invalid => return empty(StatusCode::NOT_FOUND),
         };
         let mut node = self.cache.lookup(&rel).await;
-        if client_unpack && node.file.is_none() && rel == SCRIPT.path {
+        if client_unpack && node.file.is_none() && is_script_path(&rel) {
             node.file = Some(CLIENT_SCRIPT.clone());
         }
         if !route_path.ends_with('/') && node.is_dir {
@@ -95,10 +95,27 @@ impl StaticFiles {
         if rel.ends_with(".php") {
             return empty(StatusCode::FORBIDDEN);
         }
+        let source = file.clone();
         let file = if client_unpack && rel == "index.html" { self.with_client_script(file) } else { file };
-        let etag = format!("{:x}{:x}{:x}", file.len, java_path_hash(&join(&self.root, &java_path)), file.mtime_ms);
-        if not_modified(headers, file.mtime_ms, &etag) {
-            return empty(StatusCode::NOT_MODIFIED);
+        // our index names the script by hash, so it is revalidated on every load and its tag carries that hash: an
+        // upgrade reaches viewers although the file's length and mtime stay the same
+        let scripted_index = !Arc::ptr_eq(&file, &source);
+        let cache_control = if Arc::ptr_eq(&file, &CLIENT_SCRIPT) {
+            // its URL carries a hash of its body, so a page load need not revalidate it
+            Some("public, max-age=31536000, immutable")
+        } else {
+            scripted_index.then_some("no-cache")
+        };
+        let mut etag = format!("{:x}{:x}{:x}", file.len, java_path_hash(&join(&self.root, &java_path)), file.mtime_ms);
+        if scripted_index {
+            etag = format!("{etag}-{}", SCRIPT.hash);
+        }
+        if not_modified(headers, file.mtime_ms, &etag, scripted_index) {
+            let mut res = empty(StatusCode::NOT_MODIFIED);
+            if let Some(v) = cache_control {
+                header_static(&mut res, CACHE_CONTROL, v);
+            }
+            return res;
         }
         let name = rel.rsplit('/').next().unwrap_or(&rel);
         let content_type = content_type::static_file(name);
@@ -126,9 +143,8 @@ impl StaticFiles {
             h.insert(LAST_MODIFIED, lm.clone());
         }
         header_static(&mut res, CONTENT_TYPE, content_type);
-        // its URL carries a hash of its body, so a page load need not revalidate it
-        if Arc::ptr_eq(&file, &CLIENT_SCRIPT) {
-            header_static(&mut res, CACHE_CONTROL, "public, max-age=31536000, immutable");
+        if let Some(v) = cache_control {
+            header_static(&mut res, CACHE_CONTROL, v);
         }
         res
     }
@@ -168,15 +184,17 @@ async fn identity_body(file: &FileEntry) -> Option<Response<Body>> {
     }
 }
 
-/// `If-Modified-Since` (1 s slack) is checked first, then an exact `If-None-Match`; also accepts the tag quoted
-/// or with our gzip suffix.
-fn not_modified(headers: &HeaderMap, mtime_ms: i64, etag: &str) -> bool {
-    let since = headers.get(IF_MODIFIED_SINCE).and_then(|v| v.to_str().ok()).and_then(parse_http_date);
-    if since.is_some_and(|since| since + 1000 >= mtime_ms) {
-        return true;
-    }
+/// Java's order: `If-Modified-Since` (1 s slack) first, then an exact `If-None-Match`; also accepts the tag quoted
+/// or with our gzip suffix. `tag_decides`: a sent `If-None-Match` alone decides (RFC 9110).
+fn not_modified(headers: &HeaderMap, mtime_ms: i64, etag: &str, tag_decides: bool) -> bool {
+    let inm = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok());
     let matches = |t: &str| t == etag || t.strip_suffix(GZIP_TAG) == Some(etag);
-    headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok()).is_some_and(|v| {
+    let tag_matches = inm.is_some_and(|v| {
         v == etag || v.split(',').any(|t| matches(t.trim().trim_start_matches("W/").trim_matches('"')))
-    })
+    });
+    if tag_decides && inm.is_some() {
+        return tag_matches;
+    }
+    let since = headers.get(IF_MODIFIED_SINCE).and_then(|v| v.to_str().ok()).and_then(parse_http_date);
+    since.is_some_and(|since| since + 1000 >= mtime_ms) || tag_matches
 }

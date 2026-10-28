@@ -49,7 +49,8 @@ Same world and machine; the better value in each row is bold:
 
 ¹ With bluemap-rs's webserver, which has the browser unpack optimized tiles itself
 ([docs/18](docs/18-client-unpack.md)). A client that doesn't (another webapp, or `index.html` served by nginx) is
-sent ordinary tiles, which the server has to rebuild.
+sent ordinary tiles, which the server has to rebuild; by default only a quarter of the cores do that at once
+(`server-unpack` in `webserver.conf`).
 
 Serving a hires tile nobody requested recently, by who asks for it:
 

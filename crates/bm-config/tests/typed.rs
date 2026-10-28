@@ -2,8 +2,8 @@
 //! each case states what the real jar produced.
 
 use bm_config::{
-    ConfigError, CoreConfig, Key, MapConfig, MaskShape, PluginConfig, StorageConfig, StorageFormat, Value,
-    WebappConfig, WebserverConfig, from_value, hocon,
+    ConfigError, CoreConfig, Key, MapConfig, MaskShape, PluginConfig, ServerUnpack, StorageConfig, StorageFormat,
+    Value, WebappConfig, WebserverConfig, from_value, hocon,
 };
 
 fn parse(src: &str) -> Value {
@@ -177,6 +177,17 @@ fn hidden_throttle_keys() {
     assert_eq!((plugin.render_pause_mspt, plugin.render_resume_mspt), (45.0, 40.0));
     let plugin = from_value::<PluginConfig>(&parse("render-pause-mspt: 0\nrender-resume-mspt: 30.5")).unwrap();
     assert_eq!((plugin.render_pause_mspt, plugin.render_resume_mspt), (0.0, 30.5));
+}
+
+#[test]
+fn server_unpack_key() {
+    let web = |src: &str| from_value::<WebserverConfig>(&parse(src)).map(|c| c.server_unpack);
+    assert_eq!(web(""), Ok(ServerUnpack::Limited), "Java's webserver.conf has no such key");
+    assert_eq!(web("server-unpack: never"), Ok(ServerUnpack::Never));
+    assert_eq!(web("server-unpack: ALWAYS"), Ok(ServerUnpack::Always));
+    assert!(web("server-unpack: sometimes").unwrap_err().to_string().contains("server-unpack"));
+    let generated = bm_config::generate::webserver_conf(".".as_ref(), "data".as_ref(), ".".as_ref());
+    assert_eq!(web(&generated), Ok(ServerUnpack::Limited));
 }
 
 #[test]

@@ -15,4 +15,4 @@ pub use mask::{MaskShape, RenderMask};
 pub use plugin::PluginConfig;
 pub use storage::{Compression, Dialect, FileStorageConfig, SqlStorageConfig, StorageConfig, StorageFormat};
 pub use webapp::WebappConfig;
-pub use webserver::{WebserverConfig, WebserverLogConfig};
+pub use webserver::{ServerUnpack, WebserverConfig, WebserverLogConfig};

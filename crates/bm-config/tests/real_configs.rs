@@ -54,6 +54,7 @@ fn every_generated_config_loads() {
         assert_eq!(cfg.webserver.log.format, r#"%1$s "%3$s %4$s %5$s" %6$s %7$s"#);
         assert_eq!(cfg.webserver.additional_headers[0].0, "Cache-Control");
         assert_eq!(cfg.webserver.additional_headers[1], ("CDN-Cache-Control".into(), "max-age=60".into()));
+        assert_eq!(cfg.webserver.server_unpack, bm_config::ServerUnpack::Limited);
 
         match &cfg.storages["file"] {
             StorageConfig::File(f) => {

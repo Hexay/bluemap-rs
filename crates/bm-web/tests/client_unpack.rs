@@ -8,48 +8,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bm_format::compact::BodyUnpacker;
-use bm_format::prbm::TileModel;
-use bm_storage::{Compression, FileStorage, Format, GridKey, MapStorage, Storage};
+use bm_storage::{Format, MapStorage};
 use bm_web::{MapRoute, WebApp, WebOptions};
-use common::{Served, get};
+use common::{PRBM_TYPE, RAW_TILE, Served, TILE, UNPACKS, get, packing_map as map, prbm};
 
-const UNPACKS: (&str, &str) = ("Accept", "application/vnd.bluemap.bmq3, */*");
 const MEDIA_TYPE: Option<&str> = Some("application/vnd.bluemap.bmq3");
-const PRBM_TYPE: Option<&str> = Some("application/octet-stream");
-const TILE: &str = "/maps/world/tiles/0/x0/z0.prbm";
-const RAW_TILE: &str = "/maps/world/tiles/0/x1/z0.prbm";
 const CODINGS: [(&str, Option<&str>); 3] =
     [("gzip, deflate, br, zstd", Some("zstd")), ("gzip", Some("gzip")), ("identity", None)];
-
-fn prbm() -> Vec<u8> {
-    let mut m = TileModel::default();
-    for q in 0..40 {
-        let (x, z) = ((q % 8) as f32, (q / 8) as f32);
-        for tri in [
-            [[x, 64., z], [x, 64., z + 1.], [x + 1., 64., z + 1.]],
-            [[x, 64., z], [x + 1., 64., z + 1.], [x + 1., 64., z]],
-        ] {
-            tri.iter().for_each(|p| m.position.extend(p));
-            m.color.extend([0.5, 0.5, 1.]);
-            m.sunlight.push(15);
-            m.blocklight.push(2);
-            m.material.push(q / 10);
-        }
-        m.uv.extend([0., 0., 0., 1., 1., 1., 0., 0., 1., 1., 1., 0.]);
-        m.ao.extend([1., 1., 0.5, 1., 0.5, 0.75]);
-    }
-    let mut out = Vec::new();
-    m.write_prbm(&mut out).unwrap();
-    out
-}
-
-/// A map with one tile the model holds and one it stores raw.
-fn map(root: &Path, format: Format) -> Arc<dyn MapStorage> {
-    let map = FileStorage::open(root.join("maps"), Compression::Gzip, format, false).unwrap().map("world").unwrap();
-    map.write_grid(GridKey::Hires, (0, 0), &prbm()).unwrap();
-    map.write_grid(GridKey::Hires, (1, 0), b"not a PRBM").unwrap();
-    map
-}
 
 fn serve(storage: Arc<dyn MapStorage>, web: &Path, client_unpack: bool) -> Served {
     let mut options = WebOptions::new(web);
@@ -117,15 +82,36 @@ fn index_loads_the_script_only_for_a_packing_storage() {
     assert_eq!((js.status, js.header("content-type")), (200, Some("text/javascript")));
     assert_eq!(js.header("cache-control"), Some("public, max-age=31536000, immutable"));
     assert!(String::from_utf8_lossy(&js.body).contains("application/vnd.bluemap.bmq3"));
-    assert_eq!(get(packed.addr, "/index.html", &[]).header("cache-control"), None);
+    let old_build = get(packed.addr, "/assets/bluemap-rs-unpack-0123abcd.js", &[]);
+    assert!((old_build.status, &old_build.body) == (200, &js.body), "an index cached before an upgrade names it");
     let plain_index = get(serve(map(&compat, Format::Compat), &compat, true).addr, "/", &[]);
     assert_eq!(script_tag(&plain_index.body), None);
     assert_ne!(index.header("etag"), plain_index.header("etag"));
+    assert_eq!(plain_index.header("cache-control"), None, "additional-headers decide, like Java");
 
     let compat_served = serve(map(&compat, Format::Compat), &compat, true);
     assert_eq!(get(compat_served.addr, &format!("/{script}"), &[]).status, 404);
     let r = get(compat_served.addr, TILE, &[UNPACKS, ("Accept-Encoding", "gzip")]);
     assert_eq!((r.header("content-type"), r.header("vary")), (PRBM_TYPE, Some("Accept-Encoding")));
+}
+
+/// The script's hash is in the page, so the page must revalidate, and an upgrade must change its validator.
+#[test]
+fn index_with_the_script_revalidates() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = serve(map(dir.path(), Format::Optimized), dir.path(), true);
+    let index = get(s.addr, "/index.html", &[]);
+    assert_eq!(index.header("cache-control"), Some("no-cache"));
+    let (etag, modified) = (index.header("etag").unwrap(), index.header("last-modified").unwrap());
+    let script = script_tag(&index.body).unwrap();
+    let hash = script.trim_start_matches("assets/bluemap-rs-unpack-").trim_end_matches(".js");
+    assert!(etag.ends_with(&format!("-{hash}")), "{etag}");
+    let again = get(s.addr, "/index.html", &[("If-None-Match", etag), ("If-Modified-Since", modified)]);
+    assert_eq!((again.status, again.header("cache-control")), (304, Some("no-cache")));
+    // what a browser holding the page of a build with another script sends
+    let stale_tag = etag.replace(hash, "0123abcd");
+    let older = get(s.addr, "/index.html", &[("If-None-Match", &stale_tag), ("If-Modified-Since", modified)]);
+    assert_eq!(older.status, 200, "same file, same mtime, other script");
 }
 
 #[test]

@@ -37,6 +37,7 @@ mod webapp;
 
 pub use access_log::{AccessLog, FileSink, Level, LogSink, RequestInfo, StdoutSink, java_host_address};
 pub use app::{WebApp, WebOptions};
+pub use bm_config::ServerUnpack;
 pub use error::WebError;
 pub use javafmt::{Arg, FormatError, JavaFormat};
 pub use live::LiveMap;

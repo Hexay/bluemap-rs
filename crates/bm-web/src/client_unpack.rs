@@ -20,18 +20,27 @@ const SCRIPT_STEM: &str = "bluemap-rs-unpack";
 const WASM_PLACEHOLDER: &str = "__UNPACK_WASM_BASE64__";
 
 pub(crate) struct Script {
-    /// Relative to the webroot; carries a hash of the body, so a new build is a new URL.
+    /// Relative to the webroot; carries [`Script::hash`], so a new build is a new URL.
     pub path: String,
+    /// Of the body, 8 hex digits.
+    pub hash: String,
     pub body: Bytes,
 }
 
 pub(crate) static SCRIPT: LazyLock<Script> = LazyLock::new(|| {
     let wasm = STANDARD.encode(include_bytes!("../client/unpack.wasm"));
     let body = include_str!("../client/unpack.js").replace(WASM_PLACEHOLDER, &wasm);
-    let mut hash = DefaultHasher::new();
-    body.hash(&mut hash);
-    Script { path: format!("assets/{SCRIPT_STEM}-{:08x}.js", hash.finish() as u32), body: body.into() }
+    let mut hasher = DefaultHasher::new();
+    body.hash(&mut hasher);
+    let hash = format!("{:08x}", hasher.finish() as u32);
+    Script { path: format!("assets/{SCRIPT_STEM}-{hash}.js"), hash, body: body.into() }
 });
+
+/// [`SCRIPT`]'s path under any build's hash: an `index.html` cached before an upgrade still names the old one.
+pub(crate) fn is_script_path(rel: &str) -> bool {
+    let hash = rel.strip_prefix("assets/").and_then(|r| r.strip_prefix(SCRIPT_STEM)).and_then(|r| r.strip_prefix('-'));
+    hash.and_then(|h| h.strip_suffix(".js")).is_some_and(|h| h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+}
 
 /// Whether the request asks for model bodies.
 pub(crate) fn requested(headers: &HeaderMap) -> bool {
@@ -78,6 +87,20 @@ mod tests {
         assert_eq!(with_script(made.as_bytes()), None);
         assert_eq!(with_script(b"<html></html>"), None);
         assert!(!SCRIPT.body.windows(WASM_PLACEHOLDER.len()).any(|w| w == WASM_PLACEHOLDER.as_bytes()));
+    }
+
+    #[test]
+    fn script_paths_of_any_build() {
+        assert!(is_script_path(&SCRIPT.path));
+        assert!(is_script_path("assets/bluemap-rs-unpack-0123abcd.js"));
+        for other in [
+            "assets/bluemap-rs-unpack-0123abc.js",
+            "assets/bluemap-rs-unpack-0123abcg.js",
+            "bluemap-rs-unpack-0123abcd.js",
+            "assets/bluemap-rs-unpack-0123abcd.js.map",
+        ] {
+            assert!(!is_script_path(other), "{other}");
+        }
     }
 
     #[test]

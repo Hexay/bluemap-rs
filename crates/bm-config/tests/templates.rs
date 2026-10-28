@@ -1,5 +1,5 @@
 //! Our first-start files equal what Java BlueMap 5.29's CLI generated, once the edits tools/render_serve.py made
-//! afterwards (`set_conf`) are replayed on ours and our `format` block is set aside.
+//! afterwards (`set_conf`) are replayed on ours and our `format` and `server-unpack` blocks are set aside.
 
 mod common;
 
@@ -10,6 +10,7 @@ use bm_config::{Key, load_map_config};
 use common::{conf_line, read_lf, set_conf};
 
 const FORMAT_BLOCK: &str = include_str!("../templates/storage-format.conf");
+const UNPACK_BLOCK: &str = include_str!("../templates/webserver-unpack.conf");
 
 /// Replays the harness edits: each `key` takes the value it has in the real file.
 fn replay(mut ours: String, real: &str, keys: &[&str]) -> String {
@@ -42,6 +43,10 @@ fn strip_format(generated: String) -> String {
     generated.strip_suffix(FORMAT_BLOCK).expect("storage configs end with the format block").to_owned()
 }
 
+fn strip_unpack(generated: String) -> String {
+    generated.strip_suffix(UNPACK_BLOCK).expect("webserver.conf ends with the server-unpack block").to_owned()
+}
+
 #[test]
 fn cli_templates_match_bluemap() {
     let fixtures = common::bluemap_fixtures();
@@ -57,7 +62,7 @@ fn cli_templates_match_bluemap() {
         assert_same(fixture, "core.conf", &ours, &real);
 
         let real = read_lf(&cfg.join("webserver.conf"));
-        let ours = replay(generate::webserver_conf(web, data, fixture), &real, &["ip", "port"]);
+        let ours = replay(strip_unpack(generate::webserver_conf(web, data, fixture)), &real, &["ip", "port"]);
         assert_same(fixture, "webserver.conf", &ours, &real);
 
         let real = read_lf(&cfg.join("webapp.conf"));
