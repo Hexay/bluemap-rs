@@ -39,6 +39,8 @@ fn regions(task: &RenderTask) -> Vec<Tile> {
 fn changed_region_files_are_debounced_into_one_update() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("r.0.0.mca"), b"0").unwrap();
+    // macOS FSEvents can deliver a write from just before the stream started; let it age out
+    std::thread::sleep(Duration::from_millis(1000));
     let queue = Arc::new(RenderQueue::new());
     // a loaded box (parallel test binaries, CI runners) can stretch the 10 writes or their OS notifications past 750 ms
     let s = WatchSettings { debounce: Duration::from_millis(2500), ..settings() };
