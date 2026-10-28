@@ -22,8 +22,8 @@ On a 4096×4096-block world (100 region files), a full render from scratch, same
 - **23× faster, 27× less CPU, 30% of the memory** (medians of 3 runs). Re-rendering after edits to 6 region files:
   0.97 s and 3.4 CPU-seconds, against Java's 4.3 s and 45 CPU-seconds.
 - **Cheaper to serve.** For a hires tile nobody requested recently, the webserver uses 5–20× less CPU than Java's on
-  the same compat map, 13–32× less with `optimized` storage, and under half its memory. A page reload revalidates instead of downloading the view again: 13 KB against 5.8 MB
-  ([docs/results](docs/results/devbox-web-java-vs-rs-2026-10-28.md)).
+  the same compat map, 13–32× less with `optimized` storage, and under half its memory. A page reload revalidates
+  instead of downloading the view again: 13 KB against 5.8 MB ([docs/results](docs/results/devbox-web-java-vs-rs-2026-10-28.md)).
 - **The same map.** Hires tiles are byte-identical to Java's after decompression; render state and JSON are identical.
   The one lowres difference on that world is a hole in Java's output that bluemap-rs doesn't have
   ([docs/14](docs/14-real-world-validation.md)).
@@ -55,20 +55,27 @@ Same world and machine; the better value in each row is bold:
 sent ordinary tiles, which the server has to rebuild; by default only a quarter of the cores do that at once,
 the rest queue briefly (`server-unpack` in `webserver.conf`).
 
-Serving a hires tile nobody requested recently, by who asks for it:
+Serving a hires tile nobody requested recently, by server and client:
 
-| Storage, client | Server CPU per tile | Tiles per second | Sent per tile |
-|---|---:|---:|---:|
-| `compat` | 0.03 ms | 150,515 | 96 KB |
-| `optimized`, browser unpacks, zstd | **0.02 ms** | **328,215** | **7 KB** |
-| `optimized`, browser unpacks, gzip | 0.24 ms | 32,076 | 8 KB |
-| `optimized`, client without the script, zstd | 1.51 ms | 4,218 | 96 KB |
-| `optimized`, client without the script, gzip | 3.24 ms | 2,322 | 96 KB |
+| Server, storage, client | Server CPU per tile, 1 / 32 connections | Tiles per second, 32 connections | 512 connections | Sent per tile |
+|---|---:|---:|---:|---:|
+| Java BlueMap 5.28, `compat` | 0.65 / 0.32 ms | 1,016 ² | 54,060 | 94 KB |
+| bluemap-rs, `compat` | 0.033 / 0.067 ms | 152,678 | 80,210 | 94 KB |
+| bluemap-rs, `optimized`, browser unpacks | **0.020 / 0.025 ms** | **380,754** | **300,614** | **7 KB** |
+| bluemap-rs, `optimized`, client without the script ³ | 1.8 / 2.0 ms | 2,103 | – | 97 KB |
 
-CPU per tile is at 1 connection, tiles per second at 32 (medians of 3 runs, 2026-10-28, harness in
-[docs/18](docs/18-client-unpack.md)). A tile served again from the server's cache costs the same as `compat` on every
-row. The first request to a part of the map nobody has viewed since startup reads one 2 KB index per storage bundle:
-10,000–66,000 such reads per second at 32 connections, p99 under 9 ms.
+² Java's server waits ~41 ms before each response after the first on a keep-alive connection (it never sets
+`TCP_NODELAY`), so up to 32 connections its rate is connections ÷ 41 ms, not its CPU. The stall mostly goes away
+under sustained load at 512 connections, where the client on the same machine limits both servers.
+
+³ Each tile requested once (the server caches tiles it rebuilds); at most a quarter of the cores unpack at once.
+
+Medians of 3 runs, 2026-10-28, page cache warm, none of the measured tiles requested earlier in the server's life.
+With the page cache dropped first, so every tile comes from disk, 32 connections get 969 tiles per second from Java, 72,714 from
+bluemap-rs `compat` and 187,268 from `optimized`, at 0.19 / 0.079 / 0.029 ms CPU per tile
+([method and all rows](docs/results/devbox-web-java-vs-rs-2026-10-28.md)). The first request to a part of the map
+nobody has viewed since startup reads one 2 KB index per storage bundle: 10,000–66,000 such reads per second at 32
+connections, p99 under 9 ms.
 
 ## What works
 
