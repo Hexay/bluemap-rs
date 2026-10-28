@@ -1,0 +1,28 @@
+name: Docker smoke
+
+# Runs the published CLI image natively on amd64 and arm64 the way upstream's wiki does (tools/docker_smoke.sh).
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: image tag
+        default: latest
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: bash tools/docker_smoke.sh "ghcr.io/hexay/bluemap-rs:$TAG"
+        env:
+          TAG: ${{ inputs.tag }}

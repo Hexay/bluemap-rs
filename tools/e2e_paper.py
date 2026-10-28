@@ -2,6 +2,7 @@
 upstream BlueMap 5.29 on a copy of the same world.
 
     py -3 tools/e2e_paper.py [--skip-build | --core BIN | --jar JAR] [--keep] [--no-upstream] [--server folia] [--mc 26.2]
+                             [--jvm=-XX:MaxRAMPercentage=95.0]
 
 `--server`/`--mc` pick another build from e2e_server.SERVERS; other versions need their fixture world
 (`py -3 tools/make_world.py context --mc <mc>`). Folia loads neither BlueBorder nor the bots (no `folia-supported`),
@@ -19,6 +20,7 @@ captured files go to work/e2e-paper/out/.
 import argparse
 import json
 import re
+import shlex
 import shutil
 import sys
 import time
@@ -36,6 +38,7 @@ OUT = E2E / "out"
 class Target:
     kind: str = "paper"
     mc: str = MC
+    jvm: tuple[str, ...] = ("-Xmx2G",)
 
     @property
     def addons(self) -> bool:
@@ -50,7 +53,7 @@ class Target:
         return [bluemap, e2e_addon_jar(build=False), *([fetch("blueborder"), fetch("bots")] if self.addons else [])]
 
     def server(self, folder: Path) -> Paper:
-        return Paper(folder, kind=self.kind, mc=self.mc)
+        return Paper(folder, kind=self.kind, mc=self.mc, jvm=self.jvm)
 
     def prepare(self, folder: Path, plugins: list[Path], fresh: bool, world_from: Path | None = None) -> None:
         prepare(folder, plugins, fresh, world_from=world_from, mc=self.mc)
@@ -118,6 +121,8 @@ def run_ours(jar: Path, fresh: bool, target: Target) -> Path:
         jar_mib = jar.stat().st_size / 2**20
         check("plugin jar", True, f"{jar.name} {jar_mib:.1f} MiB")
         server.wait_for(r"Done \(", 300, since_start=True)
+        if budget := next((l for l in server.history if "Container memory limit" in l), None):
+            check("container memory budget logged", True, budget[budget.index("Container"):])
 
         server.command("bluemap", r"BlueMap Status|render-threads", 30)
         check("/bluemap status", True)
@@ -330,9 +335,9 @@ def compare_configs(ours: Path, theirs: Path) -> None:
             continue
         strip = lambda p: [l for l in p.read_text(encoding="utf-8").splitlines() if not l.startswith("# 20")]
         ours_lines, theirs_lines = strip(mine), strip(path)
-        if rel.parts[0] == "storages":
-            # deliberate: new storages get an appended `format: optimized` block (docs/00 "Storage default")
-            check(f"config {rel} = upstream + format block", ours_lines[:len(theirs_lines)] == theirs_lines)
+        if rel.parts[0] == "storages" or rel.name == "webserver.conf":
+            # deliberate appended blocks: storages' `format: optimized` (docs/00 "Storage default"), `server-unpack` (docs/18)
+            check(f"config {rel} = upstream + appended block", ours_lines[:len(theirs_lines)] == theirs_lines)
         else:
             check(f"config {rel} identical", ours_lines == theirs_lines)
 
@@ -347,8 +352,9 @@ def main() -> None:
     ap.add_argument("--jobs", "-j", type=int, help="cargo jobs")
     ap.add_argument("--server", choices=sorted({kind for kind, _ in SERVERS}), default="paper")
     ap.add_argument("--mc", default=MC)
+    ap.add_argument("--jvm", default="-Xmx2G", help="JVM flags for our server (e.g. a Pterodactyl egg's)")
     args = ap.parse_args()
-    target = Target(args.server, args.mc)
+    target = Target(args.server, args.mc, tuple(shlex.split(args.jvm)))
     if (target.kind, target.mc) not in SERVERS:
         ap.error(f"no pinned {target.kind} build for {target.mc}; known: {sorted(SERVERS)}")
     jar = args.jar or (plugin_jar() if args.skip_build else build(args.core, args.jobs))
@@ -359,7 +365,7 @@ def main() -> None:
     if not args.no_upstream:
         run_upstream(folder / "world", target)  # before the JVM kill: SIGKILL can truncate the world's .dat files
     run_jvm_kill(folder, target)
-    if not args.no_upstream and target == Target():
+    if not args.no_upstream and (target.kind, target.mc) == ("paper", MC):
         run_handoff(jar, folder)
     sys.exit(report(OUT))
 
