@@ -15,12 +15,12 @@ On a 4096×4096-block world (100 region files), a full render from scratch, same
 
 | | Wall time | CPU time | Peak memory | Output |
 |---|---:|---:|---:|---:|
-| Java BlueMap 5.28 | 23.5 min | 2.7 h | 2,139 MB | 1,545 MiB |
-| bluemap-rs | **58 s** | **5.3 min** | **878 MB** | 1,576 MiB |
-| bluemap-rs, `format: optimized` storage | **25 s** | **4.4 min** | 904 MB | **130 MiB** |
+| Java BlueMap 5.28 | 5.7 min | 75 min | 2,899 MB | 1,545 MiB |
+| bluemap-rs | **14.8 s** | **2.7 min** | **858 MB** | 1,576 MiB |
+| bluemap-rs, `format: optimized` storage | **12.4 s** | **2.3 min** | 909 MB | **130 MiB** |
 
-- **24× faster, 31× less CPU, 41% of the memory** (medians of 3 runs). Re-rendering after edits to 6 region files:
-  3.6 s and 6.1 CPU-seconds, against Java's 20.5 s and 155 CPU-seconds.
+- **23× faster, 27× less CPU, 30% of the memory** (medians of 3 runs). Re-rendering after edits to 6 region files:
+  0.97 s and 3.4 CPU-seconds, against Java's 4.3 s and 45 CPU-seconds.
 - **The same map.** Hires tiles are byte-identical to Java's after decompression; render state and JSON are identical.
   The one lowres difference on that world is a hole in Java's output that bluemap-rs doesn't have
   ([docs/14](docs/14-real-world-validation.md)).
@@ -28,9 +28,10 @@ On a 4096×4096-block world (100 region files), a full render from scratch, same
   JVM heap. It can pause while the server lags, cap its own memory, and resume interrupted renders
   ([docs/15](docs/15-beyond-parity.md)).
 
-Measured on a 6-core/12-thread Xeon E-2136 with 31 GiB RAM and HDD storage, shared with other jobs: bluemap-rs
-(glibc build) on 2026-10-28, Java on 2026-10-08 (same world, config and machine). The shipped static Linux build uses
-13% more CPU and 19% less memory. Method, raw numbers and caveats: [docs/14](docs/14-real-world-validation.md).
+Measured on 2026-10-28 on an 8-core/16-thread Ryzen 7 9700X with 62 GB RAM and NVMe storage, shared with other jobs.
+Both renderers ran on that machine, with the same world and config; bluemap-rs is the glibc build. The shipped static
+Linux build uses 9% more CPU and 17% less memory. Method, raw numbers and caveats:
+[docs/results/devbox-2026-10-28.md](docs/results/devbox-2026-10-28.md).
 
 ### Which storage format
 
@@ -38,12 +39,12 @@ Same world and machine; the better value in each row is bold:
 
 | | `compat` (BlueMap's layout) | `optimized` |
 |---|---:|---:|
-| Render, wall time | 58 s | **25 s** |
-| Render, CPU time | 5.3 min | **4.4 min** |
+| Render, wall time | 14.8 s | **12.4 s** |
+| Render, CPU time | 2.7 min | **2.3 min** |
 | Size on disk | 1,576 MiB in 16,865 files | **130 MiB in 387 files** |
-| Serve a hires tile (server CPU) | 0.09 ms | **0.06 ms** ¹ |
+| Serve a hires tile (server CPU) | 0.03 ms | **0.02 ms** ¹ |
 | Bytes sent per hires tile | 96 KB | **7 KB** ¹ |
-| Hires tiles served per second | 51,000 | **103,000** ¹ |
+| Hires tiles served per second | 140,000 | **178,000** ¹ |
 | Can be served by | **bluemap-rs, Java BlueMap, nginx, `sql.php`** | bluemap-rs only |
 
 ¹ With bluemap-rs's webserver, which has the browser unpack optimized tiles itself
@@ -54,14 +55,16 @@ Serving a hires tile nobody requested recently, by who asks for it:
 
 | Storage, client | Server CPU per tile | Tiles per second | Sent per tile |
 |---|---:|---:|---:|
-| `compat` | 0.09 ms | 50,588 | 96 KB |
-| `optimized`, browser unpacks, zstd | **0.06 ms** | **102,843** | **7 KB** |
-| `optimized`, browser unpacks, gzip | 0.45 ms | 14,372 | 7 KB |
-| `optimized`, client without the script, zstd | 3.04 ms | 1,750 | 92 KB |
-| `optimized`, client without the script, gzip | 7.04 ms | 1,019 | 100 KB |
+| `compat` | 0.03 ms | 140,260 | 96 KB |
+| `optimized`, browser unpacks, zstd | **0.02 ms** | **178,064** | **7 KB** |
+| `optimized`, browser unpacks, gzip | 0.25 ms | 9,712 | 8 KB |
+| `optimized`, client without the script, zstd | 1.64 ms | 3,217 | 96 KB |
+| `optimized`, client without the script, gzip | 3.49 ms | 1,873 | 96 KB |
 
-CPU per tile is at 1 connection, tiles per second at 32 (one run, 2026-10-28, [docs/18](docs/18-client-unpack.md)). A
-tile served again from the server's cache costs the same as `compat` on every row.
+CPU per tile is at 1 connection, tiles per second at 32 (one run, 2026-10-28, harness in
+[docs/18](docs/18-client-unpack.md)). A tile served again from the server's cache costs the same as `compat` on every
+row. The first request to a part of the map nobody has viewed since startup reads one 2 KB index per storage bundle:
+10,000–66,000 such reads per second at 32 connections, p99 under 9 ms.
 
 ## What works
 
