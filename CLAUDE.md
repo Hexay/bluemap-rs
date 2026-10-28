@@ -54,7 +54,8 @@ decisions); subsystem research is `docs/01`–`09`, later docs are numbered by t
   `--jvm=<flags>`)
 - Bench: `tools/bench.py <label> -n 3 -- <cmd>`; Java vs ours `tools/bench_render.py`; real 4096² world
   `tools/real_world.py gen|edit|render|update|compare` (docs/14); serving harnesses in `docs/perf-exp/`
-- After changing `bm_format::compact`'s decoder: `py -3 tools/build_wasm.py`, then
+- After changing `bm_format::compact`'s decoder or `bm-wasm`: `py -3 tools/build_wasm.py` (needs clang + llvm-ar for
+  wasm32: run it on the devbox), then
   `node tools/check_client_unpack.mjs <server> <compat webroot>` and `check_client_unpack_browser.mjs <map url> <chrome>`
 - Release: `tools/build_core.py [targets…] [--jars]` (as CI); notices `tools/notices.py` (update
   `licenses/BUNDLED.txt` when bundled webapp/jars/C libs change). A `v*` tag makes a **draft** release: publish it,

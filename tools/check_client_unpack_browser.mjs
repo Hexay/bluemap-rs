@@ -1,15 +1,20 @@
 // usage: node tools/check_client_unpack_browser.mjs <map url> <chrome or edge exe> [screenshot.png] [seconds=25]
+//   [--accept-encoding "gzip, deflate, br"]
 // Client-side unpacking (docs/18) in a real browser: opens the webapp headless over the DevTools protocol, records
 // how its own hires tile requests were answered, then refetches those tiles in the page both ways (through the
 // client script, and as server-made PRBM over XMLHttpRequest, which the script does not touch) and compares the
-// bytes. Fails if no tile arrived packed, a tile differs, or the page logged an error.
+// bytes. Fails if no tile arrived packed, a tile differs, or the page logged an error. --accept-encoding replaces
+// the browser's, e.g. without zstd as a Safari before 26.3 sends it.
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const [url, browser, screenshot, seconds = "25"] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const at = args.indexOf("--accept-encoding");
+const acceptEncoding = at >= 0 ? args.splice(at, 2)[1] : null;
+const [url, browser, screenshot, seconds = "25"] = args;
 if (!url || !browser) {
   console.error("usage: node tools/check_client_unpack_browser.mjs <map url> <browser exe> [screenshot.png] [seconds]");
   process.exit(2);
@@ -74,6 +79,7 @@ try {
   };
 
   await send("Network.enable");
+  if (acceptEncoding) await send("Network.setExtraHTTPHeaders", { headers: { "Accept-Encoding": acceptEncoding } });
   await send("Runtime.enable");
   await send("Page.enable");
   await send("Page.navigate", { url });
@@ -116,8 +122,8 @@ try {
   }
 
   const wire = (list) => Math.round(list.reduce((sum, t) => sum + t.wire, 0) / Math.max(list.length, 1));
-  const codings = [...new Set(packed.map((t) => t.encoding))].join(", ");
-  console.log(`webapp loaded ${loaded.length} hires tiles: ${packed.length} packed (${codings}; ${wire(packed)} B on the wire each)`);
+  const forms = [...new Set(packed.map((t) => `${t.type} as ${t.encoding}`))].join(", ");
+  console.log(`webapp loaded ${loaded.length} hires tiles: ${packed.length} packed (${forms}; ${wire(packed)} B on the wire each)`);
   console.log(`refetched ${compared.same + compared.different.length}: ${compared.same} identical to the server's PRBM ` +
     `(${Math.round(compared.prbmBytes / Math.max(compared.same, 1))} B, ${Math.round(compared.quads)} quads in all)`);
   compared.different.forEach((line) => console.log(`DIFFERENT ${line}`));

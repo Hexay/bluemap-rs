@@ -186,7 +186,11 @@ impl Drop for Served {
     }
 }
 
+/// What scripts before the frame decoder ask for.
 pub const UNPACKS: (&str, &str) = ("Accept", "application/vnd.bluemap.bmq3, */*");
+/// What the current script asks for (`client/unpack.js`).
+pub const UNPACKS_FRAMES: (&str, &str) =
+    ("Accept", "application/vnd.bluemap.bmq3+zstd, application/vnd.bluemap.bmq3, */*");
 pub const PRBM_TYPE: Option<&str> = Some("application/octet-stream");
 pub const TILE: &str = "/maps/world/tiles/0/x0/z0.prbm";
 pub const RAW_TILE: &str = "/maps/world/tiles/0/x1/z0.prbm";

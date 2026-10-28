@@ -2,7 +2,7 @@
 //! unpack time of the same bodies as its baseline.
 //!
 //! Usage: `cargo run --release -p bm-wasm --example corpus -- <dir with x…/z….prbm.gz> <out dir> [--step 1]
-//! [--reps 5]`. Writes `<n>.body` per model-mode tile and `manifest.json` (`[{name, quads, prbm, fnv}]`, fnv =
+//! [--reps 5]`. Writes `<n>.body` per model-mode tile, its stored zstd frame as `<n>.frame`, and `manifest.json` (`[{name, quads, prbm, fnv}]`, fnv =
 //! FNV-1a 32 of the PRBM). Tile origins assume the default hires grid (32-block tiles offset by 2).
 
 use std::io::{Read, Write};
@@ -42,7 +42,7 @@ fn main() {
 
     let mut codec = CompactCodec::default();
     let mut unpacker = BodyUnpacker::default();
-    let (mut prbm, mut body, mut out) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut prbm, mut body, mut out, mut blob) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let (mut quads, mut native, mut entries, mut body_bytes) = (0usize, Duration::ZERO, Vec::new(), 0usize);
     for path in paths.iter().step_by(step) {
         prbm.clear();
@@ -63,6 +63,9 @@ fn main() {
         let n = u32::from_le_bytes([prbm[2], prbm[3], prbm[4], 0]) as usize / 6;
         let name = format!("{}.body", entries.len());
         std::fs::write(out_dir.join(&name), &body).expect("write body");
+        codec.encode_into(&prbm, tile.map(|t| grid.tile_min(t).into()), &mut blob).expect("encode");
+        let frame = bm_format::compact::model_frame(&blob).expect("model-mode blob");
+        std::fs::write(out_dir.join(format!("{}.frame", entries.len())), frame).expect("write frame");
         entries.push(format!(r#"{{"name":"{name}","quads":{n},"prbm":{},"fnv":{}}}"#, prbm.len(), fnv(&prbm)));
         (quads, native, body_bytes) = (quads + n, native + best, body_bytes + body.len());
     }

@@ -10,16 +10,20 @@ It is negotiated per request. A client that does not ask gets PRBM exactly as be
 ## Wire
 
 - **Request**: a hires tile URL (`maps/<id>/tiles/0/x…/z….prbm`) with `Accept` naming
-  `application/vnd.bluemap.bmq3`.
-- **Reply**, if the storage packs hires tiles and the tile is stored in model mode: `Content-Type:
-  application/vnd.bluemap.bmq3`, body = the tile's *model body* (docs/17, `bm_format::compact`):
-  - client accepts zstd: the blob's zstd frame, byte for byte from storage, `Content-Encoding: zstd`;
-  - else gzip: the frame decompressed and gzipped (transcode cache, ~8 KB per tile);
-  - else identity.
+  `application/vnd.bluemap.bmq3+zstd` (the script decodes zstd frames) or only `application/vnd.bluemap.bmq3`
+  (scripts of 0.3.0).
+- **Reply**, if the storage packs hires tiles and the tile is stored in model mode, the tile's *model body*
+  (docs/17, `bm_format::compact`) in one of:
+  - client accepts zstd: the blob's zstd frame, byte for byte from storage, `Content-Encoding: zstd`,
+    `Content-Type: application/vnd.bluemap.bmq3`;
+  - else, if it named `+zstd`: the same frame without `Content-Encoding`, `Content-Type:
+    application/vnd.bluemap.bmq3+zstd` (see "Browsers without zstd");
+  - else (a 0.3.0 script) gzip: the frame decompressed and gzipped (transcode cache, ~8 KB per tile); else
+    identity; both `application/vnd.bluemap.bmq3`.
 - A tile stored raw (the model could not hold it), a `.gz` URL, a compat storage or a server with the feature off
   answers with PRBM and `application/octet-stream`. The client tells the two apart by `Content-Type`.
 - `Vary: Accept, Accept-Encoding` on every hires reply of a packing storage while the feature is on.
-- ETags: `"<version>-bmq3-zstd"`, `-bmq3-gzip`, `-bmq3`, distinct from every PRBM representation's. A revalidation
+- ETags: `"<version>-bmq3-zstd"`, `-bmq3-frame`, `-bmq3-gzip`, `-bmq3`, distinct from every PRBM representation's. A revalidation
   from an unpacking client matches the packed tag or the PRBM tag (it holds whichever form the tile had).
 
 Code: `crates/bm-web/src/client_unpack.rs`, `map_data::serve`, `transcode::packed_body`,
@@ -27,7 +31,7 @@ Code: `crates/bm-web/src/client_unpack.rs`, `map_data::serve`, `transcode::packe
 
 ## Client
 
-`crates/bm-web/client/unpack.js`, with the WASM unpacker (`crates/bm-wasm`, 46 KB) inlined as base64. The webapp
+`crates/bm-web/client/unpack.js`, with the WASM unpacker (`crates/bm-wasm`, 85 KB) inlined as base64. The webapp
 bundle is not modified: BlueMap 5.28 loads tiles through `fetch`, so the script wraps `fetch`, adds the `Accept`
 header to hires tile requests, unpacks in workers, and hands the webapp a `Response` holding the unpacked PRBM
 (docs/24). Any failure (WASM
@@ -47,9 +51,57 @@ unavailable, corrupt body) falls back to an ordinary request.
   template headers let browsers keep `index.html` a day).
 
 The unpacker is `bm_format::compact::BodyUnpacker`, the same code the server runs, built without the `codec`
-feature (no zstd: the browser has already undone the content coding). WebAssembly float arithmetic is IEEE 754, so
-positions and normals come out bit-identical. After changing the decoder or `bm-wasm`, rebuild the checked-in
-module: `py -3 tools/build_wasm.py`.
+feature, plus zstd's C decoder (`zstd-sys`) for frames sent unlabelled. WebAssembly float arithmetic is IEEE 754,
+so positions and normals come out bit-identical. After changing the decoder or `bm-wasm`, rebuild the checked-in
+module: `py -3 tools/build_wasm.py`. It needs clang and llvm-ar with the wasm32 target (the devbox has both; this
+Windows machine does not: run it there and copy `crates/bm-web/client/unpack.wasm` back). The script links a
+staticlib with rust-lld itself: a cdylib exports, and so keeps, every upstream `#[no_mangle]` function, and
+zstd-sys's wasm shim brings ~35 KB of `qsort` nobody calls.
+
+## Browsers without zstd
+
+Chrome 123+ and Firefox 126+ send `zstd` in `Accept-Encoding`; Safari since 26.3, and only on iOS/macOS 26.3+
+(it uses the system's network stack, so Safari 26 on older macOS does not). Older Safari, older browsers, and
+clients behind a proxy that rewrites `Accept-Encoding` used to get the model body gzipped by the server: 0.24 ms of
+CPU per tile, 32k tiles/s instead of ~300k, bounded only by the transcode memory gate. The script now decodes the
+frame itself (`bmq3_unpack_frame`), so the server sends what it stored; the browser's own zstd stays in use where
+it exists (`client_unpack::Form`). Nothing needs `DecompressionStream`.
+
+Decided on numbers, thresholds set first: the decoder ships to every viewer, so at most +35 KB of script on the
+wire (fetched once per release, `immutable`; ~8 tiles' worth) and at most +15% unpack time per tile in Chrome
+(the alternative, gzip transcodes under the `server-unpack` slots and cache, keeps the server cost and only moves
+it into a queue). Devbox, 261 tiles of the 4096² world (every 64th; 89 KB body, 8.4 KB frame each), unpack ms per
+tile warm (`crates/bm-wasm/bench`, `node.mjs`/`browser.mjs --frames`, corpus with `.frame` files):
+
+| module | raw | script on the wire (base64, gzip) | Node | Chrome |
+|---|---:|---:|---:|---:|
+| bodies only (0.3.0) | 45.8 KB | 25.3 KB | 0.454 | 0.423 |
+| + ruzstd 0.9, frames | 89.4 KB | 46.4 KB | 0.897 | 0.697 |
+| + zstd C, cdylib, `-O3` | 151.5 KB | 72.1 KB | 0.500 | 0.471 |
+| + zstd C, linked from a staticlib, `-Os`, X1 Huffman, short sequences (shipped) | **84.7 KB** | **44.9 KB** | 0.481 | **0.447** |
+| same, `-O3` | 89.1 KB | 47.5 KB | 0.478 | 0.449 |
+
+ruzstd adds 63% in Chrome; the shipped build adds 0.036 ms (9%) and 19.6 KB of
+script. Time to a rendered view (`view.mjs`, 42 tiles, median of 3, devbox headless SwiftShader):
+0.3.0 script 4976 ms / this one 4992 ms with Chrome's `Accept-Encoding`; 5228 / 5218 ms with `gzip, deflate, br`;
+no script 5720 ms: the decode is noise next to the webapp's own work.
+
+Server, `docs/perf-exp/testbox_web.sh` on the devbox (2026-10-28, locked, load 8–15 from other users; d12 and
+d12-opt webroots), rows for a client without zstd:
+
+| client | 1 conn: CPU ms/req | p50 | 32 conns: req/s | CPU ms/req | KB/tile |
+|---|---:|---:|---:|---:|---:|
+| 0.3.0 script (gzip transcode) | 0.24 | 159 µs | 32,192 | 0.39 | 8 |
+| this script (frame as stored) | **0.02** | 16 µs | **299,140** | **0.03** | **7** |
+| this script, browser with zstd | 0.02 | 16 µs | 299,731 | 0.03 | 7 |
+
+`tools/check_client_unpack.mjs` (Node, no zstd: frames) 505 tiles identical, 7,498 B each;
+`tools/check_client_unpack_browser.mjs` in Chrome 42 of 42 packed both ways (3,831 B as zstd, 3,812 B as
+`bmq3+zstd` with `--accept-encoding "gzip, deflate, br"`), 40 refetched byte-identical. Both:
+`docs/perf-exp/devbox_client_frames.sh`.
+
+A tab still running the 0.3.0 script keeps the gzip path under the memory gate until it reloads (`index.html`
+revalidates, and any script hash is answered with the current script).
 
 ## Clients that don't unpack
 

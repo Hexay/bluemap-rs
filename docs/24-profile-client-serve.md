@@ -9,7 +9,7 @@ testbox (load average 50–160 from other jobs: its numbers are profiles and rat
 ```
 cargo run --release -p bm-wasm --example corpus -- <dir of x…/z….prbm.gz> <corpus dir> [--step 4]
 cargo run --release -p bm-wasm --example unpack_bench -- <corpus dir>          # native baseline
-node crates/bm-wasm/bench/node.mjs <corpus dir> [unpack.wasm]                    # WASM in Node
+node crates/bm-wasm/bench/node.mjs <corpus dir> [unpack.wasm] [reps] [--frames]   # WASM in Node (--frames: from zstd)
 node crates/bm-wasm/bench/browser.mjs <corpus dir> <chrome> [unpack.wasm]        # WASM in Chrome
 node crates/bm-wasm/bench/browser.mjs <corpus> <chrome> <wasm> 3 --client crates/bm-web/client/unpack.js [--pipeline '{"tiles":48}']
 node crates/bm-wasm/bench/view.mjs "<map url>" <chrome> [--script js --wasm wasm | --no-script] [--net 20,50]

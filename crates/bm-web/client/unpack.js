@@ -6,6 +6,8 @@
 (() => {
   "use strict";
   const MEDIA_TYPE = "application/vnd.bluemap.bmq3";
+  // the body's zstd frame, for a browser that does not take zstd as a content coding
+  const FRAME_TYPE = "application/vnd.bluemap.bmq3+zstd";
   const SWITCH = "bluemap-rs-client-unpack";
   const WASM = "__UNPACK_WASM_BASE64__";
   const scope = globalThis;
@@ -19,17 +21,17 @@
   }
   if (off || typeof plainFetch !== "function" || typeof WebAssembly !== "object") return;
 
-  // body → PRBM in a buffer of its own; runs on the main thread and, stringified, in each worker
+  // body (or its zstd frame) → PRBM in a buffer of its own; runs on the main thread and, stringified, in each worker
   function decoder(module) {
     // a module's memory never shrinks: one grown past this by a huge tile is dropped after it
     const MEMORY_LIMIT = 64 << 20;
     let exports = null;
-    return async (body) => {
+    return async (body, frame) => {
       exports ??= (await WebAssembly.instantiate(module)).exports;
       const x = exports;
       const input = x.bmq3_input(body.length);
       new Uint8Array(x.memory.buffer, input, body.length).set(body);
-      const length = x.bmq3_unpack();
+      const length = frame ? x.bmq3_unpack_frame() : x.bmq3_unpack();
       if (length < 0) throw new Error("corrupt packed tile");
       const prbm = new Uint8Array(x.memory.buffer, x.bmq3_output(), length).slice();
       if (x.memory.buffer.byteLength > MEMORY_LIMIT) exports = null;
@@ -43,7 +45,7 @@ let unpack;
 onmessage = async ({ data }) => {
   if (data.module) return void (unpack = decoder(data.module));
   try {
-    const prbm = await unpack(new Uint8Array(data.body));
+    const prbm = await unpack(new Uint8Array(data.body), data.frame);
     postMessage({ id: data.id, prbm }, [prbm.buffer]);
   } catch (error) {
     postMessage({ id: data.id, error: String(error) });
@@ -82,14 +84,14 @@ onmessage = async ({ data }) => {
         if (pool.every((e) => e.dead)) unpack = decoder(module);
       };
     }
-    return (body) => {
+    return (body, frame) => {
       const live = pool.filter((e) => !e.dead);
-      if (!live.length) return decoder(module)(body);
+      if (!live.length) return decoder(module)(body, frame);
       const entry = live.reduce((a, b) => (b.jobs.size < a.jobs.size ? b : a));
       const id = nextId++;
       return new Promise((resolve, reject) => {
         entry.jobs.set(id, { resolve, reject });
-        entry.worker.postMessage({ id, body: body.buffer }, [body.buffer]);
+        entry.worker.postMessage({ id, body: body.buffer, frame }, [body.buffer]);
       });
     };
   }
@@ -144,12 +146,13 @@ onmessage = async ({ data }) => {
     if (!unpack) return plainFetch.call(this, input, init);
 
     const request = new Request(input, init);
-    request.headers.set("Accept", `${MEDIA_TYPE}, */*`);
+    request.headers.set("Accept", `${FRAME_TYPE}, ${MEDIA_TYPE}, */*`);
     const response = await plainFetch.call(this, request);
-    if (!(response.headers.get("Content-Type") || "").startsWith(MEDIA_TYPE)) return response;
+    const type = (response.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+    if (type !== MEDIA_TYPE && type !== FRAME_TYPE) return response;
     let prbm;
     try {
-      prbm = await unpack(new Uint8Array(await response.arrayBuffer()));
+      prbm = await unpack(new Uint8Array(await response.arrayBuffer()), type === FRAME_TYPE);
     } catch (error) {
       console.warn("bluemap-rs: unpacking a tile failed, loading it unpacked", error);
       return plainFetch.call(this, input, init);

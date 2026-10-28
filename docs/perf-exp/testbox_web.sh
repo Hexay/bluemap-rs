@@ -18,7 +18,8 @@ find "$COMPAT/maps/$MAP/tiles/0" "$OPT/maps/$MAP" -type f -exec cat {} + > /dev/
 TICK=$(getconf CLK_TCK)
 cpu_ticks() { awk '{print $14 + $15}' "/proc/$1/stat"; }
 
-# run <label> <webroot> <conns> <request header> [serve_bench args…]; UNPACKS=1 also asks for packed tiles
+# run <label> <webroot> <conns> <request header> [serve_bench args…]; UNPACKS=1 also asks for packed tiles as
+# scripts before the frame decoder did, UNPACKS=frames as the current one does
 run() {
   local label=$1 root=$2 conns=$3 header=$4; shift 4
   "$EXE/serve_bench" "$root" --port $PORT --etags "$@" > /dev/null 2>&1 &
@@ -26,6 +27,7 @@ run() {
   until (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2> /dev/null; do sleep 0.1; done
   local before; before=$(cpu_ticks $pid)
   local unpacks=(); [ -n "$UNPACKS" ] && unpacks=(--header "Accept: application/vnd.bluemap.bmq3, */*")
+  [ "$UNPACKS" = frames ] && unpacks=(--header "Accept: application/vnd.bluemap.bmq3+zstd, application/vnd.bluemap.bmq3, */*")
   local out; out=$("$EXE/load_bench" 127.0.0.1:$PORT "${URLSET:-$URLS}" --conns "$conns" --secs "$SECS" --header "$header" "${unpacks[@]}")
   local after; after=$(cpu_ticks $pid)
   local rss; rss=$(awk '/VmHWM/ {print $2}' /proc/$pid/status)
@@ -55,6 +57,8 @@ for conns in 1 32; do
   # the client asks for tiles as stored and unpacks them itself (docs/18)
   UNPACKS=1 run "optimized, client unpacks, browser (zstd)" "$OPT" $conns "$BROWSER" --optimized
   UNPACKS=1 run "optimized, client unpacks, gzip only" "$OPT" $conns "Accept-Encoding: gzip" --optimized
+  UNPACKS=frames run "optimized, client decodes frames, browser (zstd)" "$OPT" $conns "$BROWSER" --optimized
+  UNPACKS=frames run "optimized, client decodes frames, no zstd" "$OPT" $conns "Accept-Encoding: gzip, deflate, br" --optimized
 done
 # tiles that were served before: the transcode cache holds them
 URLSET=$(mktemp); head -200 "$URLS" > "$URLSET"

@@ -15,6 +15,8 @@ use http::header::ACCEPT;
 
 /// `Content-Type` of a model body, and what a client puts in `Accept` to get one.
 pub(crate) const MEDIA_TYPE: &str = "application/vnd.bluemap.bmq3";
+/// `Content-Type` of a model body's zstd frame sent as is, and what a client that decodes one puts in `Accept`.
+pub(crate) const FRAME_MEDIA_TYPE: &str = "application/vnd.bluemap.bmq3+zstd";
 /// In the script's file name; an `index.html` that already mentions it is left alone.
 const SCRIPT_STEM: &str = "bluemap-rs-unpack";
 const WASM_PLACEHOLDER: &str = "__UNPACK_WASM_BASE64__";
@@ -42,18 +44,58 @@ pub(crate) fn is_script_path(rel: &str) -> bool {
     hash.and_then(|h| h.strip_suffix(".js")).is_some_and(|h| h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Whether the request asks for model bodies.
-pub(crate) fn requested(headers: &HeaderMap) -> bool {
-    let names_it = |v: &str| v.to_ascii_lowercase().contains(MEDIA_TYPE);
-    headers.get_all(ACCEPT).iter().any(|v| v.to_str().is_ok_and(names_it))
+/// What a request's `Accept` asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asked {
+    Prbm,
+    /// Model bodies (scripts before the frame decoder).
+    Bodies,
+    /// Model bodies, or their zstd frames as stored.
+    Frames,
 }
 
-/// The ETag suffix of a model body sent in `coding`, distinct from every PRBM representation's.
-pub(crate) fn etag_coding(coding: Compression) -> &'static str {
-    match coding {
-        Compression::Zstd => "bmq3-zstd",
-        Compression::Gzip => "bmq3-gzip",
-        _ => "bmq3",
+pub(crate) fn requested(headers: &HeaderMap) -> Asked {
+    let types: Vec<&str> = (headers.get_all(ACCEPT).iter().filter_map(|v| v.to_str().ok()))
+        .flat_map(|v| v.split(','))
+        .map(|item| item.split(';').next().unwrap_or("").trim())
+        .collect();
+    let names = |t: &str| types.iter().any(|item| item.eq_ignore_ascii_case(t));
+    if names(FRAME_MEDIA_TYPE) {
+        Asked::Frames
+    } else if names(MEDIA_TYPE) {
+        Asked::Bodies
+    } else {
+        Asked::Prbm
+    }
+}
+
+/// How a model-mode tile goes to a client that unpacks, which accepts `coding` (`encoding::packed_coding`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Form {
+    /// The model body in a content coding; zstd is the stored frame, others are transcoded.
+    Body(Compression),
+    /// The stored frame, unlabelled: the script decodes it.
+    Frame,
+}
+
+impl Form {
+    pub(crate) fn new(asked: Asked, coding: Compression) -> Self {
+        // the browser's own zstd decoder is faster than the script's (docs/18)
+        if asked == Asked::Frames && coding != Compression::Zstd { Form::Frame } else { Form::Body(coding) }
+    }
+
+    pub(crate) fn content_type(self) -> &'static str {
+        if self == Form::Frame { FRAME_MEDIA_TYPE } else { MEDIA_TYPE }
+    }
+
+    /// The ETag suffix, distinct from every PRBM representation's.
+    pub(crate) fn etag_suffix(self) -> &'static str {
+        match self {
+            Form::Body(Compression::Zstd) => "bmq3-zstd",
+            Form::Body(Compression::Gzip) => "bmq3-gzip",
+            Form::Body(_) => "bmq3",
+            Form::Frame => "bmq3-frame",
+        }
     }
 }
 
@@ -106,8 +148,11 @@ mod tests {
     #[test]
     fn accept_names_the_media_type() {
         let accept = |v: &'static str| [(ACCEPT, http::HeaderValue::from_static(v))].into_iter().collect::<HeaderMap>();
-        assert!(requested(&accept("Application/vnd.bluemap.BMQ3, */*")));
-        assert!(!requested(&accept("*/*")));
-        assert!(!requested(&HeaderMap::new()));
+        assert_eq!(requested(&accept("Application/vnd.bluemap.BMQ3, */*")), Asked::Bodies);
+        assert_eq!(requested(&accept("application/vnd.bluemap.bmq3+zstd, */*")), Asked::Frames);
+        assert_eq!(requested(&accept("text/html, application/vnd.bluemap.bmq3+zstd;q=1")), Asked::Frames);
+        assert_eq!(requested(&accept("application/vnd.bluemap.bmq3x")), Asked::Prbm);
+        assert_eq!(requested(&accept("*/*")), Asked::Prbm);
+        assert_eq!(requested(&HeaderMap::new()), Asked::Prbm);
     }
 }

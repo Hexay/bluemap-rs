@@ -10,9 +10,10 @@ use std::sync::Arc;
 use bm_format::compact::BodyUnpacker;
 use bm_storage::{Format, MapStorage};
 use bm_web::{MapRoute, WebApp, WebOptions};
-use common::{PRBM_TYPE, RAW_TILE, Served, TILE, UNPACKS, get, packing_map as map, prbm};
+use common::{PRBM_TYPE, RAW_TILE, Served, TILE, UNPACKS, UNPACKS_FRAMES, get, packing_map as map, prbm};
 
 const MEDIA_TYPE: Option<&str> = Some("application/vnd.bluemap.bmq3");
+const FRAME_TYPE: Option<&str> = Some("application/vnd.bluemap.bmq3+zstd");
 const CODINGS: [(&str, Option<&str>); 3] =
     [("gzip, deflate, br, zstd", Some("zstd")), ("gzip", Some("gzip")), ("identity", None)];
 
@@ -54,6 +55,33 @@ fn asked_for_tiles_arrive_packed_in_every_coding() {
     }
     let gz = get(s.addr, &format!("{TILE}.gz"), &[UNPACKS]);
     assert!(common::gunzip(&gz.body) == prbm(), ".gz URLs stay PRBM");
+}
+
+/// The current script decodes zstd frames itself: a browser without zstd gets the stored frame, untouched.
+#[test]
+fn the_frame_goes_as_stored_to_scripts_that_decode_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = serve(map(dir.path(), Format::Optimized), dir.path(), true);
+    let (mut unpacker, mut out) = (BodyUnpacker::default(), Vec::new());
+    let zstd_reply = get(s.addr, TILE, &[UNPACKS_FRAMES, ("Accept-Encoding", "gzip, deflate, br, zstd")]);
+    assert_eq!((zstd_reply.header("content-type"), zstd_reply.header("content-encoding")), (MEDIA_TYPE, Some("zstd")));
+    for accept_encoding in ["gzip, deflate, br", "identity"] {
+        let r = get(s.addr, TILE, &[UNPACKS_FRAMES, ("Accept-Encoding", accept_encoding)]);
+        assert_eq!((r.status, r.header("content-type")), (200, FRAME_TYPE), "{accept_encoding}");
+        assert_eq!((r.header("content-encoding"), r.header("vary")), (None, Some("Accept, Accept-Encoding")));
+        assert!(r.body == zstd_reply.body, "the stored frame, byte for byte");
+        let body = bm_compress::Compression::Zstd.decompress(&r.body, 1 << 30).unwrap();
+        unpacker.unpack_into(&body, &mut out).unwrap();
+        assert!(out == prbm(), "{accept_encoding}");
+
+        let tag = r.header("etag").unwrap();
+        assert!(tag.ends_with("-bmq3-frame\""), "{tag}");
+        let inm = ("If-None-Match", tag);
+        assert_eq!(get(s.addr, TILE, &[UNPACKS_FRAMES, ("Accept-Encoding", accept_encoding), inm]).status, 304);
+        assert_eq!(get(s.addr, TILE, &[("Accept-Encoding", accept_encoding), inm]).status, 200, "PRBM client");
+        let raw = get(s.addr, RAW_TILE, &[UNPACKS_FRAMES, ("Accept-Encoding", accept_encoding)]);
+        assert_eq!((raw.header("content-type"), raw.decoded()), (PRBM_TYPE, b"not a PRBM".to_vec()));
+    }
 }
 
 #[test]
