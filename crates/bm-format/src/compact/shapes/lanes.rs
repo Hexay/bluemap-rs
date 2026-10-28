@@ -10,14 +10,14 @@ pub(super) fn pack(v: [u32; 4]) -> u128 {
 /// The coarse key of a value: `(l * 4096.0) as i32` per vertex, packed. Any deterministic coarse key works; a value
 /// straddling a key boundary only costs a duplicate shape.
 #[inline]
-fn key_scalar(local: &[f32; 4]) -> u128 {
+pub(super) fn key_scalar(local: &[f32; 4]) -> u128 {
     pack(local.map(|l| (l * 4096.0) as i32 as u32))
 }
 
 /// `((l * 16.0) as i32) as f32 == l * 16.0` for every vertex.
 #[cfg(any(test, not(target_arch = "x86_64")))]
 #[inline]
-fn on_grid_scalar(local: &[f32; 4]) -> bool {
+pub(super) fn on_grid_scalar(local: &[f32; 4]) -> bool {
     local.iter().all(|&l| ((l * 16.0) as i32) as f32 == l * 16.0)
 }
 
@@ -25,7 +25,7 @@ fn on_grid_scalar(local: &[f32; 4]) -> bool {
 /// every vertex.
 #[cfg(any(test, not(target_arch = "x86_64")))]
 #[inline]
-fn fits_scalar(shape: &[u32; 4], d: Option<f32>, b: f32, want: &[u32; 4]) -> bool {
+pub(super) fn fits_scalar(shape: &[u32; 4], d: Option<f32>, b: f32, want: &[u32; 4]) -> bool {
     (0..4).all(|v| {
         let s = f32::from_bits(shape[v]);
         (d.map_or(s, |d| s + d) + b).to_bits() == want[v]
