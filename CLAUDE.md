@@ -61,7 +61,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   the background): `py -3 tools/testbox.py run <name> --sync [--lock] -- <command>`; re-attach with `wait <name>`;
   `stage <name>` once per checkout (and after a reboot) puts fixtures on tmpfs: from the shared HDD, fixture-reading
   tests are disk-bound (oracle_optimized 565 s → 12 s); jobs use a shared sccache
-- Merge gates (clippy, tests in `fast`, oracles, acceptance on release; ~6 min): `py -3 tools/testbox.py run <name>
+- Merge gates (clippy for x86 and aarch64, tests in `fast`, oracles, acceptance on release; ~6 min): `py -3 tools/testbox.py run <name>
   --sync -- python3 tools/gates.py [gate …]`
 - Golden renders (Java BlueMap 5.29, MC 26.3): `py -3 tools/render_golden.py [fixture…]` → `work/bluemap/<fx>/web`
 - Diff: `cargo run -p bm-golden -- diff-render <golden-webroot> <candidate-webroot>`
