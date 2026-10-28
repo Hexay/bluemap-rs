@@ -3,6 +3,14 @@
 Versions follow `<crate version>`; the plugin and mod jars report `<BlueMap version>+rs.<crate version>`, the
 BlueMap version they replace.
 
+## Unreleased
+
+- `optimized` storage, serving: browsers without zstd as a content coding (Safari before 26.3, Safari 26 on macOS
+  before Tahoe, clients behind proxies that strip it) now get the stored zstd frame too, and the client script
+  decodes it in WASM (zstd's C decoder, +39 KB to the module, +20 KB to the script on the wire). Server CPU per
+  hires tile for them falls from 0.24–0.39 ms to 0.02–0.03 ms; tiles/s at 32 connections from 32k to 299k
+  (docs/18). Pages still running the 0.3.0 script keep the gzip path.
+
 ## 0.3.0 — 2026-10-28
 
 - Drop-in target is now BlueMap 5.29: its webapp, `core.conf` template (`region-file-check-interval`) and

@@ -1,5 +1,6 @@
 // usage: node crates/bm-wasm/bench/browser.mjs <corpus dir> <chrome exe> [unpack.wasm=crates/bm-web/client/unpack.wasm]
 //   [reps=5] [--cpu-prof out.cpuprofile] [--pipeline '{"workers": 2, "handover": "stream"}'] [--client unpack.js]
+//   [--frames: unpack from the zstd frames, core.mjs only]
 // Headless Chrome over the DevTools protocol, the corpus and bench scripts served over HTTP (cross-origin isolated,
 // for 5 µs timers); prints one JSON line. Default: WASM unpack time per tile (core.mjs). --pipeline: the whole
 // client path (pipeline.mjs), first pass cold then `reps` warm, main-thread time from Performance.getMetrics.
@@ -18,6 +19,7 @@ const option = (name) => {
   const at = args.indexOf(name);
   return at >= 0 ? args.splice(at, 2)[1] : null;
 };
+const frames = args.includes("--frames") && !!args.splice(args.indexOf("--frames"), 1);
 const profOut = option("--cpu-prof");
 const clientScript = option("--client");
 const pipeline = option("--pipeline") ?? (clientScript ? "{}" : null);
@@ -91,7 +93,7 @@ try {
   }
   const loadCorpus = `const manifest = await (await fetch("/manifest.json")).json();
     const bodies = await Promise.all(manifest.map(async (t) =>
-      ({ ...t, body: new Uint8Array(await (await fetch("/" + t.name)).arrayBuffer()) })));
+      ({ ...t, body: new Uint8Array(await (await fetch("/" + t.name${frames ? `.replace(/\\.body$/, ".frame")` : ""})).arrayBuffer()) })));
     const wasm = await (await fetch("/unpack.wasm")).arrayBuffer();`;
   const chrome = await evaluate(`JSON.stringify(navigator.userAgent.match(/Chrome\\/[\\d.]+/)?.[0])`);
   if (pipeline) {
@@ -118,9 +120,9 @@ try {
     const result = await evaluate(`(async () => {
       const { run } = await import("${origin}/core.mjs");
       ${loadCorpus}
-      return JSON.stringify(await run(wasm, bodies, ${Number(reps)}));
+      return JSON.stringify(await run(wasm, bodies, ${Number(reps)}, ${frames}));
     })()`);
-    console.log(JSON.stringify({ wasm, chrome, ...result }));
+    console.log(JSON.stringify({ wasm, chrome, frames, ...result }));
   }
   if (profOut) writeFileSync(profOut, JSON.stringify((await send("Profiler.stop")).profile));
   exitCode = 0;

@@ -1,5 +1,5 @@
 // usage: node crates/bm-wasm/bench/view.mjs <map url> <chrome exe> [--script unpack.js --wasm unpack.wasm | --no-script]
-//   [--runs 3] [--seconds 30] [--net <latency ms>,<Mbit/s>]
+//   [--runs 3] [--seconds 30] [--net <latency ms>,<Mbit/s>] [--accept-encoding "gzip, deflate, br"]
 // Time to a rendered view in the real webapp, headless Chrome over the DevTools protocol: from navigation until the
 // hires tile manager has loaded every tile it wants and none is loading, plus main-thread busy time and the longest
 // task meanwhile. --script/--wasm replace the server's client script (A/B with one server); --no-script blanks it,
@@ -23,6 +23,8 @@ const runs = Number(option("--runs", "3"));
 const seconds = Number(option("--seconds", "30"));
 // "<latency ms>,<download Mbit/s>": Network.emulateNetworkConditions
 const net = option("--net")?.split(",").map(Number);
+// replaces the browser's, e.g. "gzip, deflate, br" for a browser without zstd
+const acceptEncoding = option("--accept-encoding");
 const [url, browser] = args;
 const replacement = noScript ? ""
   : scriptPath ? readFileSync(scriptPath, "utf8").replace("__UNPACK_WASM_BASE64__", readFileSync(wasmPath).toString("base64"))
@@ -82,8 +84,9 @@ async function run() {
     if (replacement !== null) await send("Fetch.enable", { patterns: [{ urlPattern: "*bluemap-rs-unpack-*" }] });
     await send("Runtime.enable");
     await send("Performance.enable");
+    if (net || acceptEncoding) await send("Network.enable");
+    if (acceptEncoding) await send("Network.setExtraHTTPHeaders", { headers: { "Accept-Encoding": acceptEncoding } });
     if (net) {
-      await send("Network.enable");
       await send("Network.emulateNetworkConditions", { offline: false, latency: net[0],
         downloadThroughput: (net[1] * 1e6) / 8, uploadThroughput: (net[1] * 1e6) / 8 });
     }

@@ -35,7 +35,7 @@ Rust drop-in replacement for BlueMap (Java Minecraft 3D web map). Design and dec
   Java's server: `cargo test -p bm-web --test conformance -- --ignored`; optimized hires tiles go out packed to
   browsers running `client/unpack.js` (docs/18)
 - `bm-wasm` — the BMQ3 unpacker for that script; its build is checked in (`crates/bm-web/client/unpack.wasm`):
-  after changing `bm_format::compact`'s decoder run `py -3 tools/build_wasm.py`, then check with
+  after changing `bm_format::compact`'s decoder run `py -3 tools/build_wasm.py` (needs clang for wasm32: devbox), then check with
   `node tools/check_client_unpack.mjs <server url> <compat webroot>` (Node) and
   `node tools/check_client_unpack_browser.mjs <map url> <chrome exe>` (headless browser)
 - `bm-engine` — render pipeline (`Service`, `MapContext`, `update_map`): region tasks, tile actions, persistence

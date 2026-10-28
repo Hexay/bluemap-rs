@@ -7,18 +7,20 @@ const fnv = (bytes) => {
   return h >>> 0;
 };
 
-// bodies: [{ name, quads, prbm, fnv, body: Uint8Array }]; returns per-phase totals in ms
-export async function run(wasmBytes, bodies, reps = 5) {
+// bodies: [{ name, quads, prbm, fnv, body: Uint8Array }]; returns per-phase totals in ms. frames: each `body` is
+// the model body's zstd frame, decoded in WASM too (bmq3_unpack_frame)
+export async function run(wasmBytes, bodies, reps = 5, frames = false) {
   const t0 = performance.now();
   const { instance } = await WebAssembly.instantiate(wasmBytes);
   const instantiateMs = performance.now() - t0;
   const x = instance.exports;
   const memory = () => x.memory.buffer.byteLength;
   const initialMemory = memory();
+  const unpackExport = frames ? x.bmq3_unpack_frame : x.bmq3_unpack;
   const unpack = (body) => {
     const input = x.bmq3_input(body.length);
     new Uint8Array(x.memory.buffer, input, body.length).set(body);
-    const length = x.bmq3_unpack();
+    const length = unpackExport();
     if (length < 0) throw new Error("corrupt");
     return new Uint8Array(x.memory.buffer, x.bmq3_output(), length);
   };

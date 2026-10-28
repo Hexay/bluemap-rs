@@ -8,11 +8,14 @@ publish.workspace = true
 description = "BMQ3 model-body unpacker for the browser (wasm32-unknown-unknown), shipped inside bm-web's client script"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+# the module is linked from a staticlib by tools/build_wasm.py
+crate-type = ["rlib"]
 
 [dependencies]
-# by path: the workspace entry can't drop default features, and zstd (C) does not build for the browser
+# by path: the workspace entry can't drop default features, and the encoder's zstd is not needed in the browser
 bm-format = { path = "../bm-format", default-features = false }
+# zstd's C decoder for frames sent unlabelled (docs/18); C flags for the wasm build in tools/build_wasm.py
+zstd-sys = { version = "2.1", default-features = false }
 
 [dev-dependencies]
 bm-format.workspace = true

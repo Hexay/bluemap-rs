@@ -405,6 +405,7 @@ version = "0.3.0"
 dependencies = [
  "bm-format",
  "flate2",
+ "zstd-sys",
 ]
 
 [[package]]

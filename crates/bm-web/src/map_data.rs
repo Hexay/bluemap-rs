@@ -7,7 +7,7 @@ use bm_config::ServerUnpack;
 use bm_storage::{Compression, GridKey, ItemKey, MapStorage, Tile, Version};
 use http::HeaderValue;
 
-use crate::client_unpack;
+use crate::client_unpack::{Asked, Form};
 use crate::content_type::OCTET_STREAM;
 use crate::encoding::{Accepted, Encoded, body_coding, encode, packed_coding};
 use crate::gate::Gate;
@@ -27,9 +27,9 @@ pub(crate) struct Request {
     pub if_none_match: Option<IfNoneMatch>,
     /// Send `ETag` on full replies.
     pub etags: bool,
-    /// Client-side unpacking ([`client_unpack`]): `None` when the server does not offer it, else whether this
-    /// request asked for it.
-    pub unpacks: Option<bool>,
+    /// Client-side unpacking ([`client_unpack`]): `None` when the server does not offer it, else what this request
+    /// asked for.
+    pub unpacks: Option<Asked>,
     pub server_unpack: Arc<ServerUnpackPolicy>,
 }
 
@@ -69,7 +69,10 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
         }
         _ => None,
     };
-    let unpacks = req.unpacks == Some(true) && !req.gz_url;
+    let asked = req.unpacks.filter(|_| !req.gz_url).unwrap_or(Asked::Prbm);
+    let unpacks = asked != Asked::Prbm;
+    // how a model-mode tile goes to this client if it unpacks
+    let form = packed.filter(|_| unpacks).map(|(_, coding)| Form::new(asked, coding));
     let coding_id = |coding: Compression| (coding != Compression::None).then(|| coding.id());
     let tag = |v: Version, c| {
         etag(
@@ -86,7 +89,7 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
             Target::Item(item) => (storage.item_version(item)?, storage.item_compression(item)),
         };
         // a client that unpacks holds whichever form the tile had: the packed body, or PRBM if it is stored raw
-        let body_tag = packed.filter(|_| unpacks).map(|(_, coding)| client_unpack::etag_coding(coding));
+        let body_tag = form.map(Form::etag_suffix);
         let tags = version.into_iter().flat_map(|v| [body_tag.map(|c| etag(v, Some(c))), Some(tag(v, compression))]);
         if let Some(t) = tags.flatten().find(|t| inm.matches(t)) {
             return Ok(Reply::NotModified(t));
@@ -98,11 +101,15 @@ pub(crate) fn serve(storage: &dyn MapStorage, req: Request) -> Result<Reply, Err
         let content_encoding = coding_id(coding).filter(|_| !req.gz_url);
         let negotiated = |media_type| req.unpacks.map(|_| media_type);
         let model = bm_storage::packed_model_frame(&blob).is_some();
-        if unpacks && model {
+        if let Some(form) = form.filter(|_| model) {
+            let encoded = match form {
+                Form::Frame => Encoded { body: transcode::packed_frame(blob), content_encoding: None },
+                Form::Body(_) => Encoded { body: transcode::packed_body(blob, coding)?, content_encoding },
+            };
             return Ok(Reply::Found {
-                encoded: Encoded { body: transcode::packed_body(blob, coding)?, content_encoding },
-                etag: version.map(|v| etag(v, Some(client_unpack::etag_coding(coding)))),
-                negotiated: negotiated(client_unpack::MEDIA_TYPE),
+                encoded,
+                etag: version.map(|v| etag(v, Some(form.etag_suffix()))),
+                negotiated: negotiated(form.content_type()),
             });
         }
         // a tile stored raw is PRBM for an unpacking client too, so only clients without the opt-in are limited

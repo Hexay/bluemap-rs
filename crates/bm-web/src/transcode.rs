@@ -94,14 +94,20 @@ pub(crate) fn packed(
 /// The model body of a packed hires tile in `coding`, for a client that unpacks it itself
 /// (`bm_storage::packed_model_frame` of `blob` must be `Some`). The stored frame is zstd already.
 pub(crate) fn packed_body(blob: Vec<u8>, coding: Compression) -> Result<Bytes, bm_compress::Error> {
-    let blob = Bytes::from(blob);
-    let frame = blob.slice_ref(bm_storage::packed_model_frame(&blob).unwrap_or_default());
+    let frame = packed_frame(blob);
     let body = || Compression::Zstd.decompress(&frame, MAX_DECODED);
     match coding {
         Compression::Zstd => Ok(frame.clone()),
         Compression::None => cached(Op::PackedBody(coding), &frame, body),
         c => cached(Op::PackedBody(c), &frame, || c.compress(&body()?)),
     }
+}
+
+/// The zstd frame of a packed hires tile's model body, without a copy (`bm_storage::packed_model_frame` of `blob`
+/// must be `Some`).
+pub(crate) fn packed_frame(blob: Vec<u8>) -> Bytes {
+    let blob = Bytes::from(blob);
+    blob.slice_ref(bm_storage::packed_model_frame(&blob).unwrap_or_default())
 }
 
 fn cached<E>(op: Op, input: &[u8], work: impl FnOnce() -> Result<Vec<u8>, E>) -> Result<Bytes, E> {
