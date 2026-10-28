@@ -16,7 +16,10 @@ public final class Proto {
     public record CommandSender(String kind, String name, String world, double[] position, List<String> permissions) {}
 
     public record Hello(int protocol, String platform, String mcVersion, String shimVersion, String configFolder,
-                        String modsFolder, Boolean metrics, boolean folia, long maxMemoryMib, List<WorldInfo> worlds) {}
+                        String modsFolder, Boolean metrics, boolean folia, long maxMemoryMib,
+                        MemoryBudget memoryBudget, List<WorldInfo> worlds) {}
+
+    public record MemoryBudget(long containerMib, long heapMib, long overheadMib, long budgetMib) {}
 
     public record CoreWorld(String id, String saveFolder, String serverWorld) {}
 

@@ -23,7 +23,7 @@ pub fn fit_threads(resolved: usize, limit: Option<u64>) -> usize {
     resolved.min((fitting as usize).max(1))
 }
 
-pub fn mib(bytes: u64) -> u64 {
+pub const fn mib(bytes: u64) -> u64 {
     bytes >> 20
 }
 

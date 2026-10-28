@@ -15,12 +15,14 @@ fn headers_are_tagged_camel_case() {
         metrics: None,
         folia: false,
         max_memory_mib: Some(2048),
+        memory_budget: Some(MemoryBudget { container_mib: 2048, heap_mib: 1946, overhead_mib: 450, budget_mib: -348 }),
         worlds: vec![],
     };
     let v = serde_json::to_value(&hello).unwrap();
     assert_eq!(v["t"], "Hello");
     assert_eq!(v["mcVersion"], "26.3");
     assert_eq!(v["maxMemoryMib"], 2048);
+    assert_eq!(v["memoryBudget"]["budgetMib"], -348);
     assert_eq!(serde_json::from_value::<ShimMsg>(v).unwrap(), hello);
 
     let reply: ShimMsg = serde_json::from_value(json!({"t": "Reply", "id": 7, "ok": true, "value": true})).unwrap();

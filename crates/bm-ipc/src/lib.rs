@@ -44,7 +44,7 @@
 //!
 //! | `t` | fields | body | notes |
 //! |---|---|---|---|
-//! | `Hello` | `protocol, platform, mcVersion, shimVersion, configFolder, modsFolder?, metrics?, folia, maxMemoryMib, worlds: [WorldInfo]` | default blockstates: JSON object `{"minecraft:stone": "minecraft:stone", …}` (Bukkit `Material` → `BlockData.getAsString()`), or empty | `metrics`: `null` = core.conf decides (Paper) |
+//! | `Hello` | `protocol, platform, mcVersion, shimVersion, configFolder, modsFolder?, metrics?, folia, maxMemoryMib, memoryBudget?: {containerMib, heapMib, overheadMib, budgetMib}, worlds: [WorldInfo]` | default blockstates: JSON object `{"minecraft:stone": "minecraft:stone", …}` (Bukkit `Material` → `BlockData.getAsString()`), or empty | `metrics`: `null` = core.conf decides (Paper); `memoryBudget`: only under a container memory limit, the core's `memory-limit` when core.conf sets none (docs/15 §2) |
 //! | `WorldAdded` | `world: WorldInfo` | | |
 //! | `WorldRemoved` | `id` | | |
 //! | `Players` | `players: [PlayerInfo]` | | 1 Hz, complete batch in the shim's `ConcurrentHashMap<UUID,…>` order (= upstream's JSON order) |

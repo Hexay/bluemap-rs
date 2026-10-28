@@ -105,7 +105,7 @@ pub fn close_files() {
     FILES.lock().unwrap_or_else(PoisonError::into_inner).clear();
 }
 
-fn log(level: Level, msg: &str) {
+pub fn log(level: Level, msg: &str) {
     if let Some(sink) = SINK.get() {
         sink(level, msg);
     } else {

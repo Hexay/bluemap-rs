@@ -38,6 +38,18 @@ Units as typesafe-config's `getBytes`: `K`/`k`/`Ki`/`KiB`/`kibibytes` = 1024, `k
 M, G, T, P, E; fractions allowed. Garbage is a config error naming the key (`MemorySizeError`,
 `crates/bm-config/src/de/size.rs`).
 
+**Automatic in containers (plugins).** The shim (`platforms/common/.../core/ContainerMemory.java`, whose docstring
+justifies the estimate) reads the smallest cgroup memory limit from its cgroup up to the mount root (v2
+`memory.max`, v1 `memory/memory.limit_in_bytes`; `max` and v1's page-rounded `LONG_MAX` = none; off Linux = none)
+and sends `Hello.memoryBudget` = limit − `Runtime.maxMemory()` − (256 MiB + heap / 10). The core
+(`crates/bm-cli/src/plugin/memory_budget.rs`) applies it at each load, logging one line, nothing without a
+container limit:
+- `memory-limit` set in core.conf: it wins (INFO naming both); `auto-memory-limit: false` (hidden plugin.conf key):
+  no limit (INFO).
+- budget ≥ 184 MiB (`BASE_BYTES + PER_THREAD_BYTES`, one render thread): it becomes `memory-limit` (INFO).
+- smaller (e.g. Pterodactyl's `-XX:MaxRAMPercentage=95.0`): `memory-limit` 184 MiB and a WARNING with the
+  `MaxRAMPercentage`/`-Xmx` that would leave 184 MiB (heap lowered by the deficit) or the container limit to raise to.
+
 **At load** the render pool (`crates/bm-cli/src/throttle/mod.rs`, CLI and plugin) gets
 `min(render-thread-count, max(1, (limit − base) / per_thread))` threads and logs at INFO when that lowered it:
 `Using 1 instead of 8 render threads to stay within the memory-limit of 100 MiB`. A limit below the base still gets

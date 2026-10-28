@@ -44,6 +44,17 @@ pub struct PlayerInfo {
     pub gamemode: String,
 }
 
+/// The shim's container memory estimate (`ContainerMemory.java` documents the overhead estimate). MiB;
+/// `budget_mib` = container − heap − overhead, negative when the JVM alone may exceed the container.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryBudget {
+    pub container_mib: u64,
+    pub heap_mib: u64,
+    pub overhead_mib: u64,
+    pub budget_mib: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandSender {
@@ -77,6 +88,9 @@ pub enum ShimMsg {
         folia: bool,
         #[serde(default)]
         max_memory_mib: Option<u64>,
+        /// `None`: no container memory limit (or an older shim).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        memory_budget: Option<MemoryBudget>,
         worlds: Vec<WorldInfo>,
     },
     WorldAdded {

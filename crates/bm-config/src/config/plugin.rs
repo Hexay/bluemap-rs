@@ -24,6 +24,9 @@ pub struct PluginConfig {
     /// `render-pause-mspt` and resumes below `render-resume-mspt`; <= 0 disables.
     pub render_pause_mspt: f64,
     pub render_resume_mspt: f64,
+    /// Hidden bluemap-rs key (docs/15 §2): without a core.conf `memory-limit`, fit the core into the container's
+    /// memory limit left over by the JVM.
+    pub auto_memory_limit: bool,
 }
 
 impl Default for PluginConfig {
@@ -43,6 +46,7 @@ impl Default for PluginConfig {
             player_render_limit: -1,
             render_pause_mspt: 45.0,
             render_resume_mspt: 40.0,
+            auto_memory_limit: true,
         }
     }
 }

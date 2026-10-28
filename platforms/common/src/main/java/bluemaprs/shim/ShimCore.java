@@ -4,6 +4,7 @@ import bluemaprs.shim.api.Providers;
 import bluemaprs.shim.api.ShimBackend;
 import bluemaprs.shim.commands.CommandBridge;
 import bluemaprs.shim.commands.CommandSpec;
+import bluemaprs.shim.core.ContainerMemory;
 import bluemaprs.shim.core.CoreDispatcher;
 import bluemaprs.shim.core.CoreSupervisor;
 import bluemaprs.shim.ipc.CoreLink;
@@ -120,6 +121,7 @@ public final class ShimCore<S> {
                 null,
                 platform.folia(),
                 Runtime.getRuntime().maxMemory() / (1024 * 1024),
+                ContainerMemory.detect(),
                 platform.worlds()
         );
         return new Frame(Msg.of("Hello", hello), blockstates);

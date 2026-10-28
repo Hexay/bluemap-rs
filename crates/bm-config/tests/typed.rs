@@ -175,6 +175,8 @@ fn hidden_throttle_keys() {
 
     let plugin = from_value::<PluginConfig>(&parse("")).unwrap();
     assert_eq!((plugin.render_pause_mspt, plugin.render_resume_mspt), (45.0, 40.0));
+    assert!(plugin.auto_memory_limit);
+    assert!(!from_value::<PluginConfig>(&parse("auto-memory-limit: false")).unwrap().auto_memory_limit);
     let plugin = from_value::<PluginConfig>(&parse("render-pause-mspt: 0\nrender-resume-mspt: 30.5")).unwrap();
     assert_eq!((plugin.render_pause_mspt, plugin.render_resume_mspt), (0.0, 30.5));
 }
