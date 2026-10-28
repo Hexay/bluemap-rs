@@ -29,7 +29,7 @@ pub unsafe extern "C" fn memset(dst: *mut c_void, c: c_int, n: usize) -> *mut c_
 pub unsafe fn fill(dst: *mut u8, byte: u8, n: usize) {
     let b8 = u64::from_ne_bytes([byte; 8]);
     // SAFETY: `Block` is 16 plain bytes on every target
-    let block: Block = unsafe { std::mem::transmute([byte; 16]) };
+    let block: Block = unsafe { std::ptr::read_unaligned([byte; 16].as_ptr().cast()) };
     // SAFETY (all blocks): every store lies within `dst..dst + n`
     unsafe {
         match n {
