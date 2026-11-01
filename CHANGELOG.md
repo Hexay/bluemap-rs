@@ -3,6 +3,17 @@
 Versions follow `<crate version>`; the plugin and mod jars report `<BlueMap version>+rs.<crate version>`, the
 BlueMap version they replace.
 
+## 0.3.2 — 2026-11-01
+
+- `optimized` storage, browser: a reload checks all cached tiles against one version list instead of one request per
+  tile (new `tile-versions` route, used only by the client script; any failure falls back to normal requests). On a real
+  GPU, reload takes 1.3 / 1.4 s instead of 1.8 / 3.1 s at 50 / 10 Mbit/s.
+- `optimized` storage, browser: the script fetches tiles ahead of the camera while panning, at most 16 held at once, for
+  about 11% more hires data. New tiles appear in 33 / 30 ms instead of 103 / 142 ms when panning in one direction.
+- Fixed: a live tile update arriving while that tile was loading could leave the old tile on screen.
+- libz-sys 1.1.31 (RUSTSEC-2026-0418: its build script saved the build environment under `target/`). Only affects
+  building from source; zlib is unchanged.
+
 ## 0.3.1 — 2026-10-28
 
 - `optimized` storage, serving: browsers without zstd as a content coding (Safari before 26.3, Safari 26 on macOS
