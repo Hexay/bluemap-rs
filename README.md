@@ -39,21 +39,25 @@ limit, so data per tile decides how many tiles you can send:
 ### Viewing: the browser
 
 Someone opening the map. The gain is modest because much of the time is the visitor's connection and BlueMap's own
-webapp, which bluemap-rs reuses. Real Chrome, on a 50 Mbit/s and a 10 Mbit/s connection:
+webapp, which bluemap-rs reuses. Real Chrome, on a 50 Mbit/s and a 10 Mbit/s connection, with BlueMap's 5.28 server and
+5.29 webapp:
 
-| | BlueMap 5.29 | bluemap-rs `compat` | bluemap-rs `optimized` |
+| | BlueMap | bluemap-rs `compat` | bluemap-rs `optimized` |
 |---|---:|---:|---:|
-| First load | 2.2 s, 5.1 s | 1.9 s, 4.4 s | 1.7 s, 2.9 s |
-| Reload | 3.6 s, 10.8 s | 1.8 s, 3.2 s | 1.8 s, 3.2 s |
-| New tiles appearing while panning | 197 ms, 429 ms | 204 ms, 433 ms | 95 ms, 119 ms |
+| First load | 2.2 s, 5.1 s | 1.9 s, 4.4 s | 1.9 s, 2.5 s |
+| Reload | 3.6 s, 10.8 s | 1.8 s, 3.2 s | 1.3 s, 1.4 s |
+| New tiles appearing while panning ¹ | 197 ms, 429 ms | 204 ms, 433 ms | 33 ms, 30 ms |
 | Frame rate while panning or zooming | same | same | same |
+
+¹ Panning in one direction, the best case for `optimized`, which fetches ahead of the camera.
 
 It isn't smoother: the map fills in sooner, but frame rate matches BlueMap's and a reload may have a few more slow
 frames.
 
 Hires tiles, render state and JSON are identical to BlueMap's. Tested on a Ryzen 7 9700X and, for the browser, an Intel
 Arc GPU. Methods, caveats and raw numbers: [rendering](docs/results/devbox-2026-10-28.md),
-[serving](docs/results/devbox-web-java-vs-rs-2026-10-28.md), [browser](docs/results/webapp-smoothness-2026-11-01.md).
+[serving](docs/results/devbox-web-java-vs-rs-2026-10-28.md), [browser](docs/results/webapp-smoothness-2026-11-01.md),
+[browser, `optimized`](docs/results/webapp-load-improvements-2026-11-01.md).
 
 ## Which storage format
 
