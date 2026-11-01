@@ -1,6 +1,6 @@
 // The DevTools side of the real-webapp harnesses (view.mjs, gpu_trace.mjs).
-import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 // The page target's socket URL of a Chrome started with --remote-debugging-port=0 --user-data-dir=<profile>:
@@ -38,6 +38,14 @@ export async function connect(profile, onEvent) {
       pending.set(++nextId, { resolve, reject });
       socket.send(JSON.stringify({ id: nextId, method, params, sessionId }));
     });
+}
+
+// The client script as bm-web assembles it; a file from before it had parts works too.
+export function assembleScript(scriptPath, wasmPath) {
+  const parts = () => readdirSync(dirname(scriptPath)).filter((f) => f.endsWith(".js") && f !== basename(scriptPath)).sort()
+    .map((f) => readFileSync(join(dirname(scriptPath), f), "utf8")).join("");
+  return readFileSync(scriptPath, "utf8").replace("// __CLIENT_PARTS__", parts)
+    .replace("__UNPACK_WASM_BASE64__", readFileSync(wasmPath).toString("base64"));
 }
 
 // Fetch.enable pattern of the server's client script; fulfillScript answers its Fetch.requestPaused.

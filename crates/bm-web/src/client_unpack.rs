@@ -20,6 +20,13 @@ pub(crate) const FRAME_MEDIA_TYPE: &str = "application/vnd.bluemap.bmq3+zstd";
 /// In the script's file name; an `index.html` that already mentions it is left alone.
 const SCRIPT_STEM: &str = "bluemap-rs-unpack";
 const WASM_PLACEHOLDER: &str = "__UNPACK_WASM_BASE64__";
+/// `unpack.js` is one scope; what grew out of it stays in files of its own.
+const PARTS_PLACEHOLDER: &str = "// __CLIENT_PARTS__";
+const PARTS: &str = concat!(
+    include_str!("../client/prefetch.js"),
+    include_str!("../client/revalidate.js"),
+    include_str!("../client/zz_pace.js")
+);
 
 pub(crate) struct Script {
     /// Relative to the webroot; carries [`Script::hash`], so a new build is a new URL.
@@ -31,7 +38,7 @@ pub(crate) struct Script {
 
 pub(crate) static SCRIPT: LazyLock<Script> = LazyLock::new(|| {
     let wasm = STANDARD.encode(include_bytes!("../client/unpack.wasm"));
-    let body = include_str!("../client/unpack.js").replace(WASM_PLACEHOLDER, &wasm);
+    let body = include_str!("../client/unpack.js").replace(PARTS_PLACEHOLDER, PARTS).replace(WASM_PLACEHOLDER, &wasm);
     let mut hasher = DefaultHasher::new();
     body.hash(&mut hasher);
     let hash = format!("{:08x}", hasher.finish() as u32);

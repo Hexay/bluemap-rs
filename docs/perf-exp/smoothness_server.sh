@@ -40,7 +40,7 @@ print('\n'.join(far[:4000]))" > "$WARM"
   start)
     row=$2
     stop
-    root=$row cmd=("$OUT/bluemap" -w)
+    root=$row cmd=("${BLUEMAP:-$OUT/bluemap}" -w)
     case $row in
       j529) cmd=("$JAVA" -jar "$JAR" -w) ;;
       rn) root=ro ;;

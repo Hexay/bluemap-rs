@@ -10,7 +10,7 @@ import { existsSync, appendFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { CLIENT_SCRIPT_PATTERN, closeBrowser, connect, fulfillScript, waitForTiles } from "./devtools.mjs";
+import { CLIENT_SCRIPT_PATTERN, assembleScript, closeBrowser, connect, fulfillScript, waitForTiles } from "./devtools.mjs";
 import { chromeMemory, onBattery, outsideLoad, processes, waitQuiet } from "./smoothness_host.mjs";
 import { NOW, RECORDER, RENDERER, pan, slice, teleport, zoom } from "./smoothness_page.mjs";
 import { frameStats, latencyStats, report } from "./smoothness_stats.mjs";
@@ -37,6 +37,17 @@ const uncapped = flag("--uncapped");
 const scale = option("--scale");
 const host = option("--host", "devbox");
 const port = Number(option("--port", "18100"));
+// A/B of the client script on server row ro: name=<unpack.js>,<unpack.wasm>[,<tuning json>] (repeat); adds the names to --rows.
+// --server-bin: the devbox's bluemap for those rows; --run-limit: seconds before a run is voided.
+const variants = new Map();
+for (let v = option("--variant"); v; v = option("--variant")) {
+  const [name, spec] = [v.slice(0, v.indexOf("=")), v.slice(v.indexOf("=") + 1)];
+  const [script, wasm, ...tune] = spec.split(",");
+  variants.set(name, { body: assembleScript(script, wasm), tune: tune.join(",") });
+  if (!rows.includes(name)) rows.push(name);
+}
+const serverBin = option("--server-bin");
+const runLimitS = Number(option("--run-limit", "360"));
 const browser = args[0];
 if (!browser || !args.length) throw new Error("usage: smoothness.mjs <chrome exe> --out rows.jsonl");
 
@@ -59,10 +70,10 @@ const remote = (command) => {
 // Holds the lock and the forward for as long as this process lives; ssh dying closes stdin there and frees the lock.
 async function openTunnel() {
   const ssh = spawn("ssh", ["-o", "ExitOnForwardFailure=yes", "-L", `${port}:127.0.0.1:8100`, host,
-    `exec flock ~/bench.lock sh -c 'echo locked; cat > /dev/null'`], { stdio: ["pipe", "pipe", "inherit"] });
+    `exec flock -w 3600 ~/bench.lock sh -c 'echo locked; cat > /dev/null'`], { stdio: ["pipe", "pipe", "inherit"] });
   await new Promise((done, fail) => {
     ssh.stdout.once("data", done);
-    ssh.once("exit", (code) => fail(new Error(`tunnel exited: ${code}`)));
+    ssh.once("exit", (code) => fail(new Error(`tunnel exited (no ~/bench.lock within an hour?): ${code}`)));
   });
   ssh.removeAllListeners("exit");
   return ssh;
@@ -81,7 +92,8 @@ async function tunnelRtt() {
 async function run(row, net, runIndex, tunnelPid) {
   const quiet = await waitQuiet(0.25, 1000, 600);
   if (!quiet) return { valid: false, why: "machine stayed busy" };
-  const serverLoad = remote(`bash ~/smooth/server.sh start ${row}`);
+  const variant = variants.get(row);
+  const serverLoad = remote(variant ? `BLUEMAP=${serverBin ?? ""} bash ~/smooth/server.sh start ro` : `bash ~/smooth/server.sh start ${row}`);
   const tunnelRttMs = await tunnelRtt();
   const profile = mkdtempSync(join(tmpdir(), "bm-smooth-"));
   const [latency, mbit] = net.split(",").map(Number);
@@ -98,7 +110,7 @@ async function run(row, net, runIndex, tunnelPid) {
     let exceptions = 0;
     const send = await connect(profile, (method, params) => {
       if (method === "Page.frameNavigated" && !params.frame.parentId) onNavigated();
-      else if (method === "Fetch.requestPaused") fulfillScript(send, params.requestId, "");
+      else if (method === "Fetch.requestPaused") fulfillScript(send, params.requestId, variant?.body ?? "");
       else if (method === "Target.attachedToTarget" && params.targetInfo.type === "worker") workers.add(params.sessionId);
       else if (method === "Target.detachedFromTarget") workers.delete(params.sessionId);
       else if (method === "Runtime.exceptionThrown") exceptions++;
@@ -122,7 +134,8 @@ async function run(row, net, runIndex, tunnelPid) {
     await send("Page.bringToFront");
     await send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     await send("Page.addScriptToEvaluateOnNewDocument", { source: RECORDER });
-    if (row === "rn") await send("Fetch.enable", { patterns: [{ urlPattern: CLIENT_SCRIPT_PATTERN }] });
+    if (row === "rn" || variant) await send("Fetch.enable", { patterns: [{ urlPattern: CLIENT_SCRIPT_PATTERN }] });
+    if (variant?.tune) await send("Page.addScriptToEvaluateOnNewDocument", { source: `try { localStorage.setItem("bluemap-rs-client-tuning", ${JSON.stringify(variant.tune)}); } catch {}` });
     await send("Network.enable");
     await send("Network.emulateNetworkConditions", { offline: false, latency,
       downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (mbit * 1e6) / 8 });
@@ -237,7 +250,9 @@ try {
         for (let attempt = 1; attempt <= 3 && !done.has(`${row}|${net}|${r}`); attempt++) {
           let result;
           try {
-            result = await run(row, net, r, tunnel.pid);
+            // gotcha: any wait in a run can hang on an occluded window; never let one stop the campaign
+            result = await Promise.race([run(row, net, r, tunnel.pid),
+              sleep(runLimitS * 1000, null, { ref: false }).then(() => { throw new Error(`run over ${runLimitS} s`); })]);
           } catch (e) {
             result = { valid: false, why: `error: ${e.message}` };
           }

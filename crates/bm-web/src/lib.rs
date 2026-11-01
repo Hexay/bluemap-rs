@@ -34,6 +34,7 @@ mod server;
 mod slots;
 mod static_cache;
 mod static_files;
+mod tile_versions;
 mod transcode;
 mod validators;
 mod webapp;

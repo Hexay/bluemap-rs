@@ -16,7 +16,7 @@ use crate::live::LiveMap;
 use crate::map_data::{self, Reply, ServerUnpackPolicy, Target};
 use crate::response::{empty, header_static};
 use crate::validators::IfNoneMatch;
-use crate::{client_unpack, content_type};
+use crate::{client_unpack, content_type, tile_versions};
 
 /// One served map: its storage and, when the app provides live data, its [`LiveMap`].
 #[derive(Clone)]
@@ -54,7 +54,35 @@ pub(crate) async fn handle(
             _ => {}
         }
     }
+    if let Some(specs) = path.strip_prefix("tile-versions/") {
+        return tile_versions(route, specs, serving).await;
+    }
     storage(route, path, method, headers, peer, serving).await
+}
+
+/// Only for the client script: a map without it answers as if the route did not exist.
+async fn tile_versions(route: &MapRoute, specs: &str, serving: &Serving) -> Response<Body> {
+    if !(serving.client_unpack && serving.etags && route.storage.packs_hires()) {
+        return empty(StatusCode::NOT_FOUND);
+    }
+    let Some(rects) = tile_versions::parse(specs) else { return empty(StatusCode::BAD_REQUEST) };
+    let storage = route.storage.clone();
+    match tokio::task::spawn_blocking(move || tile_versions::body(storage.as_ref(), &rects)).await {
+        Ok(Ok(body)) => {
+            let mut res = Response::new(Body::from(body));
+            header_static(&mut res, CONTENT_TYPE, "text/plain; charset=utf-8");
+            no_store(&mut res);
+            res
+        }
+        Ok(Err(e)) => {
+            tracing::error!("Failed to read tile versions for web-request: {e}");
+            empty(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+        Err(e) => {
+            tracing::error!("tile versions read panicked: {e}");
+            empty(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }
 
 fn live_json(body: Option<bytes::Bytes>) -> Response<Body> {

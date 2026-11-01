@@ -9,11 +9,11 @@
 // first request to the last finish, per tile `tileMs` request to finish, `tileBodyMs` response headers to finish.
 // --dump <file> appends every request (netdump.mjs).
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { CLIENT_SCRIPT_PATTERN, closeBrowser, connect, fulfillScript, waitForTiles } from "./devtools.mjs";
+import { CLIENT_SCRIPT_PATTERN, assembleScript, closeBrowser, connect, fulfillScript, waitForTiles } from "./devtools.mjs";
 import { netDump } from "./netdump.mjs";
 
 const args = process.argv.slice(2);
@@ -36,7 +36,7 @@ const acceptEncoding = option("--accept-encoding");
 const dumpFile = option("--dump");
 const [url, browser] = args;
 const replacement = noScript ? ""
-  : scriptPath ? readFileSync(scriptPath, "utf8").replace("__UNPACK_WASM_BASE64__", readFileSync(wasmPath).toString("base64"))
+  : scriptPath ? assembleScript(scriptPath, wasmPath)
   : null;
 
 const middle = (xs) => (xs.length ? xs.toSorted((a, b) => a - b)[Math.floor(xs.length / 2)] : null);

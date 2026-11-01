@@ -58,6 +58,49 @@ Windows machine does not: run it there and copy `crates/bm-web/client/unpack.was
 staticlib with rust-lld itself: a cdylib exports, and so keeps, every upstream `#[no_mangle]` function, and
 zstd-sys's wasm shim brings ~35 KB of `qsort` nobody calls.
 
+## Loading faster
+
+Everything here is in the script and falls back to the normal request. Numbers and what was dropped:
+`docs/results/webapp-load-improvements-2026-11-01.md`. The script is `client/unpack.js` plus parts spliced in at
+`// __CLIENT_PARTS__` (`client_unpack::PARTS`; bench tools: `devtools.mjs` `assembleScript`).
+
+**Fast reload** (`client/revalidate.js`). On a browser reload (`performance` navigation type `reload`, with `useCookies`)
+or the map's update button the webapp sends every tile with `cache: "no-cache"`; a plain revisit doesn't, it obeys
+`max-age`. So the reload's ~260 conditional requests are the webapp asking for fresh tiles, and a cache lifetime can't
+remove them. Java sends no validators on map data, so there the same reload re-downloads everything.
+
+- Wire: `GET maps/<id>/tile-versions/<lod>,<x0>,<z0>,<x1>,<z1>/…`, inclusive rectangles, at most 8 and 4096 tiles (else
+  `400`). `200`, `no-store`, `text/plain`: `<lod> <x> <z> <version>` per stored tile, `-` for a tile stored without a
+  version. `404` unless the server offers the script for that map (`client-unpack`, ETags on map data, packed hires). Code:
+  `tile_versions.rs`.
+- Script, for a `no-cache` tile request: read the HTTP cache (`only-if-cached`). Nothing cached: the normal request, so
+  a cold tile never waits on a list. Cached: compare its `ETag`'s version with the list (fetched once for the view of
+  every LOD, from `window.bluemap`'s tile managers). Same version: use the cached reply. No such tile: `204`. Different,
+  unknown, or the list failed: the normal request.
+- Freshness: every tile is still compared with the server's current version. An entry serves one request for at most
+  5 s, and a live `tile` event voids it, so the webapp's reload of a tile always goes to the server.
+
+**Fetch-ahead** (`client/prefetch.js`). While the camera moves at 8 blocks/s or more (`controlsManager.position`, polled
+every 100 ms), fetches the tiles of the manager's spiral around where the camera will be in 1 s, on the side it is moving
+towards, at `priority: "low"`, 3 in flight. The webapp's request for such a tile takes the held reply, or joins it in flight.
+
+- Bound on waste: at most 16 held unclaimed tiles at any moment; if over 35% of 24 or more were dropped unused,
+  it pauses 10 s; an in-flight tile the view turned away from is aborted; held tiles expire after 15 s.
+- Off with the webapp's "pause tile loading while moving" setting and with Save-Data. Does nothing if the
+  webapp's objects or tile paths don't look as expected. A failed fetch leaves the tile to the webapp's request.
+- A `no-cache` request only takes a held tile fetched `no-cache` within 3 s. A live `tile` event drops the held tile.
+
+**Live events during a load.** The webapp ignores a `tile` event for a tile it is loading, so a reply that left the
+server before the render stayed on screen until the next reload. The script wraps `EventSource`, and refetches such a
+tile before handing it over.
+
+**Paced delivery** (`client/zz_pace.js`): off by default, see the results doc. `localStorage`
+`bluemap-rs-client-tuning` = `{"pace":4,"ahead":1}` overrides the features, for A/B runs.
+
+Check: `tools/check_client_fresh.mjs` (the webapp against a proxy that plays renders and failures),
+`docs/perf-exp/devbox_client_checks.sh` runs it with the other two checks. Load A/B:
+`docs/perf-exp/devbox_load_ab.sh`, `crates/bm-wasm/bench/load_ab.mjs`, `load_ab_report.mjs`.
+
 ## Browsers without zstd
 
 Chrome 123+ and Firefox 126+ send `zstd` in `Accept-Encoding`; Safari since 26.3, and only on iOS/macOS 26.3+

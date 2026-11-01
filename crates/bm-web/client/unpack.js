@@ -21,6 +21,16 @@
   }
   if (off || typeof plainFetch !== "function" || typeof WebAssembly !== "object") return;
 
+  // features measured one by one (docs/18); localStorage "bluemap-rs-client-tuning" overrides them for an A/B
+  const TUNING = { pace: 0, ahead: 1 };
+  try {
+    Object.assign(TUNING, JSON.parse(scope.localStorage.getItem("bluemap-rs-client-tuning")));
+  } catch {
+    // storage blocked or nothing valid in it: the defaults
+  }
+  const hiresLoading = new Set();
+  const hiresDirty = new Set();
+
   // body (or its zstd frame) → PRBM in a buffer of its own; runs on the main thread and, stringified, in each worker
   function decoder(module) {
     // a module's memory never shrinks: one grown past this by a huge tile is dropped after it
@@ -133,6 +143,9 @@ onmessage = async ({ data }) => {
 
   // maps/<id>/tiles/0/x…/z….prbm
   const isHiresTile = (url) => /\/tiles\/0\/x[-\d/]+z[-\d/]+\.prbm$/.test(url.pathname);
+  const isLowresTile = (url) => /\/tiles\/[1-9]\d*\/x[-\d/]+z[-\d/]+\.png$/.test(url.pathname);
+
+// __CLIENT_PARTS__
 
   scope.fetch = async function (input, init) {
     let url;
@@ -141,26 +154,64 @@ onmessage = async ({ data }) => {
     } catch {
       return plainFetch.call(this, input, init);
     }
+    if (isLowresTile(url)) {
+      const request = new Request(input, init);
+      return (await revalidated(request, url)) ?? plainFetch.call(this, request);
+    }
     if (!isHiresTile(url)) return plainFetch.call(this, input, init);
     await ready;
     if (!unpack) return plainFetch.call(this, input, init);
 
     const request = new Request(input, init);
     request.headers.set("Accept", `${FRAME_TYPE}, ${MEDIA_TYPE}, */*`);
-    const response = await plainFetch.call(this, request);
-    const type = (response.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
-    if (type !== MEDIA_TYPE && type !== FRAME_TYPE) return response;
-    let prbm;
+    const m = TILE_PATH.exec(url.pathname);
+    const [x, z] = [m[3], m[4]].map((s) => Number(s.replaceAll("/", "")));
+    const key = tileKey(x, z);
     try {
-      prbm = await unpack(new Uint8Array(await response.arrayBuffer()), type === FRAME_TYPE);
-    } catch (error) {
-      console.warn("bluemap-rs: unpacking a tile failed, loading it unpacked", error);
-      return plainFetch.call(this, input, init);
+      noteHiresRequest(url, m[1], x, z);
+    } catch {
+      // prefetching is optional
     }
-    const headers = new Headers(response.headers);
-    headers.set("Content-Type", "application/octet-stream");
-    headers.set("Content-Length", String(prbm.length));
-    headers.delete("Content-Encoding");
-    return new Unpacked(prbm, { status: response.status, statusText: response.statusText, headers });
+    hiresLoading.add(key);
+    try {
+      const response = (await claimHeld(x, z, url, request)) ?? (await revalidated(request, url)) ?? (await plainFetch.call(this, request));
+      const type = (response.headers.get("Content-Type") || "").split(";")[0].trim().toLowerCase();
+      if (type !== MEDIA_TYPE && type !== FRAME_TYPE) return response;
+      let prbm;
+      try {
+        prbm = await unpack(new Uint8Array(await response.arrayBuffer()), type === FRAME_TYPE);
+      } catch (error) {
+        console.warn("bluemap-rs: unpacking a tile failed, loading it unpacked", error);
+        return plainFetch.call(this, input, init);
+      }
+      await paced();
+      if (hiresDirty.delete(key)) return scope.fetch(new Request(new Request(input, init), { cache: "no-cache" }));
+      const headers = new Headers(response.headers);
+      headers.set("Content-Type", "application/octet-stream");
+      headers.set("Content-Length", String(prbm.length));
+      headers.delete("Content-Encoding");
+      return new Unpacked(prbm, { status: response.status, statusText: response.statusText, headers });
+    } finally {
+      hiresLoading.delete(key);
+      hiresDirty.delete(key);
+    }
   };
+
+  // the webapp reloads a tile on these; any answer held for that tile is out of date first
+  const PlainEventSource = scope.EventSource;
+  if (typeof PlainEventSource === "function") {
+    scope.EventSource = class extends PlainEventSource {
+      constructor(...args) {
+        super(...args);
+        this.addEventListener("tile", ({ data }) => {
+          try {
+            const t = JSON.parse(data);
+            tileChanged(t.lod, t.x, t.y);
+          } catch {
+            // the webapp's own listener decides what to do with it
+          }
+        });
+      }
+    };
+  }
 })();

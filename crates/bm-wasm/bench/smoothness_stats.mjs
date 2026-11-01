@@ -49,7 +49,7 @@ export function report(file) {
   if (voided.length) console.log(`voided: ${voided.map((r) => `${r.row}/${r.net}/${r.run}: ${r.why}`).join("; ")}`);
   for (const net of [...new Set(valid.map((r) => r.net))]) {
     const of = (row) => valid.filter((r) => r.net === net && r.row === row);
-    const rows = ROW_ORDER.filter((row) => of(row).length);
+    const rows = [...new Set([...ROW_ORDER, ...valid.map((r) => r.row)])].filter((row) => of(row).length);
     const header = (r) => `${r} (${of(r).length})`;
     table(`### ${net} ms,Mbit/s: tiles in`, ["row (runs)", "first load ms", "all requests done ms", "reload ms", "tunnel RTT ms", "outside load %", "tunnel ssh CPU %"],
       rows.map((r) => [header(r), cell(of(r).map((x) => x.phases.load.ms), 0), cell(of(r).map((x) => x.allInMs), 0), cell(of(r).map((x) => x.phases.reload.ms), 0),
