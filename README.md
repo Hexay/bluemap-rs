@@ -14,27 +14,50 @@ Beta. Not affiliated with the BlueMap project.
 - **Viewing** is when someone opens the map in a browser. This is only modestly faster (1.3–3.6×, with `optimized`
   storage), because much of the time is the visitor's connection and BlueMap's own webapp, which bluemap-rs reuses.
 
-| | BlueMap 5.28 | bluemap-rs | Gain |
-|---|---:|---:|---:|
-| **Rendering** a 4096×4096 world | 5.7 min | 14.8 s | 23× |
-| CPU time for that render | 75 min | 2.7 min | 27× |
-| Peak memory for that render | 2,899 MB | 858 MB | 3.4× |
-| Re-render after editing 6 region files | 4.3 s | 0.97 s | 4.4× |
-| **Size on disk**, `optimized` storage | 1,545 MiB | 130 MiB | 12× |
-| **Serving**: server CPU per hires tile, `compat` storage | 0.32–0.65 ms | 0.03–0.07 ms | 5–20× |
-| Server CPU per hires tile, `optimized` storage | 0.32–0.65 ms | 0.02–0.03 ms | 13–32× |
-| Data sent per hires tile, `optimized` storage | 94 KB | 7 KB | 13× |
-| **In the browser**, `optimized` storage: first load | 2.2–5.1 s | 1.7–2.9 s | 1.3–1.7× |
-| Reload | 3.6–10.8 s | 1.8–3.2 s | 2–3.4× |
-| New tiles appearing while panning | 197–429 ms | 95–119 ms | 2–3.6× |
-| **Frame rate** while panning or zooming | same | same | none |
+### Rendering
 
-Browser ranges go from a 50 Mbit/s connection to a 10 Mbit/s one. The slower the connection, the bigger the gain.
+A 4096×4096 world, 12 render threads:
+
+| | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
+|---|---:|---:|---:|
+| Full render | 5.7 min | 14.8 s | 12.4 s |
+| CPU time | 75 min | 2.7 min | 2.3 min |
+| Peak memory | 2,899 MB | 858 MB | 909 MB |
+| Re-render after editing 6 region files | 4.3 s | 0.97 s | 0.89 s |
+| Size on disk | 1,545 MiB | 1,576 MiB | 130 MiB |
+
+### Viewing: the server
+
+Hires tiles nobody requested recently, on the same machine as the test client:
+
+| | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
+|---|---:|---:|---:|
+| Server CPU per tile, 1 connection | 0.65 ms | 0.033 ms | 0.020 ms |
+| Server CPU per tile, 32 connections | 0.32 ms | 0.067 ms | 0.025 ms |
+| Tiles per second, 32 connections | 1,016 ¹ | 152,678 | 380,754 |
+| Tiles per second, 512 connections | 54,060 | 80,210 | 300,614 |
+| Data sent per tile | 94 KB | 94 KB | 7 KB |
+
+¹ BlueMap's server pauses ~41 ms before most responses on a reused connection, which limits it here more than its CPU
+does. Compare the 512-connection row for its capacity. At that load the test client limits BlueMap and `compat`.
+
+Throughput is how many visitors a server can handle, not how fast the map loads for each one. Most servers never get
+near these rates.
+
+### Viewing: the browser
+
+The real webapp in Chrome, on a 50 Mbit/s and a 10 Mbit/s connection:
+
+| | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
+|---|---:|---:|---:|
+| First load | 2.2 s, 5.1 s | 1.9 s, 4.4 s | 1.7 s, 2.9 s |
+| Reload | 3.6 s, 10.8 s | 1.8 s, 3.2 s | 1.8 s, 3.2 s |
+| New tiles appearing while panning | 197 ms, 429 ms | 204 ms, 433 ms | 95 ms, 119 ms |
+| Frame rate while panning or zooming | same | same | same |
 
 - **It isn't smoother.** The webapp and tile geometry are the same as BlueMap's, so frame rate matches. Freezes during
   loading are about the same length, and a reload may have a few more slow frames. The map fills in sooner.
-- **With `compat` storage**, first load is about 15% faster than BlueMap's and panning is the same. Reloads are
-  2–3.4× faster because they don't download everything again.
+- **Reloads are faster on both storages** because they don't download everything again.
 - **The cost:** clients that can't unpack `optimized` tiles are slower to serve than with BlueMap (see below).
 
 Hires tiles are byte-identical to BlueMap's after decompression; render state and JSON are identical too. The one
