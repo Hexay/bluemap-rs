@@ -10,7 +10,9 @@ Beta. Not affiliated with the BlueMap project.
 
 ## How it compares to BlueMap
 
-Rendering is much faster. Viewing the map in a browser is modestly faster, and only with `optimized` storage.
+- **Rendering** is when your server turns the world into map files. This is where bluemap-rs is much faster (23×).
+- **Viewing** is when someone opens the map in a browser. This is only modestly faster (1.3–3.6×, with `optimized`
+  storage), because much of the time is the visitor's connection and BlueMap's own webapp, which bluemap-rs reuses.
 
 | | BlueMap 5.28 | bluemap-rs | Gain |
 |---|---:|---:|---:|
