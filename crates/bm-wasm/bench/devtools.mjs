@@ -33,10 +33,10 @@ export async function connect(profile, onEvent) {
     pending.delete(m.id);
     return m.error ? reject(new Error(m.error.message)) : resolve(m.result);
   };
-  return (method, params = {}) =>
+  return (method, params = {}, sessionId = undefined) =>
     new Promise((resolve, reject) => {
       pending.set(++nextId, { resolve, reject });
-      socket.send(JSON.stringify({ id: nextId, method, params }));
+      socket.send(JSON.stringify({ id: nextId, method, params, sessionId }));
     });
 }
 
