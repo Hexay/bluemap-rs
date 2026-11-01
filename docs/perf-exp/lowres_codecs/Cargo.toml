@@ -1,0 +1,20 @@
+[package]
+name = "lowres_codecs"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+bm-format = { path = "../../../crates/bm-format", default-features = false }
+# the workspace's backend: without it encode_png runs on miniz_oxide (1.4% larger, not what ships)
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }
+libwebp-sys = "0.14"
+oxipng = { version = "10", default-features = false, features = ["zopfli"] }
+png = "0.18"
+zstd = "0.14"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
