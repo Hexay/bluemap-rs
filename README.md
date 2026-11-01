@@ -28,21 +28,24 @@ A 4096×4096 world, 12 render threads:
 
 ### Viewing: the server
 
-Hires tiles nobody requested recently, on the same machine as the test client:
+Hires tiles nobody requested recently. The two CPU-per-tile rows ran with the test client sharing the server's CPUs:
 
 | | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
 |---|---:|---:|---:|
 | Server CPU per tile, 1 connection | 0.65 ms | 0.033 ms | 0.020 ms |
 | Server CPU per tile, 32 connections | 0.32 ms | 0.067 ms | 0.025 ms |
-| Tiles per second, 32 connections | 1,016 ¹ | 152,678 | 380,754 |
-| Tiles per second, 512 connections | 54,060 | 80,210 | 300,614 |
+| CPU ceiling, 8 threads, unlimited network ¹ | 72,611 tiles/s | 111,178 tiles/s | 319,976 tiles/s |
+| 500 Mbit/s uplink ² | 624 tiles/s, 11% CPU | 633 tiles/s, 4% CPU | 7,707 tiles/s, 18% CPU |
+| 1 Gbit/s uplink ² | 1,229 tiles/s, 14% CPU | 1,214 tiles/s, 6% CPU | 15,415 tiles/s, 35% CPU |
 | Data sent per tile | 94 KB | 94 KB | 7 KB |
 
-¹ BlueMap's server pauses ~41 ms before most responses on a reused connection, which limits it here more than its CPU
-does. Compare the 512-connection row for its capacity. At that load the test client limits BlueMap and `compat`.
+¹ Server on 4 cores (8 threads), test client on the other 4. BlueMap at 256 connections, its best rate; bluemap-rs at
+32, its best.
 
-Throughput is how many visitors a server can handle, not how fast the map loads for each one. Most servers never get
-near these rates.
+² Measured on a shaped link with 32 connections. CPU is % of one core.
+
+On a real uplink, bandwidth is the limit, so data per tile decides how many tiles you can send. `optimized` uses more
+CPU there because it sends about 12× the tiles; per tile it uses the least.
 
 ### Viewing: the browser
 
