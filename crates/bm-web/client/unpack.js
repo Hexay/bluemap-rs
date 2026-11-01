@@ -22,7 +22,7 @@
   if (off || typeof plainFetch !== "function" || typeof WebAssembly !== "object") return;
 
   // features measured one by one (docs/18); localStorage "bluemap-rs-client-tuning" overrides them for an A/B
-  const TUNING = { pace: 0, ahead: 1 };
+  const TUNING = { ahead: 1 };
   try {
     Object.assign(TUNING, JSON.parse(scope.localStorage.getItem("bluemap-rs-client-tuning")));
   } catch {
@@ -184,7 +184,6 @@ onmessage = async ({ data }) => {
         console.warn("bluemap-rs: unpacking a tile failed, loading it unpacked", error);
         return plainFetch.call(this, input, init);
       }
-      await paced();
       if (hiresDirty.delete(key)) return scope.fetch(new Request(new Request(input, init), { cache: "no-cache" }));
       const headers = new Headers(response.headers);
       headers.set("Content-Type", "application/octet-stream");

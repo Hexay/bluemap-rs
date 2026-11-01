@@ -22,11 +22,7 @@ const SCRIPT_STEM: &str = "bluemap-rs-unpack";
 const WASM_PLACEHOLDER: &str = "__UNPACK_WASM_BASE64__";
 /// `unpack.js` is one scope; what grew out of it stays in files of its own.
 const PARTS_PLACEHOLDER: &str = "// __CLIENT_PARTS__";
-const PARTS: &str = concat!(
-    include_str!("../client/prefetch.js"),
-    include_str!("../client/revalidate.js"),
-    include_str!("../client/zz_pace.js")
-);
+const PARTS: &str = concat!(include_str!("../client/prefetch.js"), include_str!("../client/revalidate.js"));
 
 pub(crate) struct Script {
     /// Relative to the webroot; carries [`Script::hash`], so a new build is a new URL.

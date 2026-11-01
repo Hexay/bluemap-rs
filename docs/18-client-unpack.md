@@ -94,8 +94,8 @@ towards, at `priority: "low"`, 3 in flight. The webapp's request for such a tile
 server before the render stayed on screen until the next reload. The script wraps `EventSource`, and refetches such a
 tile before handing it over.
 
-**Paced delivery** (`client/zz_pace.js`): off by default, see the results doc. `localStorage`
-`bluemap-rs-client-tuning` = `{"pace":4,"ahead":1}` overrides the features, for A/B runs.
+Paced delivery was tried and removed: no fewer slow frames on a real GPU, and tiles arrived later (see the results doc).
+`localStorage` `bluemap-rs-client-tuning` = `{"ahead":0}` turns fetch-ahead off, for A/B runs.
 
 Check: `tools/check_client_fresh.mjs` (the webapp against a proxy that plays renders and failures),
 `docs/perf-exp/devbox_client_checks.sh` runs it with the other two checks. Load A/B:

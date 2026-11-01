@@ -82,7 +82,7 @@ and the spiral already starts at the center, so there is little to reorder.
 It gains 3% at 20,50, nothing at 50,10, and hurts reload at 50,10. Only one view was tried; a flatter camera sees fewer of the
 square's tiles.
 
-**Paced delivery** (not on by default; kept behind `bluemap-rs-client-tuning` for the real-GPU run). Handing all tiles out a few
+**Paced delivery** (removed after the real-GPU run below). Handing all tiles out a few
 per frame delayed everything; letting a frame's first N through at once ("burst") cut that but still costs:
 
 | | off 20,50 | pace 2 | pace 4 | burst 4 | off 50,10 | pace 2 | pace 4 | burst 4 |
@@ -99,7 +99,7 @@ burst, revisit 58 vs 58. SwiftShader is a weak stand-in for a GPU, so this doesn
 
 `tools/check_client_fresh.mjs`, the real webapp against a proxy playing renders and failures: changed tile shown after a reload
 with the other 41 not refetched; failing version list; corrupt body; failing fetch-aheads; live `tile` event, including during
-that tile's load. No holes in any; also passes with `pace` 4. The old script fails 5 of them (the new behaviour, including an
+that tile's load. No holes in any. The old script fails 5 of them (the new behaviour, including an
 event during a load), which shows they can fail.
 Gates: `fmt clippy unit arm` pass; `conformance` passes on the testbox (the devbox has no `bluemap/vanilla`). The fixture gates
 (render, lowres and storage oracles, acceptance) were not run: nothing they cover changed, and the devbox disk was full.
@@ -108,26 +108,39 @@ No-script clients and `client-unpack: false`: unchanged code path; `tests/tile_v
 Browsers without workers or zstd were tested only through the zstd case above; without WebAssembly the script returns before
 any of this.
 
-## Unproven until the real-GPU run
+## Real GPU
 
-- Frame pacing of anything here, including whether reload's frames over 33 ms (ours 5-11, Java 2 at 20,50) got better or worse.
-  Fast reload puts the same uploads in less time, which could make those frames worse.
-- The size of the gains on a real GPU, where main-thread and upload time are larger.
-- Whether `pace` helps there. If it doesn't, delete `client/zz_pace.js`.
+Intel Arc, canvas 2534x1414, Chrome, 5 interleaved runs per row (30 of 30 valid); median (min-max), ms. Full tables:
+[smoothness/load-improvements.md](smoothness/load-improvements.md). All on the optimized map; `base` is the script at `f200a0d`.
 
-Real-GPU run, about 40 minutes, every wait bounded (a run is voided at 360 s, the lock wait gives up at an hour). In Git Bash from
-the checkout, with the devbox build of this branch at `~/bmrs-wl40/target/release/bluemap`:
+| | 20,50 base | final | paced | 50,10 base | final | paced |
+|---|---:|---:|---:|---:|---:|---:|
+| reload | 1818 (1684-2828) | 1255 (1055-1411) | 1298 (1046-1618) | 3084 (3003-3781) | 1416 (1364-1500) | 1430 (1333-1894) |
+| first load | 1695 (1566-2022) | 1905 (1783-2489) | 2043 (1729-2466) | 2680 (2426-3713) | 2537 (2470-2711) | 2666 (2486-3914) |
+| pan, new tile p50 | 103 (78-162) | 33 (30-34) | 45 (44-55) | 142 (126-169) | 30 (28-31) | 45 (44-52) |
+| pan, new tile p95 | 260 (143-503) | 118 (94-660) | 166 (101-318) | 270 (236-303) | 143 (103-167) | 210 (118-309) |
+| reload frames | 106 | 79 | 81 | 190 | 91 | 89 |
+| reload frames over 33 ms, % | 3.85 (1.99-4.90) | 3.75 (2.00-5.80) | 2.94 (1.50-3.70) | 1.58 (1.18-2.13) | 3.23 (2.33-3.37) | 3.49 (1.54-6.67) |
+
+- Reload frames over 33 ms, as counts (median frames x median %): 4.1 to 3.0 at 20,50, 3.0 to 2.9 at 50,10: no worse. The percentage
+  rises at 50,10 only because a reload now has half the frames. Longest frame is unchanged (about 200 ms).
+- Frame times while panning and zooming are unchanged: 25 ms p50/p99 pan, 16.7/25 ms zoom.
+- First load: no change expected and none shown; 20,50 reads 12% slower, 50,10 5% faster, ranges overlap, tunnel RTT differed by row.
+- Pan 33 and 30 ms is fetch-ahead on a pan in one direction, the best case; with the camera reversing (headless, 20,50) p50 went
+  50 to 36.
+- Paced delivery removed: its range of frames over 33 ms overlaps `final`, and it adds about 12-15 ms to pan p50.
+
+To repeat, in Git Bash from the checkout, with a devbox build at `~/bmrs-wl40/target/release/bluemap` and the server roots from
+`devbox_web_load_dump.sh` under `~/viewtrace-load`. `MSYS_NO_PATHCONV=1` is required, or Git Bash rewrites `--server-bin` and every
+run is voided. Use absolute paths; about 40 minutes, keep the Chrome windows visible.
 
 ```
-git show f200a0d:crates/bm-web/client/unpack.js > "$TEMP/unpack-base.js"
+git show f200a0d:crates/bm-web/client/unpack.js > "$TEMP/base/unpack-base.js"
 scp docs/perf-exp/smoothness_server.sh devbox:smooth/server.sh
 W=crates/bm-web/client/unpack.wasm; J=crates/bm-web/client/unpack.js
-timeout 4h node crates/bm-wasm/bench/smoothness.mjs "C:/Program Files/Google/Chrome/Application/chrome.exe" \
+MSYS_NO_PATHCONV=1 timeout 4h node crates/bm-wasm/bench/smoothness.mjs "C:/Program Files/Google/Chrome/Application/chrome.exe" \
   --out docs/results/smoothness/load-improvements.jsonl --rows base --runs 5 --nets 20,50+50,10 \
   --server-bin /home/agent/bmrs-wl40/target/release/bluemap \
-  --variant "base=$TEMP/unpack-base.js,$W" --variant "final=$J,$W" --variant "paced=$J,$W,{\"pace\":4}"
+  --variant "base=$TEMP/base/unpack-base.js,$W" --variant "final=$J,$W"
 node crates/bm-wasm/bench/smoothness.mjs --report docs/results/smoothness/load-improvements.jsonl
 ```
-
-Ship `pace` only if `paced` lowers reload frames over 33 ms beyond the ranges of `final`, without the load times above getting
-worse. The variant options of `smoothness.mjs` passed a syntax check only: they have not been run.
