@@ -2,7 +2,7 @@
 
 **Result.** `bluemap -u` sustained **3,400–3,800 new chunks/s (2.1–3.5 full regions/s)** for 10 minutes at 12 render
 threads, and **3,170 chunks/s** at 4 threads. A shorter 400 s run held 4,020 chunks/s at 12 threads; 4,560 did not hold.
-Output was identical to a clean `-r -f` in every run compared. Estimate for 88 M chunks (300k²): **about 6–7.5 h of
+Output was identical to a clean `-r -f` in every run compared. Estimate for 88 M chunks (300k²): **about 6–8 h of
 renderer time**, which would keep up with about 180 bots. The renderer is not the bottleneck: the bots are, then the
 converter.
 
@@ -47,7 +47,7 @@ converter.
 | spiral | 12 | 300 s | 4,809 | 4.32 | 111k → 429k, **grows** | 9.2 / 12.4 (others 5.1) | | |
 | scatter, 168 bots | 4 | 300 s | 3,288 | 1.03 | 75k → 89k, bounded | 3.5 / 5.3 | | |
 | scatter, 196 bots | 4 | 300 s | 3,834 | 1.17 | 101k → 233k, **grows** | 3.8 / 5.3 | | |
-| one real-speed bot (spiral, 1.4 chunks/s) | 12 | 300 s | 22.8 | 0.013 | 104 → 141 | 0.05 / 0.33 | 162 / 597 | 2.44 |
+| one real-speed bot (spiral, 1.4 chunks/s) | 12 | 300 s | 22.8 | 0.013 | 104 → 141 | 0.05 / 0.33 | 146 / 597 | 2.44 |
 
 CPU ms/chunk covers crawl plus drain where the run settled (600 s runs except large, and the real-speed bot); otherwise
 the whole run up to stop, which understates cost because the backlog is left unrendered.
@@ -100,10 +100,8 @@ tile states.
 |---|--:|--:|---|
 | scatter, 12 t, 300 s (3,536/s) | 246,623 | 3,910 | **identical** |
 | spiral, 12 t, 300 s (3,809/s) | 284,248 | 1,375 | **identical** |
-| scatter, 4 t, 600 s (3,167/s) | 451,386 | 5,492* | **identical** |
+| scatter, 4 t, 600 s (3,167/s) | 451,386 | 5,102 | **identical** |
 | real-speed bot, twice | 1,654 | 44 | **identical** |
-
-\* From the clean run's log; the file-by-file compare of this run reported no missing, extra or differing lowres file.
 
 No holes and no wrong tiles. The 12-thread 600 s runs were not compared: scatter lost its compare to a harness bug and
 spiral didn't fit in tmpfs, hence the 300 s checks at similar rates. The large-map run wasn't compared either; its
@@ -118,9 +116,10 @@ differences. Bundle parser: 1,046,529 tiles at k=8, equal to rstate's `rendered`
 
 ## Findings
 
-1. **Map size doesn't matter.** Over the k=8 map, 2.26 ms CPU per chunk against 2.25 on an empty one. Region updates touch
-   only their own cells. Startup to "up-to-date" took 0.6 s at k=8, but that run's log is deleted, so I didn't confirm how
-   many regions that pass covered; docs/22 gives about 4 min CPU at k=73 for the same no-op pass on the slower testbox.
+1. **An existing k=8 map didn't raise per-chunk cost.** 2.26 ms CPU per chunk against 2.25 on an empty map. This run was at
+   2,698 chunks/s, below the limit, and didn't settle (10,864 chunks unfinished), so capacity over a large map wasn't
+   tested. Startup to "up-to-date" took 0.6 s at k=8, too fast to be a full pass, and that log is deleted, so the daily
+   full update is **not measured**; docs/22 gives about 4 min CPU at k=73 for a no-op pass on the testbox.
 2. **4 threads get about 93% of 12.** 3,167 vs 3,411 chunks/s, at 1.28 vs 2.25 ms CPU per chunk. The clean render shows
    the same curve: 1.03 ms/chunk at 4 threads, 1.97 at 12, wall rate 4,130 vs 5,380 chunks/s. So it isn't specific to
    ingest. This CPU has 8 physical cores, so SMT sharing is the likely cause; I didn't test that. `render-thread-count: 4`
@@ -137,13 +136,20 @@ differences. Bundle parser: 1,046,529 tiles at k=8, equal to rstate's `rendered`
      changed, even though the inotify path already handled it.
    - Rerun with the log kept: start 19:57:43, rescan 20:02:43, burst of schedules at 20:02:48 (+5 s debounce), and 8 tasks
      up to 20:03:42 with `0 tiles rendered, 0 skipped`, some delayed by cooldown.
-   - Those are what the `bot1` log showed at 19:45:26. The bot's real tasks did render: 1,790 tiles rendered, 1,654 final,
-     output identical to a clean render. This is not a harness bug and not lost tiles.
+   - This matches the lines reported from the `bot1` log at 19:45:26, about 5 minutes into that run. That log was already
+     deleted, so the match is by timing and by the rerun, not a direct read. The bot's real tasks did render in both runs:
+     1,790 tiles rendered, 1,654 final, output identical to a clean render. No tiles were lost and the harness isn't at fault.
    - Cost: scatter 12 t had 8,645 schedules for 5,816 file versions. Each is a header compare only. The re-arm can push a
      pending real update out by up to the cooldown. Not fixed, as instructed.
-5. **Disk-full check.** No row needs a rerun on that account. All tabled rows have 0 `WARNING`/`ERROR` lines and none
-   aborted. Each crawl tick checked free disk (3 GB guard at the time). Logs of finished runs were deleted, so this rests
-   on those recorded counts plus the identical compares. The guard is now 10 GB, and runs refuse to start below it.
+5. **Disk-full check: indirect, no reruns.** The devbox disk was reported 100% full earlier that day; I couldn't establish
+   when. Run logs had been deleted, so I couldn't grep them for write errors. Only the bot rerun has been read directly.
+   - Every row records 0 `WARNING`/`ERROR` lines and no abort. The abort guard (then 3 GB free) ran on each crawl tick, so no
+     crawl phase overlapped a full disk. It didn't run during drain or settle.
+   - I didn't confirm that a failed storage write logs at those levels, so the zero count is weak evidence alone.
+   - The compared runs are safe regardless: their output is identical to a clean render. Uncompared rows (including the
+     600 s 12-thread runs and the large map) rely on the guard and the count, plus hires bytes per chunk in line with
+     compared runs.
+   - The guard is now 10 GB, and runs refuse to start below it.
 
 ## Estimate for 300k² (88 M chunks): extrapolated, not measured
 
@@ -155,9 +161,9 @@ differences. Bundle parser: 1,046,529 tiles at k=8, equal to rstate's `rendered`
 - CPU about 55 core-hours at 12 threads, about 31 at 4.
 - Optimized output about 170 GB final (1,914–2,042 B/chunk), about 220 GB written. Converter writes about 2× its roughly
   710–780 GB final world.
-- Assumes chunks of about 8 KB (8.9 KB here; zlib cost scales with bytes but read and parse are about 2% of render CPU).
-- **Real DonutSMP terrain could cost more.** This is one vanilla seed, tiled, with no builds. Render CPU follows faces per
-  tile, not chunk bytes, so dense player bases will be slower. It also isn't converter output.
+- Assumes chunks of about 8 KB (8.9 KB here); chunk size sensitivity wasn't tested.
+- **Real DonutSMP terrain could differ, probably costing more.** This is one vanilla seed, tiled, with no builds, and it
+  isn't converter output. I'd expect dense player bases to render slower; not measured.
 
 ## Bottleneck
 
@@ -166,7 +172,7 @@ differences. Bundle parser: 1,046,529 tiles at k=8, equal to rstate's `rendered`
 | stage | rate | source |
 |---|--:|---|
 | 8 bots at `examples/scale` speed | ~150–190 chunks/s, so 88 M takes about 5.5–7 days | that harness's model |
-| converter (`acacia-anvil` store, one writer) | 1,179–1,402 columns/s (testbox, 12 t), 2,155 (22 t) | its README, 2026-10-24, synthetic terrain; **not re-measured** |
+| converter (`acacia-anvil` store, one writer) | 1,179–1,402 columns/s (testbox, 12 t), 2,155 (22 t) | its README, synthetic terrain; **not re-measured** |
 | renderer | 3,167–4,020 chunks/s | this document |
 
 - At 8 bots the renderer idles at under 5% of capacity. Latency is then about 30 s p50 and 80 s p99, nearly all debounce.
