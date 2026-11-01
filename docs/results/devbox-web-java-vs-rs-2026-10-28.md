@@ -220,3 +220,68 @@ MSYS_NO_PATHCONV=1 BM_TESTBOX=devbox py -3 tools/testbox.py run devbench --lock 
   '~/bmrs-devbench/work/real/d12-opt' '~/bmrs-devbench/work/downloads/jdk25/bin/java' \
   '~/bmrs-devbench/work/downloads/bluemap-5.28-cli.jar' 3 5
 ```
+
+## CPU ceiling and shaped uplinks, 2026-11-01
+
+The loopback rows above share 16 threads between client and server, so they measure the pair. This section separates
+them: bluemap-rs 0.3.1 (`3043cc2`), Java 5.28, `docs/perf-exp/devbox_web_uplink.sh`.
+
+- **Link:** devbox→testbox measured 932 Mbit/s (devbox NIC is 1 Gbit), far too slow to saturate a server's CPU. All rows
+  therefore run on the devbox, on a veth pair (MTU 1500) between two network namespaces in a rootless Docker container,
+  so `tc` and the veth touch nothing on the host. No sudo, and AppArmor blocks plain user namespaces.
+- **CPUs:** server pinned to 8 logical CPUs (cores 0–3 and SMT siblings), client to the other 8; the 4-thread rows use
+  cores 0–1 and give the client 12. Default worker counts follow the affinity.
+- **Uplinks:** `tbf` on the server's egress, applied after an unshaped warmup. Wire Mbit/s is the veth `tx_bytes`
+  counter, which omits repeated headers of GSO segments, so 960 is what a full 1 Gbit reads.
+- **Load:** distinct-tile method as above (5 s warmup at 256 conns, 3 s idle, page cache warm), browser `Accept-Encoding`,
+  opt-in `Accept` for optimized. 3 runs of 10 s, interleaved, order flipped, medians, under `flock ~/bench.lock`. Others
+  kept 0.12–0.23 of 16 CPUs busy between runs. One Java 500 Mbit run had another user on the server's CPUs; its process
+  CPU did not move. Webroots: Java `j12`, ours `d12`, `d12-opt`.
+- **CPU:** process utime+stime in % of one core. "Busy" counts all work on the allotted CPUs, including softirq.
+
+| CPU ceiling | server, conns | tiles/s | Gbit/s wire | p50 | p99 | CPU % | ms/tile | server CPUs busy | client CPUs busy |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8 threads | Java, 256 | **72,611** | 57.6 | 1.6 ms | 5.1 ms | 791 | 0.109 | 99% | 58% |
+| | ours compat, 32 | **111,178** | 88.1 | 259 µs | 804 µs | 750 | 0.068 | 95% | 16% |
+| | ours compat, 256 | 86,966 | 68.9 | 2.7 ms | 8.1 ms | 766 | 0.088 | 96% | 30% |
+| | ours optimized, 32 | **319,976** | 20.0 | 94 µs | 233 µs | 711 | 0.022 | 91% | 15% |
+| | ours optimized, 256 | 306,289 | 19.1 | 756 µs | 2.2 ms | 725 | 0.024 | 93% | 18% |
+| 4 threads | Java, 256 | 40,767 | 31.9 | 2.2 ms | 43.4 ms | 397 | 0.097 | 99% | 14% |
+| | ours compat, 32 | 83,470 (62–84k) | 66.2 | 364 µs | 907 µs | 378 | 0.045 | 95% | 5% |
+| | ours optimized, 32 | 192,598 | 12.0 | 160 µs | 356 µs | 364 | 0.019 | 93% | 5% |
+
+| uplink, 32 conns | server | tiles/s | wire Mbit/s | goodput Mbit/s | p50 | p99 | CPU % | ms/tile | KB/tile |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 500 Mbit/s | Java | 624 | 480 | 473 | 39.2 ms | 183 ms | 11 | 0.171 | 92.6 |
+| | ours compat | 633 | 480 | 477 | 35.6 ms | 366 ms | 3.9 | 0.060 | 91.9 |
+| | ours optimized | **7,707** | 480 | 458 | 4.1 ms | 5.7 ms | 18 | 0.024 | 7.3 |
+| 1 Gbit/s | Java | 1,229 | 960 | 947 | 24.9 ms | 55.1 ms | 14 | 0.117 | 94.0 |
+| | ours compat | 1,214 | 958 | 953 | 26.9 ms | 81.6 ms | 6.0 | 0.050 | 95.9 |
+| | ours optimized | **15,415** | 961 | 916 | 2.1 ms | 2.9 ms | 35 | 0.023 | 7.3 |
+
+Findings:
+
+1. **The server is the limit in every ceiling row:** its CPUs are 91–99% busy, the client's at most 58%.
+2. **Scaling is not linear:** 4→8 threads gives Java 1.8×, optimized 1.7×, compat 1.3×. Don't extrapolate to 16.
+3. **More connections cost ours throughput:** compat 111k at 32, 87k at 256; a single-run sweep gave 71k at 1024 and
+   optimized 235k at 1024. Java was flat from 256 to 1024 (71–72k), 55k at 32 (p99 40 ms, the stall), and 13k at 2048
+   (one run, not traced).
+4. **On an uplink `optimized` sends 12.2× (500 Mbit) and 12.7× (1 Gbit) compat's tiles.** The link fills in all rows.
+5. **The CPU saving is per tile, not per server.** At the uplink limit optimized uses more total CPU than either compat
+   server because it sends 12× the tiles. Per tile, on 1 Gbit: optimized 0.023 ms, compat 0.050, Java 0.117. Ours compat
+   needs 2.3× less CPU than Java at the same tile rate.
+6. **Java's stall doesn't dominate at these rates.** With MTU 1500 Java fills the link at 32 conns and its latency
+   matches compat's. Check with 20 ms RTT added (client→server `netem`, 1 Gbit): Java 1,238 tiles/s and compat 1,224 at
+   256 conns, optimized 15,090 at 1024; p50 150, 149, 42 ms. 32 conns can't fill the link at that RTT with 7 KB tiles.
+
+Reproduce (needs `target/release/bluemap`, `target/profiling/examples/load_bench`; ~13 min; raw rows kept on the devbox in
+`~/jvr-uplink/rows-final.jsonl`, `~/jvr-uplink-rtt/rows.jsonl`, `~/jvr-uplink-sweep/rows.jsonl`):
+
+```
+MSYS_NO_PATHCONV=1 BM_TESTBOX=devbox py -3 tools/testbox.py run uplink --sync --lock --detach --job final -- \
+  "OUT=~/jvr-uplink bash docs/perf-exp/devbox_web_uplink.sh ~/bmrs-uplink ~/bmrs-devbench/work/real/j12 \
+  ~/bmrs-devbench/work/real/d12 ~/bmrs-devbench/work/real/d12-opt ~/bmrs-devbench/work/downloads/jdk25/bin/java \
+  ~/bmrs-devbench/work/downloads/bluemap-5.28-cli.jar 3 10 veth:8,java,256 veth:8,rs,32 veth:8,rso,32 veth:8,rs,256 \
+  veth:8,rso,256 veth:4,java,256 veth:4,rs,32 veth:4,rso,32 500:8,java,32 500:8,rs,32 500:8,rso,32 \
+  1000:8,java,32 1000:8,rs,32 1000:8,rso,32"
+```

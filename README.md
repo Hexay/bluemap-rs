@@ -10,13 +10,10 @@ Beta. Not affiliated with the BlueMap project.
 
 ## How it compares to BlueMap
 
-- **Rendering** is when your server turns the world into map files. This is where bluemap-rs is much faster (23×).
-- **Viewing** is when someone opens the map in a browser. This is only modestly faster (1.3–3.6×, with `optimized`
-  storage), because much of the time is the visitor's connection and BlueMap's own webapp, which bluemap-rs reuses.
-
 ### Rendering
 
-A 4096×4096 world, 12 render threads:
+Your server turning the world into map files. This is where bluemap-rs is much faster. A 4096×4096 world, 12 render
+threads:
 
 | | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
 |---|---:|---:|---:|
@@ -28,46 +25,35 @@ A 4096×4096 world, 12 render threads:
 
 ### Viewing: the server
 
-Hires tiles nobody requested recently, on the same machine as the test client:
+The webserver sending tiles to visitors, for hires tiles nobody requested recently. On a real uplink, bandwidth is the
+limit, so data per tile decides how many tiles you can send:
 
 | | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
 |---|---:|---:|---:|
-| Server CPU per tile, 1 connection | 0.65 ms | 0.033 ms | 0.020 ms |
-| Server CPU per tile, 32 connections | 0.32 ms | 0.067 ms | 0.025 ms |
-| Tiles per second, 32 connections | 1,016 ¹ | 152,678 | 380,754 |
-| Tiles per second, 512 connections | 54,060 | 80,210 | 300,614 |
 | Data sent per tile | 94 KB | 94 KB | 7 KB |
-
-¹ BlueMap's server pauses ~41 ms before most responses on a reused connection, which limits it here more than its CPU
-does. Compare the 512-connection row for its capacity. At that load the test client limits BlueMap and `compat`.
-
-Throughput is how many visitors a server can handle, not how fast the map loads for each one. Most servers never get
-near these rates.
+| Tiles/s, 500 Mbit/s uplink | 624 | 633 | 7,707 |
+| Tiles/s, 1 Gbit/s uplink | 1,229 | 1,214 | 15,415 |
+| Tiles/s, unlimited network, 8 threads | 72,611 | 111,178 | 319,976 |
+| Server CPU per tile, 32 connections | 0.32 ms | 0.067 ms | 0.025 ms |
 
 ### Viewing: the browser
 
-The real webapp in Chrome, on a 50 Mbit/s and a 10 Mbit/s connection:
+Someone opening the map. The gain is modest because much of the time is the visitor's connection and BlueMap's own
+webapp, which bluemap-rs reuses. Real Chrome, on a 50 Mbit/s and a 10 Mbit/s connection:
 
-| | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
+| | BlueMap 5.29 | bluemap-rs `compat` | bluemap-rs `optimized` |
 |---|---:|---:|---:|
 | First load | 2.2 s, 5.1 s | 1.9 s, 4.4 s | 1.7 s, 2.9 s |
 | Reload | 3.6 s, 10.8 s | 1.8 s, 3.2 s | 1.8 s, 3.2 s |
 | New tiles appearing while panning | 197 ms, 429 ms | 204 ms, 433 ms | 95 ms, 119 ms |
 | Frame rate while panning or zooming | same | same | same |
 
-- **It isn't smoother.** The webapp and tile geometry are the same as BlueMap's, so frame rate matches. Freezes during
-  loading are about the same length, and a reload may have a few more slow frames. The map fills in sooner.
-- **Reloads are faster on both storages** because they don't download everything again.
-- **The cost:** clients that can't unpack `optimized` tiles are slower to serve than with BlueMap (see below).
+It isn't smoother: the map fills in sooner, but frame rate matches BlueMap's and a reload may have a few more slow
+frames.
 
-Hires tiles are byte-identical to BlueMap's after decompression; render state and JSON are identical too. The one
-lowres difference on the test world is a hole in BlueMap's output that bluemap-rs doesn't have.
-
-Tested on a Ryzen 7 9700X with NVMe storage, using a glibc build; the static Linux release uses 9% more CPU and 17%
-less memory. The browser tests used real Chrome on an Intel Arc GPU, on one world, and haven't covered phones or
-discrete GPUs. Methods and raw numbers:
-[rendering](docs/results/devbox-2026-10-28.md), [serving](docs/results/devbox-web-java-vs-rs-2026-10-28.md),
-[browser](docs/results/webapp-smoothness-2026-11-01.md).
+Hires tiles, render state and JSON are identical to BlueMap's. Tested on a Ryzen 7 9700X and, for the browser, an Intel
+Arc GPU. Methods, caveats and raw numbers: [rendering](docs/results/devbox-2026-10-28.md),
+[serving](docs/results/devbox-web-java-vs-rs-2026-10-28.md), [browser](docs/results/webapp-smoothness-2026-11-01.md).
 
 ## Which storage format
 
