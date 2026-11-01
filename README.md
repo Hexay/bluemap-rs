@@ -28,7 +28,7 @@ A 4096×4096 world, 12 render threads:
 
 ### Viewing: the server
 
-Hires tiles nobody requested recently:
+Hires tiles nobody requested recently. The two CPU-per-tile rows ran with the test client sharing the server's CPUs:
 
 | | BlueMap 5.28 | bluemap-rs `compat` | bluemap-rs `optimized` |
 |---|---:|---:|---:|

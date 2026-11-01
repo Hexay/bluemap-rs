@@ -269,8 +269,7 @@ Findings:
 4. **On an uplink `optimized` sends 12.2× (500 Mbit) and 12.7× (1 Gbit) compat's tiles.** The link fills in all rows.
 5. **The CPU saving is per tile, not per server.** At the uplink limit optimized uses more total CPU than either compat
    server because it sends 12× the tiles. Per tile, on 1 Gbit: optimized 0.023 ms, compat 0.050, Java 0.117. Ours compat
-   needs 2.4× less CPU than Java for the same tile rate. Latency differs by the same factor: each 94 KB tile queues
-   on the same link.
+   needs 2.3× less CPU than Java at the same tile rate.
 6. **Java's stall doesn't dominate at these rates.** With MTU 1500 Java fills the link at 32 conns and its latency
    matches compat's. Check with 20 ms RTT added (client→server `netem`, 1 Gbit): Java 1,238 tiles/s and compat 1,224 at
    256 conns, optimized 15,090 at 1024; p50 150, 149, 42 ms. 32 conns can't fill the link at that RTT with 7 KB tiles.
