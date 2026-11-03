@@ -27,20 +27,23 @@
     const loop = v.renderLoop;
     v.renderLoop = (t) => {
       if (!s) return loop(t);
-      const calls0 = renderer.info.render.calls, tris0 = renderer.info.render.triangles;
-      const f0 = renderer.info.render.frame;
+      const calls0 = renderer.info.render.calls, tris0 = renderer.info.render.triangles, f0 = renderer.info.render.frame;
       const t0 = now();
       s.heightAcc = 0;
       loop(t);
       const dt = now() - t0;
       s.loopMs.push(dt);
       s.heightMs.push(s.heightAcc);
+      const map = v.map;
+      if (map?.hiresTileManager) {
+        s.inFlight.push([map.hiresTileManager, ...(map.lowresTileManager ?? [])]
+          .reduce((a, m) => a + m.currentlyLoading, 0));
+      }
       if (renderer.info.render.frame !== f0) {
         s.renderMs.push(dt);
         s.calls.push(renderer.info.render.calls - calls0);
         s.tris.push(renderer.info.render.triangles - tris0);
       }
-      if (renderer.info.render.calls > 1e9) renderer.info.reset();
     };
   }
 
@@ -78,6 +81,7 @@
     const load = loader.load.bind(loader);
     loader.load = (...args) => {
       const t0 = now();
+      if (s) s.starts[kind]++;
       const p = load(...args);
       p.then(() => s?.tileMs[kind].push(now() - t0), () => s && s.tileFail[kind]++);
       return p;
@@ -160,13 +164,14 @@
   }
 
   function start(opts = {}) {
-    s = { t0: now(), gl: opts.gl ? new Map() : null, raf: [], loopMs: [], heightMs: [], heightAcc: 0, renderMs: [], calls: [], tris: [], longTasks: [], loaf: [],
+    s = { t0: now(), gl: opts.gl ? new Map() : null, inFlight: [], starts: { hires: 0, lowres: 0 }, raf: [], loopMs: [], heightMs: [], heightAcc: 0, renderMs: [], calls: [], tris: [], longTasks: [], loaf: [],
       scripts: new Map(), tileMs: { hires: [], lowres: [] }, tileFail: { hires: 0, lowres: 0 },
       net: { hires: [], lowres: [], other: 0 }, samples: [], observers: [], timer: null, rafId: 0 };
     hookMap();
     let last = now();
     const tick = (t) => {
       if (!s) return;
+      hookMap(); // the map and its tile managers appear (and change) after start
       s.raf.push(t - last);
       last = t;
       s.rafId = requestAnimationFrame(tick);
@@ -218,7 +223,10 @@
     if (!r) return null;
     const seconds = r.seconds ?? (now() - r.t0) / 1000;
     const first = r.samples[0], last = r.samples[r.samples.length - 1];
+    const gl = viewer()?.renderer?.getContext();
+    const info = gl?.getExtension("WEBGL_debug_renderer_info");
     const out = {
+      glRenderer: info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null,
       seconds: round(seconds, 1),
       fps: round(r.raf.length / seconds, 1),
       renderedFps: round(r.renderMs.length / seconds, 1),
@@ -227,6 +235,9 @@
       renderLoopMs: dist(r.renderMs),
       mainPerFrameMs: round(r.renderMs.reduce((a, b) => a + b, 0) / (r.renderMs.length || 1)),
       terrainHeightMs: dist(r.heightMs),
+      // tile loads in flight at each render-loop tick (the webapp allows 8 per tile manager)
+      inFlight: dist(r.inFlight),
+      tileStarts: { ...r.starts, perRenderedFrame: round((r.starts.hires + r.starts.lowres) / (r.renderMs.length || 1)) },
       drawCalls: dist(r.calls),
       trianglesK: dist(r.tris.map((x) => x / 1000)),
       longTasks: { n: r.longTasks.length, totalMs: round(r.longTasks.reduce((a, b) => a + b, 0), 0),
