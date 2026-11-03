@@ -94,8 +94,12 @@ towards, at `priority: "low"`, 3 in flight. The webapp's request for such a tile
 server before the render stayed on screen until the next reload. The script wraps `EventSource`, and refetches such a
 tile before handing it over.
 
+**Tile slots** (`client/slots.js`). Each tile manager starts tiles until its 8 slots are full, instead of upstream's
+one per `setTimeout(0)`, which paces loading by the frame rate on slow devices (docs/25).
+
 Paced delivery was tried and removed: no fewer slow frames on a real GPU, and tiles arrived later (see the results doc).
-`localStorage` `bluemap-rs-client-tuning` = `{"ahead":0}` turns fetch-ahead off, for A/B runs.
+`localStorage` `bluemap-rs-client-tuning` = `{"ahead":0}` turns fetch-ahead off, `{"slots":0}` the tile slots, for A/B
+runs.
 
 Check: `tools/check_client_fresh.mjs` (the webapp against a proxy that plays renders and failures),
 `docs/perf-exp/devbox_client_checks.sh` runs it with the other two checks. Load A/B:

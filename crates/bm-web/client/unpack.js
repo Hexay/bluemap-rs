@@ -22,7 +22,7 @@
   if (off || typeof plainFetch !== "function" || typeof WebAssembly !== "object") return;
 
   // features measured one by one (docs/18); localStorage "bluemap-rs-client-tuning" overrides them for an A/B
-  const TUNING = { ahead: 1 };
+  const TUNING = { ahead: 1, slots: 1 };
   try {
     Object.assign(TUNING, JSON.parse(scope.localStorage.getItem("bluemap-rs-client-tuning")));
   } catch {
