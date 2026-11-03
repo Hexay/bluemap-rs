@@ -33,6 +33,11 @@ export async function connect(profile, onEvent) {
     pending.delete(m.id);
     return m.error ? reject(new Error(m.error.message)) : resolve(m.result);
   };
+  // a crashed or killed browser: fail what is waiting instead of letting Node exit with it unsettled
+  socket.onclose = () => {
+    for (const { reject } of pending.values()) reject(new Error("the browser closed the DevTools connection"));
+    pending.clear();
+  };
   return (method, params = {}, sessionId = undefined) =>
     new Promise((resolve, reject) => {
       pending.set(++nextId, { resolve, reject });
