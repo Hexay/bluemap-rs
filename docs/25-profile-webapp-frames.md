@@ -75,8 +75,11 @@ node tools/webperf/compare.mjs r.jsonl … --markdown       # medians per label/
 
 - Draw calls −99%, main-thread time per frame −70–80%. Triangles rise ~100k: a merged batch is drawn whole where
   upstream frustum-culls per marker; trivial for a GPU, visible here only because SwiftShader rasterises on the CPU.
-- Not checked: how the batched markers look, clicks/popups in the page (Node checks only:
-  `tools/check_marker_batch.mjs`), real-GPU fps.
+- Look and clicks: `node tools/webperf/marker_check.mjs <map url> <out dir>` (capped Chrome per variant): overview and
+  close-up screenshots match upstream apart from a 1–2 px camera offset (depth-tested outlines hidden by terrain the
+  same way); clicks go through `mapViewer.handleMapInteraction` (Hammer's tap needs press→release within 250 ms,
+  which a 1 fps software page misses) and gave the same popup per marker in both variants (3/5 right, the same two
+  misses: upstream hit-testing). Not checked: real-GPU fps.
 
 ## Not measured (runs stopped for cost)
 
