@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { connect } from "../../crates/bm-wasm/bench/devtools.mjs";
 import { boxRecord, boxState, installTeardown, launch, preflight, QUIET_CHROME_FLAGS, reapStaleScopes, stopAll,
-  waitForCalm } from "./box.mjs";
+  waitForCalm, waitForTurn } from "./box.mjs";
 import { summarizeProfile } from "./cpuprofile.mjs";
 import { medianTable } from "./rows.mjs";
 import { startTrace, traceEvent } from "./trace.mjs";
@@ -206,6 +206,7 @@ for (const s of scenarios) {
 setTimeout(() => abort(`invocation limit: --max-minutes ${maxMinutes} passed; Chrome stopped`, 3), maxMinutes * 60e3);
 for (const scenario of scenarios) {
   for (let i = 0; i < runs; i++) {
+    if (!(await waitForTurn(waitMax * 60e3, log))) abort(`another webperf run stayed live for --wait-max ${waitMax} min`, 4);
     if (waitLoad !== null && !(await waitForCalm(Number(waitLoad), waitMax * 60e3, log)))
       log(`warning: cpu PSI stayed above --wait-load ${waitLoad} for --wait-max ${waitMax} min: running anyway`);
     let before;

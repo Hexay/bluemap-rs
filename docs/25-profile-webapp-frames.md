@@ -27,6 +27,7 @@ node tools/webperf/compare.mjs r.jsonl … --markdown       # medians per label/
 - Preflight: no run starts unless MemAvailable > `--max-rss` + 1 GB. Each result's `box` holds load1, cpu PSI some
   avg10 and MemAvailable before/after, the scope's CPU and throttled ms and memory peak; `contended` when PSI passed
   `--contended-psi` (40). `--wait-load <psi>` waits (5 s polls, `--wait-max` 10 min) for PSI to drop first.
+- One capped Chrome per box: a run waits (up to `--wait-max`) while another live run.mjs's `bm-webperf-*` scope exists.
 - `--trace` is the expensive option (an earlier traced run crashed Chrome); leave it off unless a question needs it.
 
 ## Initial load (4096² real world, optimized storage, 1280×800, median of 3; raw: `docs/results/25-webapp/`)

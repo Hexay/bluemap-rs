@@ -165,16 +165,34 @@ export function installTeardown(log) {
   }
 }
 
-// scopes left by an earlier run.mjs that died (its pid is in the unit name)
-export function reapStaleScopes(log) {
+// bm-webperf scopes of other run.mjs processes: [unit, owner pid]
+function otherScopes() {
   let units = "";
   try {
     units = execFileSync("systemctl", ["--user", "list-units", "--all", "--plain", "--no-legend", "bm-webperf-*"], quiet);
   } catch {
-    return;
+    return [];
   }
-  for (const [, name, pid] of units.matchAll(/(bm-webperf-(\d+)-\d+\.scope)/g)) {
-    if (Number(pid) === process.pid || alive(Number(pid))) continue;
+  return [...units.matchAll(/(bm-webperf-(\d+)-\d+\.scope)/g)].map(([, name, pid]) => [name, Number(pid)])
+    .filter(([, pid]) => pid !== process.pid);
+}
+
+// one capped Chrome per box (every session runs as the same user): waits, 5 s polls, while another run's scope lives
+export async function waitForTurn(maxMs, log) {
+  const until = Date.now() + maxMs;
+  for (;;) {
+    const busy = otherScopes().filter(([, pid]) => alive(pid));
+    if (!busy.length) return true;
+    if (Date.now() >= until) return false;
+    log(`another webperf run is live (${busy.map(([n]) => n).join(", ")}): waiting`);
+    await new Promise((r) => setTimeout(r, Math.min(5000, until - Date.now())));
+  }
+}
+
+// scopes left by an earlier run.mjs that died (its pid is in the unit name)
+export function reapStaleScopes(log) {
+  for (const [name, pid] of otherScopes()) {
+    if (alive(pid)) continue;
     log(`stopping stale ${name}`);
     try {
       execFileSync("systemctl", ["--user", "stop", name], quiet);
