@@ -166,6 +166,15 @@ fn live_json_and_sse() {
     assert_eq!(markers.header("content-type"), Some("application/json"));
     assert_eq!(markers.header("cache-control"), Some("no-store"), "additional-headers must not override");
     assert_eq!(markers.header("surrogate-control"), Some("no-store"));
+    let etag = markers.header("etag").expect("live JSON has a strong ETag").to_owned();
+    let same = get(a, "/maps/world/live/markers.json", &[("If-None-Match", &etag)]);
+    assert_eq!((same.status, same.body.len()), (304, 0));
+    assert_eq!((same.header("etag"), same.header("cache-control")), (Some(etag.as_str()), Some("no-store")));
+    f.live.set_markers("{\"other\":{}}");
+    let changed = get(a, "/maps/world/live/markers.json", &[("If-None-Match", &etag)]);
+    assert_eq!((changed.status, changed.body.as_slice()), (200, b"{\"other\":{}}".as_slice()));
+    assert_ne!(changed.header("etag"), Some(etag.as_str()));
+    f.live.set_markers("{\"set\":{}}");
     // players are not live for this map: storage copy
     assert_eq!(get(a, "/maps/world/live/players.json", &[]).body, b"{}");
 

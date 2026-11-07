@@ -25,7 +25,10 @@ const PARTS_PLACEHOLDER: &str = "// __CLIENT_PARTS__";
 const PARTS: &str = concat!(
     include_str!("../client/prefetch.js"),
     include_str!("../client/revalidate.js"),
-    include_str!("../client/slots.js")
+    include_str!("../client/slots.js"),
+    include_str!("../client/marker_batch.js"),
+    include_str!("../client/markers.js"),
+    include_str!("../client/marker_poll.js")
 );
 
 pub(crate) struct Script {

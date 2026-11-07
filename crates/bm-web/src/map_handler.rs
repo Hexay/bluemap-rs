@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::client_key::ClientKey;
 use crate::encoding::Accepted;
-use crate::live::LiveMap;
+use crate::live::{LiveBody, LiveMap};
 use crate::map_data::{self, Reply, ServerUnpackPolicy, Target};
 use crate::response::{empty, header_static};
 use crate::validators::IfNoneMatch;
@@ -48,8 +48,12 @@ pub(crate) async fn handle(
 ) -> Response<Body> {
     if let Some(live) = &route.live {
         match path {
-            "live/players.json" if live.players().is_some() => return live_json(live.players().flatten()),
-            "live/markers.json" if live.markers().is_some() => return live_json(live.markers().flatten()),
+            "live/players.json" if let Some(body) = live.players() => {
+                return live_json(body, method, headers, serving.etags);
+            }
+            "live/markers.json" if let Some(body) = live.markers() => {
+                return live_json(body, method, headers, serving.etags);
+            }
             "live/sse" if live.sse_enabled() => return sse(live, shutdown.clone()),
             _ => {}
         }
@@ -85,9 +89,26 @@ async fn tile_versions(route: &MapRoute, specs: &str, serving: &Serving) -> Resp
     }
 }
 
-fn live_json(body: Option<bytes::Bytes>) -> Response<Body> {
-    let mut res = Response::new(body.map_or_else(Body::empty, Body::from));
+/// The body as Java sends it; with `etags`, plus its ETag and a 304 for a client that already holds it.
+fn live_json(live: Option<LiveBody>, method: &Method, headers: &HeaderMap, etags: bool) -> Response<Body> {
+    let (body, etag) = match live {
+        Some(LiveBody { body, etag }) if etags => {
+            if IfNoneMatch::from_request(method, headers).is_some_and(|inm| inm.matches(&etag)) {
+                let mut res = empty(StatusCode::NOT_MODIFIED);
+                res.headers_mut().insert(ETAG, etag);
+                no_store(&mut res);
+                return res;
+            }
+            (Body::from(body), Some(etag))
+        }
+        Some(LiveBody { body, .. }) => (Body::from(body), None),
+        None => (Body::empty(), None),
+    };
+    let mut res = Response::new(body);
     header_static(&mut res, CONTENT_TYPE, "application/json");
+    if let Some(etag) = etag {
+        res.headers_mut().insert(ETAG, etag);
+    }
     no_store(&mut res);
     res
 }

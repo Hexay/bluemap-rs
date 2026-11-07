@@ -22,7 +22,7 @@
   if (off || typeof plainFetch !== "function" || typeof WebAssembly !== "object") return;
 
   // features measured one by one (docs/18); localStorage "bluemap-rs-client-tuning" overrides them for an A/B
-  const TUNING = { ahead: 1, slots: 1 };
+  const TUNING = { ahead: 1, slots: 1, markerBatch: 64, markerPoll: 1 };
   try {
     Object.assign(TUNING, JSON.parse(scope.localStorage.getItem("bluemap-rs-client-tuning")));
   } catch {
@@ -154,6 +154,7 @@ onmessage = async ({ data }) => {
     } catch {
       return plainFetch.call(this, input, init);
     }
+    if (TUNING.markerPoll && isLiveMarkers(url)) return fetchLiveMarkers(this, input, init);
     if (isLowresTile(url)) {
       const request = new Request(input, init);
       return (await revalidated(request, url)) ?? plainFetch.call(this, request);

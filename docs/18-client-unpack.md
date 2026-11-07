@@ -105,6 +105,36 @@ Check: `tools/check_client_fresh.mjs` (the webapp against a proxy that plays ren
 `docs/perf-exp/devbox_client_checks.sh` runs it with the other two checks. Load A/B:
 `docs/perf-exp/devbox_load_ab.sh`, `crates/bm-wasm/bench/load_ab.mjs`, `load_ab_report.mjs`.
 
+## Many shape markers (BlueMap#904)
+
+**Shape-marker batching** (`client/markers.js`, pure parts `client/marker_batch.js`). Every `ShapeMarker` is a fill
+Mesh and a border Line2 with materials of their own: 9.3k claims = ~18.6k draw calls, 16–26 fps. After each
+`NormalMarkerManager.updateFromData` (prototype wrapped, so managers of later maps are covered), a `MarkerSet` with at
+least `TUNING.markerBatch` (64) direct shape markers gets one merged fill and one merged border per look: key = part
+kind, renderOrder, shaders, material flags (depthTest, blending, side, …), defines and every uniform but `resolution`
+(colour, opacity, line width, fade distances). Merged vertices are in the set's space through each part's world
+matrix; the batch objects are children of the set (its toggle applies), never raycast, and set the screen size
+(`resolution`) each frame like `ShapeMarkerBorder`, copying it to the originals. Originals move to layer 30: the
+camera skips them before frustum tests, the webapp's raycasters (`layers.enableAll()`) still hit them, so clicks,
+popups and links are upstream's; their matrices are frozen (`matrix(World)AutoUpdate = false`) after being computed.
+A rebuild runs only when a set's signature changes (markers, visibility, positions, geometry objects, look keys);
+the old batch is disposed, a set below the threshold gets its originals back, a removed set disposes its batch.
+Not followed until the next applied update: an addon flipping `marker.visible`. Translucent fills of one batch blend
+in index order instead of upstream's per-marker distance sort.
+
+**Unchanged markers.json polls** (`client/marker_poll.js`). The webapp refetches `live/markers.json` every 10 s and
+re-applies every marker. The fetch wrapper keeps the last parsed object per URL and its ETag (sent as
+`If-None-Match`, same origin only) or, without an ETag (Java), its text. A 304 or the same text answers with a body-less
+200 whose `json()` is that object, and the wrapped `updateFromData` skips the object it applied last. SSE `marker`
+events are parsed by the webapp, so always applied. Server: live `players.json`/`markers.json` carry a strong
+`"live-<hash>"` ETag hashed once per new body, and `If-None-Match` gets a no-store 304 (`map-etags: false` sends
+neither, as Java); storage-served `live/markers.json` has the storage version ETag.
+
+`TUNING`: `{"markerBatch":0}` off (or another threshold), `{"markerPoll":0}` off. Check (no browser, real three r186):
+`node tools/check_marker_batch.mjs [three dir]`. A/B data: `python3 tools/gen_markers.py
+<storage root>/<map>/live/markers.json [--count 9300] [--sets 1] [--radius R]`, then `bluemap -w` alone (`-r`/`-u`
+rewrite it from the config's marker-sets); the map must be on optimized storage, or the script is not loaded.
+
 ## Browsers without zstd
 
 Chrome 123+ and Firefox 126+ send `zstd` in `Accept-Encoding`; Safari since 26.3, and only on iOS/macOS 26.3+

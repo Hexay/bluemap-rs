@@ -2,11 +2,13 @@
 //! the `live/sse` event fan-out (`MapRequestHandler`, `SseConnection`). The app feeds it; the web layer only reads.
 
 use std::convert::Infallible;
+use std::hash::{DefaultHasher, Hasher};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::Stream;
+use http::HeaderValue;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio_util::sync::CancellationToken;
 
@@ -21,21 +23,38 @@ pub struct LiveMap {
     markers_read: Mutex<Option<Instant>>,
 }
 
+/// A live JSON body and its strong ETag, hashed once per new body (Java sends none; the client script revalidates
+/// `markers.json` with it, docs/18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveBody {
+    pub body: Bytes,
+    pub etag: HeaderValue,
+}
+
+impl LiveBody {
+    fn new(body: Bytes) -> Self {
+        let mut hasher = DefaultHasher::new();
+        hasher.write(&body);
+        let etag = HeaderValue::from_str(&format!("\"live-{:016x}\"", hasher.finish())).expect("hex is header text");
+        Self { body, etag }
+    }
+}
+
 #[derive(Default)]
-struct LiveJson(Mutex<Option<Bytes>>);
+struct LiveJson(Mutex<Option<LiveBody>>);
 
 impl LiveJson {
     /// Stores `json`; true if it differs from the previous value (`LiveDataSupplierBroadcaster` equality).
     fn replace(&self, json: Bytes) -> bool {
         let mut latest = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if latest.as_ref() == Some(&json) {
+        if latest.as_ref().is_some_and(|l| l.body == json) {
             return false;
         }
-        *latest = Some(json);
+        *latest = Some(LiveBody::new(json));
         true
     }
 
-    fn get(&self) -> Option<Bytes> {
+    fn get(&self) -> Option<LiveBody> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
@@ -108,11 +127,11 @@ impl LiveMap {
     }
 
     /// `None` = route not registered; `Some(None)` = registered but nothing pushed yet (Java: empty 200).
-    pub(crate) fn players(&self) -> Option<Option<Bytes>> {
+    pub(crate) fn players(&self) -> Option<Option<LiveBody>> {
         self.players.as_ref().map(LiveJson::get)
     }
 
-    pub(crate) fn markers(&self) -> Option<Option<Bytes>> {
+    pub(crate) fn markers(&self) -> Option<Option<LiveBody>> {
         let markers = self.markers.as_ref()?;
         *self.markers_read.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
         Some(markers.get())
@@ -192,7 +211,23 @@ mod tests {
         assert_eq!(rx.try_recv().unwrap(), Bytes::from("event: player\ndata: {}\n\n"));
         assert_eq!(rx.try_recv().unwrap(), Bytes::from("event: tile\ndata: {\"x\":-3,\"y\":7,\"lod\":0}\n\n"));
         assert!(rx.try_recv().is_err());
-        assert_eq!(live.players(), Some(Some(Bytes::from("{}"))));
+        assert_eq!(live.players().flatten().map(|p| p.body), Some(Bytes::from("{}")));
         assert_eq!(live.markers(), None);
+    }
+
+    #[test]
+    fn live_etag_follows_the_body() {
+        let live = LiveMap::new(false).with_markers();
+        let tag = || live.markers().flatten().map(|m| m.etag);
+        assert_eq!(tag(), None);
+        live.set_markers("{\"a\":{}}");
+        let first = tag().unwrap();
+        assert!(first.to_str().unwrap().starts_with("\"live-") && first.to_str().unwrap().ends_with('"'));
+        live.set_markers("{\"a\":{}}");
+        assert_eq!(tag().unwrap(), first);
+        live.set_markers("{\"b\":{}}");
+        assert_ne!(tag().unwrap(), first);
+        live.set_markers("{\"a\":{}}");
+        assert_eq!(tag().unwrap(), first, "same body, same tag");
     }
 }
