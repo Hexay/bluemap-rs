@@ -8,15 +8,26 @@ numbers (main-thread ms per frame, draw calls, triangles, tile latency, view loa
 ## Harness (`tools/webperf/`)
 
 ```
-node tools/webperf/run.mjs <map url> --scenario initial-load --runs 3 --out r.jsonl --label base [--inject patch.js]
-node tools/webperf/compare.mjs r.jsonl … --markdown       # medians per label/scenario
+node tools/webperf/run.mjs <map url> --out r.jsonl --label base [--inject patch.js]   # 1 initial-load run, 960×600
+node tools/webperf/compare.mjs r.jsonl … --markdown       # medians per label/scenario(/contended)
 ```
 
 - `probe.js` wraps the webapp's render loop and tile managers; pasted into a real browser's console it gives true-GPU
   numbers (`bmPerf.start()`, move, `bmPerf.stop(); bmPerf.report()`).
-- Scenarios: `initial-load`, `pan`, `zoom`, `flyover`, `idle`, `soak`; `--inject` overlays a candidate fix.
-- Memory guard: one Chrome at a time, killed past `--max-rss` (2500 MB); Chrome peaks ~1.5 GB with software GL.
-  `--trace` is the expensive option (an earlier traced run crashed Chrome); leave it off unless a question needs it.
+- Scenarios: `initial-load` (default), `pan`, `zoom`, `flyover`, `idle`, `soak`; `--inject` overlays a candidate fix.
+  The tables below used `--window 1280,800 --runs 3`; pass them to compare with them.
+- Box limits (`box.mjs`; earlier uncapped runs loaded the shared devbox for a long time): each Chrome runs in its own
+  `systemd-run --user --scope` unit `bm-webperf-<pid>-<n>`: `CPUQuota` = `--cpus` (2) × 100 %, `MemoryMax` =
+  `--max-rss` (2500 MB), no swap, `TasksMax=1024`, nice 10, `RuntimeMaxSec` = run timeout + 30 s (kills it even if
+  node is SIGKILLed); teardown stops the unit, also on Ctrl-C, SIGTERM and crashes; stale units of dead runs are
+  stopped at start. Chrome gets no session D-Bus: with one its browser process moves itself into its own
+  `app-org.chromium.Chromium-<pid>.scope`, out of the limits. Without `systemd-run --user`: plain spawn, RSS watch, warning.
+- Hard limits: `--run-timeout` (180 s) per run, `--max-minutes` (15) per invocation; on expiry Chrome is stopped,
+  completed runs are summarized and the aborted one is appended to `--out` as `aborted`; exit 2 / 3 (4: preflight).
+- Preflight: no run starts unless MemAvailable > `--max-rss` + 1 GB. Each result's `box` holds load1, cpu PSI some
+  avg10 and MemAvailable before/after, the scope's CPU and throttled ms and memory peak; `contended` when PSI passed
+  `--contended-psi` (40). `--wait-load <psi>` waits (5 s polls, `--wait-max` 10 min) for PSI to drop first.
+- `--trace` is the expensive option (an earlier traced run crashed Chrome); leave it off unless a question needs it.
 
 ## Initial load (4096² real world, optimized storage, 1280×800, median of 3; raw: `docs/results/25-webapp/`)
 

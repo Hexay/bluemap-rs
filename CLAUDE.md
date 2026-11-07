@@ -56,7 +56,8 @@ decisions); subsystem research is `docs/01`–`09`, later docs are numbered by t
   `tools/real_world.py gen|edit|render|update|compare` (docs/14); serving harnesses in `docs/perf-exp/`
 - Webapp frames/memory/tile latency (scripted camera, headless Chrome; `tools/webperf/probe.js` also pastes into a real
   browser console): `node tools/webperf/run.mjs <map url> [--scenario initial-load,pan,zoom,flyover,idle,soak]
-  [--cpu-profile]` (docs/25)
+  [--cpu-profile]`; each Chrome in a capped systemd scope (`--cpus 2`, `--max-rss 2500`), `--run-timeout 180`,
+  `--max-minutes 15` (docs/25 "Harness")
 - After changing `bm_format::compact`'s decoder or `bm-wasm`: `py -3 tools/build_wasm.py` (needs clang + llvm-ar for
   wasm32: run it on the devbox), then
   `node tools/check_client_unpack.mjs <server> <compat webroot>` and `check_client_unpack_browser.mjs <map url> <chrome>`

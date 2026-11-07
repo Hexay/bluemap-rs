@@ -7,10 +7,13 @@ const args = process.argv.slice(2);
 const at = args.indexOf("--rows");
 const only = at >= 0 ? args.splice(at, 2)[1].split(",") : null;
 const markdown = args.includes("--markdown") && args.splice(args.indexOf("--markdown"), 1);
-const results = args.flatMap((f) => readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)));
+const results = args.flatMap((f) => readFileSync(f, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)))
+  .filter((r) => !r.aborted);
+// contended runs (run.mjs --contended-psi) get their own column so only like is compared with like
+const column = (r) => `${r.label}/${r.scenario}${r.box?.contended ? "/contended" : ""}`;
 const count = new Map();
-results.forEach((r) => count.set(`${r.label}/${r.scenario}`, (count.get(`${r.label}/${r.scenario}`) ?? 0) + 1));
-const table = medianTable(results, (r) => `${r.label}/${r.scenario}`);
+results.forEach((r) => count.set(column(r), (count.get(column(r)) ?? 0) + 1));
+const table = medianTable(results, column);
 const rows = Object.entries(table).filter(([k]) => !only || only.includes(k));
 if (!markdown) {
   console.table(Object.fromEntries(rows));

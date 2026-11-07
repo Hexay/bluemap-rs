@@ -22,7 +22,9 @@ export const ROWS = {
   "geometries end": (r) => r.memory.end?.geometries,
   "textures end": (r) => r.memory.end?.textures,
   "hires geom MB peak": (r) => r.memory.peakHiresGeomMB,
-  "chrome RSS MB peak": (r) => r.chromeRssPeakMB,
+  // scope memory.peak (RSS + page cache) since box.mjs; tree RSS before and in the uncapped fallback
+  "chrome MB peak": (r) => r.box?.memPeakMB ?? r.chromeRssPeakMB,
+  "chrome cpu throttled ms": (r) => r.box?.throttledMs,
   "rAF fps (software GL)": (r) => r.fps,
   "rendered fps (software GL)": (r) => r.renderedFps,
   "frame p95 ms (software GL)": (r) => r.frameInterval.p95,
