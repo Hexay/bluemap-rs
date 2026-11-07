@@ -55,6 +55,29 @@ node tools/webperf/compare.mjs r.jsonl … --markdown       # medians per label/
 - Terrain-height raycast (`MapHeightControls`, every frame) is 0.2 ms p95, below the static estimate; low priority.
 - 320×200 runs recorded no frames (harness issue) and are left out.
 
+## Many shape markers (issue #904; 2026-11-07)
+
+9,300 generated claims in one set (`tools/gen_markers.py --radius 2048`, 4.7 MB) on the same world, served with
+`bluemap -w`; client script with `{"markerBatch":0,"markerPoll":0}` (upstream behaviour) vs defaults (docs/18
+"Many shape markers"). One run each, 960×600, capped Chrome, every run contended (PSI 59–72); raw:
+`docs/results/25-webapp/markers-9300-ab.jsonl`.
+
+| | off: load | off: idle | on: load | on: idle |
+|---|---:|---:|---:|---:|
+| draw calls per frame p50 | 10,475 | 10,503 | 49 | 77 |
+| main ms per frame p50 / p95 | 292 / 587 | 345 / 429 | 59 / 163 | 92 / 176 |
+| main busy ms/s | 200 | 202 | 91 | 45 |
+| geometries alive | 10,440 | 10,440 | 14 | 14 |
+| triangles k p50 | 278 | 418 | 384 | 524 |
+| JS heap peak MB | 188 | 194 | 149 | 126 |
+| Chrome peak MB | 1,021 | 1,006 | 707 | 709 |
+| view complete s | 36.6 | 30.8 | 28.9 | 26.5 |
+
+- Draw calls −99%, main-thread time per frame −70–80%. Triangles rise ~100k: a merged batch is drawn whole where
+  upstream frustum-culls per marker; trivial for a GPU, visible here only because SwiftShader rasterises on the CPU.
+- Not checked: how the batched markers look, clicks/popups in the page (Node checks only:
+  `tools/check_marker_batch.mjs`), real-GPU fps.
+
 ## Not measured (runs stopped for cost)
 
 `pan`, `zoom`, `flyover`, `idle`, `soak`; compat storage; llvmpipe vs SwiftShader. Static candidates still to
